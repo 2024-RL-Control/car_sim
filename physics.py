@@ -51,7 +51,7 @@ class KinematicModel:
         # 조향 각도에 따른 요 레이트 계산
         if abs(state.vel) > 0.1:  # 속도가 너무 낮을 때 수치적 불안정성 방지
             # 기본 조향에 의한 요 레이트
-            steering_yaw_rate = (state.vel / config.WHEELBASE) * np.tan(steer)
+            steering_yaw_rate = -(state.vel / config.WHEELBASE) * np.tan(steer)
 
             # 슬립에 의한 요 레이트는 속도에 따라 다름
             # 저속: 슬립이 안정화 효과 (반대 방향 회전)

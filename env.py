@@ -9,8 +9,7 @@ import os
 from collections import deque
 from math import radians, degrees, pi, cos, sin
 from config import VehicleConfig, SimConfig
-from state import VehicleState
-from physics import DynamicModel
+from vehicle import Vehicle
 
 # ======================
 # Simulation Environment
@@ -26,12 +25,15 @@ class CarSimulatorEnv(gym.Env):
         # 설정 객체 초기화
         self.sim_config = SimConfig()
         self.vehicle_config = VehicleConfig()
-        self.state = VehicleState()
 
-        # 캐시 및 렌더링 최적화를 위한 변수
-        self._track_marks = []          # 타이어 자국 [(x,y,width,color), ...]
+        # Vehicle 클래스 생성
+        self.vehicle = Vehicle(self.vehicle_config, self.sim_config)
+
+        # 카메라 관련 변수
         self._camera_offset = (0, 0)    # 카메라 오프셋 (팬/줌 기능용)
         self._camera_zoom = 1.0         # 카메라 줌 수준
+
+        # 성능 측정 변수
         self._performance_metrics = {   # 성능 측정 데이터
             'fps': 0,
             'physics_time': 0,
@@ -87,20 +89,7 @@ class CarSimulatorEnv(gym.Env):
         self.sim_config.CAMERA_FOLLOW = True
 
     def _load_assets(self):
-        """차량 및 타이어 그래픽 리소스 생성"""
-        # 차체
-        car_length = self.vehicle_config.LENGTH * self.sim_config.SCALE
-        car_width = self.vehicle_config.WIDTH * self.sim_config.SCALE
-        self.car_surf = pygame.Surface((car_length, car_width), pygame.SRCALPHA)
-        pygame.draw.rect(self.car_surf, self.sim_config.VEHICLE_COLOR,
-                        (0, 0, car_length, car_width), 2, border_radius=int(car_width * 0.2))
-
-        # 타이어
-        tire_w = self.vehicle_config.TIRE_WIDTH * self.sim_config.SCALE
-        tire_h = self.vehicle_config.TIRE_HEIGHT * self.sim_config.SCALE
-        self.tire_surf = pygame.Surface((tire_h, tire_w), pygame.SRCALPHA)
-        pygame.draw.rect(self.tire_surf, self.sim_config.TIRE_COLOR,
-                        (0, 0, tire_h, tire_w), 2)
+        """그래픽 리소스 생성"""
 
         # G-force 표시기
         self.g_force_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
@@ -114,8 +103,8 @@ class CarSimulatorEnv(gym.Env):
         항상 차량이 화면 중앙에 오도록 변환
         """
         # 차량의 현재 위치를 화면 중앙으로
-        cam_x = self.state.x
-        cam_y = self.state.y
+        cam_x = self.vehicle.state.x
+        cam_y = self.vehicle.state.y
 
         # 줌 처리
         scale = self.sim_config.SCALE * self._camera_zoom
@@ -134,14 +123,41 @@ class CarSimulatorEnv(gym.Env):
 
         return (int(screen_x), int(screen_y))
 
+    def _update_camera(self):
+        """카메라 위치 업데이트 (시선 위치 조정)"""
+        # 기본적으로 차량은 항상 화면 중심에 위치 (월드-스크린 변환에서 처리)
+        if self.sim_config.CAMERA_FOLLOW:
+            # 전방 주시 효과 (시선 약간 앞쪽으로)
+            look_ahead_distance = min(self.vehicle.state.vel * 0.5, 50)  # 속도에 비례하여 전방 주시
+
+            if look_ahead_distance > 5:  # 일정 속도 이상일 때만 전방 주시
+                # 전방 주시 방향으로 약간의 오프셋 적용
+                target_offset_x = look_ahead_distance * np.cos(self.vehicle.state.yaw) * self.sim_config.SCALE * self._camera_zoom * 0.3
+                target_offset_y = -look_ahead_distance * np.sin(self.vehicle.state.yaw) * self.sim_config.SCALE * self._camera_zoom * 0.3
+
+                # 부드러운 카메라 이동
+                smoothing = 0.05  # 낮을수록 부드럽게
+
+                self._camera_offset = (
+                    self._camera_offset[0] * (1 - smoothing) + target_offset_x * smoothing,
+                    self._camera_offset[1] * (1 - smoothing) + target_offset_y * smoothing
+                )
+            else:
+                # 저속에서는 서서히 중앙으로 복귀
+                smoothing = 0.05
+                self._camera_offset = (
+                    self._camera_offset[0] * (1 - smoothing),
+                    self._camera_offset[1] * (1 - smoothing)
+                )
+
     def _draw_grid(self):
         """고정 그리드 그리기"""
         scale = self.sim_config.SCALE * self._camera_zoom
         grid_size = 10 * self.sim_config.SCALE   # 그리드 단위 (100 픽셀) * 스케일
 
         # 카메라 위치 계산 (차량 중심)
-        cam_x = self.state.x
-        cam_y = self.state.y
+        cam_x = self.vehicle.state.x
+        cam_y = self.vehicle.state.y
 
         # 화면 영역(viewport)에서 보이는 월드 좌표 범위 계산
         screen_width = self.sim_config.SIM_WIDTH
@@ -196,149 +212,6 @@ class CarSimulatorEnv(gym.Env):
         origin_pos = self._world_to_screen(0, 0)
         self.screen.blit(origin, (origin_pos[0] + 5, origin_pos[1] + 5))
 
-    def _update_camera(self):
-        """카메라 위치 업데이트 (시선 위치 조정)"""
-        # 기본적으로 차량은 항상 화면 중심에 위치 (월드-스크린 변환에서 처리)
-
-        if self.sim_config.CAMERA_FOLLOW:
-            # 전방 주시 효과 (시선 약간 앞쪽으로)
-            look_ahead_distance = min(self.state.vel * 0.5, 50)  # 속도에 비례하여 전방 주시
-
-            if look_ahead_distance > 5:  # 일정 속도 이상일 때만 전방 주시
-                # 전방 주시 방향으로 약간의 오프셋 적용
-                target_offset_x = look_ahead_distance * np.cos(self.state.yaw) * self.sim_config.SCALE * self._camera_zoom * 0.3
-                target_offset_y = -look_ahead_distance * np.sin(self.state.yaw) * self.sim_config.SCALE * self._camera_zoom * 0.3
-
-                # 부드러운 카메라 이동
-                smoothing = 0.05  # 낮을수록 부드럽게
-
-                self._camera_offset = (
-                    self._camera_offset[0] * (1 - smoothing) + target_offset_x * smoothing,
-                    self._camera_offset[1] * (1 - smoothing) + target_offset_y * smoothing
-                )
-            else:
-                # 저속에서는 서서히 중앙으로 복귀
-                smoothing = 0.05
-                self._camera_offset = (
-                    self._camera_offset[0] * (1 - smoothing),
-                    self._camera_offset[1] * (1 - smoothing)
-                )
-
-    def _draw_tire_marks(self):
-        """타이어 자국 그리기"""
-        if not self.sim_config.ENABLE_TRACK_MARKS:
-            return
-
-        # 드리프트 중일 때만 타이어 자국 추가
-        if abs(self.state.drift_angle) > radians(5) and abs(self.state.vel) > 5.0:
-            # 각 타이어 위치 계산
-            wheelbase = self.vehicle_config.WHEELBASE
-            track = self.vehicle_config.TRACK
-
-            # 타이어 상대 위치 계산 (차량 좌표계 기준)
-            tire_positions = [
-                ( wheelbase/2,  track/2),  # Front Right
-                ( wheelbase/2, -track/2),  # Front Left
-                (-wheelbase/2,  track/2),  # Rear Right
-                (-wheelbase/2, -track/2)   # Rear Left
-            ]
-
-            for dx, dy in tire_positions:
-                # 차량 회전 변환
-                rotated_x = dx * cos(self.state.yaw) - dy * sin(self.state.yaw)
-                rotated_y = dx * sin(self.state.yaw) + dy * cos(self.state.yaw)
-
-                # 월드 좌표 계산
-                world_x = self.state.x + rotated_x
-                world_y = self.state.y + rotated_y
-
-                # 마크 너비는 드리프트 각도에 비례
-                mark_width = max(1, min(5, abs(self.state.drift_angle) * 10))
-
-                # 타이어 자국 추가
-                self._track_marks.append((world_x, world_y, mark_width))
-
-        # 타이어 자국 렌더링 (모든 자국)
-        for x, y, width in self._track_marks:
-            pos = self._world_to_screen(x, y)
-            pygame.draw.circle(self.screen, self.sim_config.MARK_COLOR, pos, width)
-
-        # 타이어 자국 개수 제한 (너무 많으면 성능 저하)
-        max_marks = 2000
-        if len(self._track_marks) > max_marks:
-            self._track_marks = self._track_marks[-max_marks:]
-
-    def _draw_tires(self):
-        """4개의 타이어 렌더링 (아커만 조향 적용)"""
-        wheelbase = self.vehicle_config.WHEELBASE
-        track = self.vehicle_config.TRACK
-
-        # 타이어 상대 위치 계산 (차량 좌표계 기준)
-        tire_positions = [
-            ( wheelbase/2,  track/2),  # Front Right
-            ( wheelbase/2, -track/2),  # Front Left
-            (-wheelbase/2,  track/2),  # Rear Right
-            (-wheelbase/2, -track/2)   # Rear Left
-        ]
-
-        # 아커만 조향각 계산 (좌/우 앞바퀴 각도 차이 계산)
-        steer = self.state.steer
-        if abs(steer) > 0.001:  # 조향 중일 때만 아커만 계산
-            # 회전 반경 계산 (자전거 모델 기준)
-            R = wheelbase / np.tan(abs(steer))
-
-            # 좌/우 조향각 계산 (아커만 공식)
-            if steer > 0:  # 좌회전
-                steer_inner = np.arctan(wheelbase / (R - track/2))  # 왼쪽 바퀴 (안쪽)
-                steer_outer = np.arctan(wheelbase / (R + track/2))  # 오른쪽 바퀴 (바깥쪽)
-            else:  # 우회전
-                steer_inner = -np.arctan(wheelbase / (R - track/2))  # 오른쪽 바퀴 (안쪽)
-                steer_outer = -np.arctan(wheelbase / (R + track/2))  # 왼쪽 바퀴 (바깥쪽)
-
-            # 조향각 배열 [FR, FL, RR, RL]
-            steer_angles = [
-                steer_outer if steer < 0 else steer_inner,  # 우회전시 바깥쪽, 좌회전시 안쪽
-                steer_inner if steer < 0 else steer_outer,  # 우회전시 안쪽, 좌회전시 바깥쪽
-                0.0,  # 뒷바퀴는 조향 없음
-                0.0   # 뒷바퀴는 조향 없음
-            ]
-        else:
-            # 직진 시 모든 바퀴 조향각 0
-            steer_angles = [0.0, 0.0, 0.0, 0.0]
-
-        for i, (dx, dy) in enumerate(tire_positions):
-            # 차량 회전 변환
-            rotated_x = dx * cos(self.state.yaw) - dy * sin(self.state.yaw)
-            rotated_y = dx * sin(self.state.yaw) + dy * cos(self.state.yaw)
-
-            # 월드 좌표 계산
-            world_x = self.state.x + rotated_x
-            world_y = self.state.y + rotated_y
-
-            # 타이어 각도 계산 (앞바퀴는 아커만 스티어링 적용)
-            tire_angle = steer_angles[i]
-
-            total_angle = self.state.yaw + tire_angle
-
-            # 타이어 회전 및 위치 변환
-            rotated_tire = pygame.transform.rotate(self.tire_surf, degrees(total_angle))
-            tire_rect = rotated_tire.get_rect(center=self._world_to_screen(world_x, world_y))
-
-            self.screen.blit(rotated_tire, tire_rect.topleft)
-
-    def _draw_trajectory(self):
-        """차량 궤적 그리기"""
-        if len(self.state.trajectory) < 2:
-            return
-
-        # 지난 궤적을 점선으로 표시
-        trajectory_points = [self._world_to_screen(x, y) for x, y in self.state.trajectory]
-
-        # 부드러운 곡선 대신 선분으로 그림 (성능)
-        if len(trajectory_points) > 1:
-            trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
-            pygame.draw.lines(self.screen, trajectory_color, False, trajectory_points, 2)
-
     def _draw_g_force_meter(self, x, y):
         """G-force 미터 그리기"""
         meter_size = 80
@@ -360,8 +233,8 @@ class CarSimulatorEnv(gym.Env):
         self.screen.blit(bg_surf, (x, y))
 
         # G-force 포인터 그리기
-        g_lateral = self.state.g_forces[1]
-        g_longitudinal = self.state.g_forces[0]
+        g_lateral = self.vehicle.state.g_forces[1]
+        g_longitudinal = self.vehicle.state.g_forces[0]
 
         # G-force를 픽셀로 변환 (1G = 반경의 1/3)
         scale_factor = radius / 3
@@ -389,39 +262,42 @@ class CarSimulatorEnv(gym.Env):
 
     def _draw_hud(self):
         """차량 상태 HUD 표시"""
+        state = self.vehicle.state
+        config = self.vehicle.config
+
         # 아커만 조향각 계산 (좌/우 앞바퀴)
-        wheelbase = self.vehicle_config.WHEELBASE
-        track = self.vehicle_config.TRACK
-        steer = self.state.steer
+        wheelbase = config.WHEELBASE
+        track = config.TRACK
+        steer = state.steer
 
         left_steer = steer
         right_steer = steer
 
         if abs(steer) > 0.001:
             R = wheelbase / np.tan(abs(steer))
-            if steer > 0:  # 좌회전
-                left_steer = np.arctan(wheelbase / (R - track/2))
-                right_steer = np.arctan(wheelbase / (R + track/2))
+            if steer < 0:  # 좌회전
+                left_steer = -np.arctan(wheelbase / (R - track/2))
+                right_steer = -np.arctan(wheelbase / (R + track/2))
             else:  # 우회전
-                right_steer = -np.arctan(wheelbase / (R - track/2))
-                left_steer = -np.arctan(wheelbase / (R + track/2))
+                right_steer = np.arctan(wheelbase / (R - track/2))
+                left_steer = np.arctan(wheelbase / (R + track/2))
 
         # 기본 정보
         hud = [
-            f"Velocity: {self.state.vel:.2f} m/s ({self.state.vel * 3.6:.1f} km/h)",
-            f"Steering: {degrees(self.state.steer):.1f}°",
-            f"Left wheel: {degrees(left_steer):.1f}°, Right wheel: {degrees(right_steer):.1f}°",
-            f"Position: ({self.state.x:.1f}, {self.state.y:.1f})",
-            f"Heading: {degrees(self.state.yaw):.1f}°",
-            f"Accel: {self.state.accel:.2f} m/s²"
+            f"Velocity: {state.vel:.2f} m/s ({state.vel * 3.6:.1f} km/h)",
+            f"Steering: {np.degrees(state.steer):.1f}°",
+            f"Left wheel: {np.degrees(left_steer):.1f}°, Right wheel: {np.degrees(right_steer):.1f}°",
+            f"Position: ({state.x:.1f}, {state.y:.1f})",
+            f"Heading: {np.degrees(state.yaw):.1f}°",
+            f"Accel: {state.accel:.2f} m/s²"
         ]
 
-        # 디버그 정보 추가가
+        # 디버그 정보 추가
         if self.sim_config.ENABLE_DEBUG_INFO:
             hud.extend([
-                f"Lateral Vel: {self.state.vel_lateral:.2f} m/s",
-                f"Drift Angle: {degrees(self.state.drift_angle):.1f}°",
-                f"G-Forces: Long {self.state.g_forces[0]:.2f}g, Lat {self.state.g_forces[1]:.2f}g",
+                f"Lateral Vel: {state.vel_lateral:.2f} m/s",
+                f"Drift Angle: {np.degrees(state.drift_angle):.1f}°",
+                f"G-Forces: Long {state.g_forces[0]:.2f}g, Lat {state.g_forces[1]:.2f}g",
                 f"FPS: {self._performance_metrics['fps']:.1f}",
             ])
 
@@ -443,7 +319,7 @@ class CarSimulatorEnv(gym.Env):
         self._draw_g_force_meter(self.sim_config.SIM_WIDTH - 90, 20)
 
         # 큰 속도계
-        speed_kmh = self.state.vel * 3.6
+        speed_kmh = state.vel * 3.6
         speed_text = self.large_font.render(f"{speed_kmh:.0f}", True, (255, 255, 255))
         kmh_text = self.font.render("km/h", True, (200, 200, 200))
 
@@ -498,7 +374,7 @@ class CarSimulatorEnv(gym.Env):
             self.sim_config.ENABLE_DEBUG_INFO = not self.sim_config.ENABLE_DEBUG_INFO
 
         if pressed[pygame.K_f]:  # 모든 자국 지우기
-            self._track_marks = []
+            self.vehicle.clear_track_marks()
 
         # 저장 및 로드
         if pressed[pygame.K_F5]:  # 상태 저장
@@ -522,18 +398,18 @@ class CarSimulatorEnv(gym.Env):
 
         # 조향 입력
         if self._keys_pressed['left']:
-            action[1] = 1.0  # 좌회전
+            action[1] = -1.0  # 좌회전
         if self._keys_pressed['right']:
-            action[1] = -1.0  # 우회전
+            action[1] = 1.0  # 우회전
 
         return action
 
     def _save_state(self):
         """현재 시뮬레이션 상태 저장"""
         save_data = {
-            'state': self.state,
-            'track_marks': self._track_marks,
-            'vehicle_config': self.vehicle_config
+            'state': self.vehicle.state,
+            'track_marks': self.vehicle.get_track_marks(),
+            'vehicle_config': self.vehicle.config
         }
 
         try:
@@ -557,12 +433,12 @@ class CarSimulatorEnv(gym.Env):
             with open(f'saves/{latest_file}', 'rb') as f:
                 save_data = pickle.load(f)
 
-            self.state = save_data['state']
-            self._track_marks = save_data['track_marks']
-            self.vehicle_config = save_data['vehicle_config']
+            self.vehicle.state = save_data['state']
+            self.vehicle.set_track_marks(save_data['track_marks'])
+            self.vehicle.config = save_data['vehicle_config']
 
             # 그래픽 리소스 다시 로드
-            self._load_assets()
+            self.vehicle._load_graphics()
 
             print(f"시뮬레이션 상태를 불러왔습니다: {latest_file}")
         except Exception as e:
@@ -600,8 +476,8 @@ class CarSimulatorEnv(gym.Env):
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()
 
-        # 물리 모델 적용
-        DynamicModel.apply_forces(self.state, action, dt, self.sim_config, self.vehicle_config)
+        # 차량 업데이트
+        self.vehicle.step(action, dt)
 
         # 물리 시뮬레이션 시간 측정
         self._performance_metrics['physics_time'] = time.time() - physics_start
@@ -612,11 +488,9 @@ class CarSimulatorEnv(gym.Env):
         done = False
 
         # 상태 기록 (리플레이용)
-        self._state_history.append(self.state.__dict__.copy())
+        self._state_history.append(self.vehicle.state.__dict__.copy())
 
-        info = {
-
-        }
+        info = {}
 
         # 성능 측정 업데이트
         self._update_performance_metrics()
@@ -625,8 +499,7 @@ class CarSimulatorEnv(gym.Env):
 
     def reset(self):
         """환경 초기화"""
-        self.state = VehicleState()
-        self._track_marks = []
+        self.vehicle.reset()
         self._state_history = []
         self._camera_offset = (0, 0)
         self._camera_zoom = 1.0
@@ -646,19 +519,8 @@ class CarSimulatorEnv(gym.Env):
         # 고정 그리드 그리기
         self._draw_grid()
 
-        # 타이어 자국 그리기
-        self._draw_tire_marks()
-
-        # 차량 궤적 그리기
-        self._draw_trajectory()
-
-        # 차체 렌더링
-        rotated_surf = pygame.transform.rotate(self.car_surf, degrees(self.state.yaw))
-        rect = rotated_surf.get_rect(center=self._world_to_screen(self.state.x, self.state.y))
-        self.screen.blit(rotated_surf, rect.topleft)
-
-        # 타이어 렌더링
-        self._draw_tires()
+        # 차량 및 타이어 자국 그리기
+        self.vehicle.draw(self.screen, self._world_to_screen)
 
         # HUD 표시
         self._draw_hud()
@@ -676,23 +538,24 @@ class CarSimulatorEnv(gym.Env):
 
     def _get_obs(self):
         """관측 정보 반환 [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1]]"""
-        cos_yaw, sin_yaw = self.state.encoding_angle(self.state.yaw)
+        state = self.vehicle.state
+        cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         return np.array([
-            self.state.x,
-            self.state.y,
+            state.x,
+            state.y,
             cos_yaw,
             sin_yaw,
-            self.state.vel,
-            self.state.vel_lateral,
-            self.state.drift_angle,
-            self.state.g_forces[0],
-            self.state.g_forces[1]
+            state.vel,
+            state.vel_lateral,
+            state.drift_angle,
+            state.g_forces[0],
+            state.g_forces[1]
         ])
 
     def _calculate_reward(self):
         """보상 함수 (드리프트 및 속도 기반)"""
         # 속도 보상 (최대 속도에 가까울수록 높은 보상)
-        speed_reward = self.state.vel / self.vehicle_config.MAX_SPEED
+        speed_reward = self.vehicle.state.vel / self.vehicle.config.MAX_SPEED
 
         # 종합 보상
         reward = 0.6 * speed_reward
