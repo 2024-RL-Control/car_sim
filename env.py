@@ -73,6 +73,9 @@ class CarSimulatorEnv(gym.Env):
             'brake': False,  # 수동 브레이크 (Space)
         }
 
+        # 충돌 관련 변수
+        self._collision_state = False
+
         # 시간 관리 변수
         self._last_update_time = time.time()
         self._frame_times = deque(maxlen=60)  # 최근 60프레임 시간 (FPS 계산용)
@@ -334,7 +337,7 @@ class CarSimulatorEnv(gym.Env):
         self.screen.blit(speed_text, speed_rect)
         self.screen.blit(kmh_text, kmh_rect)
 
-    def _handle_keyboard_input(self):
+    def handle_keyboard_input(self):
         """키보드 입력 처리 (상태 업데이트)"""
         pressed = pygame.key.get_pressed()
 
@@ -408,6 +411,10 @@ class CarSimulatorEnv(gym.Env):
 
         return action
 
+    def get_obstacle_manager(self):
+        """장애물 관리자 객체 반환"""
+        return self.obstacle_manager
+
     def _save_state(self):
         """현재 시뮬레이션 상태 저장"""
         save_data = {
@@ -480,8 +487,14 @@ class CarSimulatorEnv(gym.Env):
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()
 
+        # 장애물 업데이트
+        self.obstacle_manager.update(dt)
+
         # 차량 업데이트
         self.vehicle.step(action, dt)
+
+        # 충돌 감지
+        collision = self.vehicle.check_collision(self.obstacle_manager)
 
         # 물리 시뮬레이션 시간 측정
         self._performance_metrics['physics_time'] = time.time() - physics_start
@@ -491,10 +504,20 @@ class CarSimulatorEnv(gym.Env):
         reward = self._calculate_reward()
         done = False
 
+        info = {}
+
+        # 충돌 처리
+        if collision:
+            # 충돌 상태 설정
+            self._collision_state = True
+
+            # 충돌로 인한 보상 감소 및 종료 상태 설정
+            reward -= 50.0
+            done = True
+            info['collision'] = True
+
         # 상태 기록 (리플레이용)
         self._state_history.append(self.vehicle.state.__dict__.copy())
-
-        info = {}
 
         # 성능 측정 업데이트
         self._update_performance_metrics()
@@ -522,6 +545,9 @@ class CarSimulatorEnv(gym.Env):
 
         # 고정 그리드 그리기
         self._draw_grid()
+
+        # 장애물 그리기
+        self.obstacle_manager.draw(self.screen, self._world_to_screen, self.sim_config.ENABLE_DEBUG_INFO)
 
         # 차량 및 타이어 자국 그리기
         self.vehicle.draw(self.screen, self._world_to_screen)

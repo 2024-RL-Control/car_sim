@@ -468,3 +468,67 @@ class ObstacleManager:
     def get_obstacle_count(self) -> int:
         """장애물 수 반환"""
         return len(self.obstacles)
+
+    def add_circle_obstacle(self, x: float, y: float, radius: float,
+                            yaw: float = 0.0, yaw_rate: float = 0.0,
+                            vel: float = 0.0, color: Tuple[int, int, int] = (255, 0, 0)):
+        """
+        원형 장애물 추가
+
+        Args:
+            x: 장애물 중심 X 좌표
+            y: 장애물 중심 Y 좌표
+            radius: 원 반지름
+            yaw: 초기 방향각 [rad]
+            yaw_rate: 각속도 [rad/s]
+            vel: 이동 속도 [m/s]
+            color: RGB 색상
+
+        Returns:
+            장애물 인덱스
+        """
+        obstacle = CircleObstacle(x, y, yaw, yaw_rate, vel, "circle", color, radius)
+        return self.add_obstacle(obstacle)
+
+    def add_square_obstacle(self, x: float, y: float, length: float,
+                            yaw: float = 0.0, yaw_rate: float = 0.0,
+                            vel: float = 0.0, color: Tuple[int, int, int] = (255, 0, 0)):
+        """
+        정사각형 장애물 추가
+
+        Args:
+            x: 장애물 중심 X 좌표
+            y: 장애물 중심 Y 좌표
+            length: 한 변의 길이
+            yaw: 초기 방향각 [rad]
+            yaw_rate: 각속도 [rad/s]
+            vel: 이동 속도 [m/s]
+            color: RGB 색상
+
+        Returns:
+            장애물 인덱스
+        """
+        obstacle = SquareObstacle(x, y, yaw, yaw_rate, vel, "square", color, length)
+        return self.add_obstacle(obstacle)
+
+    def add_rectangle_obstacle(self, x: float, y: float, width: float, height: float,
+                                yaw: float = 0.0, yaw_rate: float = 0.0,
+                                vel: float = 0.0, color: Tuple[int, int, int] = (255, 0, 0)):
+        """
+        직사각형 장애물 추가
+
+        Args:
+            x: 장애물 중심 X 좌표
+            y: 장애물 중심 Y 좌표
+            width: 너비
+            height: 높이
+            yaw: 초기 방향각 [rad]
+            yaw_rate: 각속도 [rad/s]
+            vel: 이동 속도 [m/s]
+            color: RGB 색상
+
+        Returns:
+            장애물 인덱스
+        """
+        obstacle = RectangleObstacle(x, y, yaw, yaw_rate, vel, "rectangle", color, width, height)
+        return self.add_obstacle(obstacle)
