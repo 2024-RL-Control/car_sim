@@ -225,23 +225,23 @@ class Vehicle:
             (-wheelbase/2, -track/2)   # Rear Left
         ]
 
-        # 아커만 조향각 계산 (좌/우 앞바퀴 각도 차이 계산)
+        # pygame 시각화를 위한 아커만 조향각 계산 (좌/우 앞바퀴 각도 차이 계산)
         if abs(steer) > 0.001:  # 조향 중일 때만 아커만 계산
             # 회전 반경 계산 (자전거 모델 기준)
             R = wheelbase / np.tan(abs(steer))
 
             # 좌/우 조향각 계산 (아커만 공식)
             if steer < 0:  # 좌회전
-                left_steer = -np.arctan(wheelbase / (R - track/2))
-                right_steer = -np.arctan(wheelbase / (R + track/2))
+                steer_inner = np.arctan(wheelbase / (R - track/2))  # 왼쪽 바퀴 (안쪽)
+                steer_outer = np.arctan(wheelbase / (R + track/2))  # 오른쪽 바퀴 (바깥쪽)
             else:  # 우회전
-                left_steer = np.arctan(wheelbase / (R + track/2))
-                right_steer = np.arctan(wheelbase / (R - track/2))
+                steer_inner = -np.arctan(wheelbase / (R - track/2))  # 오른쪽 바퀴 (안쪽)
+                steer_outer = -np.arctan(wheelbase / (R + track/2))  # 왼쪽 바퀴 (바깥쪽)
 
             # 조향각 배열 [FR, FL, RR, RL]
             steer_angles = [
-                right_steer,
-                left_steer,
+                steer_outer if steer > 0 else steer_inner,  # 우회전시 바깥쪽, 좌회전시 안쪽
+                steer_inner if steer > 0 else steer_outer,  # 우회전시 안쪽, 좌회전시 바깥쪽
                 0.0,  # 뒷바퀴는 조향 없음
                 0.0   # 뒷바퀴는 조향 없음
             ]
