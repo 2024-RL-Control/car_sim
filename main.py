@@ -170,18 +170,18 @@ def create_test_course(obstacle_manager, course_type="basic"):
     elif course_type == "slalom":
         # 슬라럼 코스 - 지그재그 장애물 배치
         num_obstacles = 10
-        spacing = 6.0
+        spacing = 10.0
 
         for i in range(num_obstacles):
-            x = i * spacing
+            x = i * spacing + 20
             y = 8.0 if i % 2 == 0 else -8.0
             obstacle_manager.add_circle_obstacle(x, y, 2.0, color=(200, 100, 100))
 
         # 코스 경계 추가
         for i in range(num_obstacles + 1):
-            x = i * spacing - spacing/2
-            obstacle_manager.add_rectangle_obstacle(x, 15, spacing, 1.0, color=(100, 100, 100))
-            obstacle_manager.add_rectangle_obstacle(x, -15, spacing, 1.0, color=(100, 100, 100))
+            x = i * spacing - spacing/2 + 20
+            obstacle_manager.add_rectangle_obstacle(x, 35, spacing, 1.0, color=(100, 100, 100))
+            obstacle_manager.add_rectangle_obstacle(x, -35, spacing, 1.0, color=(100, 100, 100))
 
 # ==============
 # Manual Control With Obstacles
