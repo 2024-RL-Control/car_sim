@@ -10,6 +10,7 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 from config import VehicleConfig, SimConfig
 from vehicle import Vehicle
+from object import ObstacleManager
 
 # ======================
 # Simulation Environment
@@ -28,6 +29,9 @@ class CarSimulatorEnv(gym.Env):
 
         # Vehicle 클래스 생성
         self.vehicle = Vehicle(self.vehicle_config, self.sim_config)
+
+        # 장애물 매니저 초기화
+        self.obstacle_manager = ObstacleManager()
 
         # 카메라 관련 변수
         self._camera_offset = (0, 0)    # 카메라 오프셋 (팬/줌 기능용)
@@ -279,8 +283,8 @@ class CarSimulatorEnv(gym.Env):
                 left_steer = -np.arctan(wheelbase / (R - track/2))
                 right_steer = -np.arctan(wheelbase / (R + track/2))
             else:  # 우회전
-                right_steer = np.arctan(wheelbase / (R - track/2))
                 left_steer = np.arctan(wheelbase / (R + track/2))
+                right_steer = np.arctan(wheelbase / (R - track/2))
 
         # 기본 정보
         hud = [

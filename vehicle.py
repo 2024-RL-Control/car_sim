@@ -6,6 +6,7 @@ from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
 from physics import DynamicModel
+from object import RectangleObstacle
 
 # ======================
 # State Management
@@ -54,6 +55,15 @@ class Vehicle:
         self.state = VehicleState()
         self._track_marks = []  # 타이어 자국 [(x,y,width), ...]
 
+        # 경계 생성
+        self.collision_body = RectangleObstacle(
+            x=self.state.x, y=self.state.y,
+            width=self.config.LENGTH, height=self.config.WIDTH,
+            yaw=self.state.yaw,
+            obs_type="vehicle",
+            color=self.sim_config.VEHICLE_COLOR
+        )
+
         # 그래픽 리소스 초기화
         self._load_graphics()
 
@@ -83,10 +93,84 @@ class Vehicle:
         # 물리 모델 적용
         DynamicModel.apply_forces(self.state, action, dt, self.sim_config, self.config)
 
+        # 충돌 바디 위치 및 방향 업데이트
+        self._update_collision_body()
+
         # 타이어 자국 업데이트
         self._update_tire_marks()
 
         return self.state
+
+    def _update_collision_body(self):
+        """충돌 검사용 바디 업데이트"""
+        self.collision_body.set(x=self.state.x, y=self.state.y, yaw=self.state.yaw)
+
+    def get_outer_circles_world(self):
+        """차량 외접원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""
+        return self.collision_body.get_outer_circles_world()
+
+    def get_middle_circles_world(self):
+        """차량 중간원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""
+        return self.collision_body.get_middle_circles_world()
+
+    def get_inner_circles_world(self):
+        """차량 내접원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""
+        return self.collision_body.get_inner_circles_world()
+
+    def check_collision(self, obstacle_manager):
+        """
+        장애물과의 충돌 검사 (3단계 검사)
+
+        Args:
+            obstacle_manager: ObstacleManager 객체
+
+        Returns:
+            충돌 여부 (Boolean)
+        """
+        # 위치 및 방향 업데이트 (만약 step 이외에서 호출될 경우 대비)
+        self._update_collision_body()
+
+        # 장애물이 없으면 충돌 없음
+        if obstacle_manager.get_obstacle_count() == 0:
+            return False
+
+        # 광역 검사 (빠른 제외)
+        obstacle_outer_circles = obstacle_manager.get_all_outer_circles()
+        vehicle_outer_circles = self.get_outer_circles_world()
+        if not self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
+            return False
+
+        # 중간 수준 검사
+        obstacle_middle_circles = obstacle_manager.get_all_middle_circles()
+        vehicle_middle_circles = self.get_middle_circles_world()
+        if not self._circles_collision(vehicle_middle_circles, obstacle_middle_circles):
+            return False
+
+        # 정밀 검사
+        obstacle_inner_circles = obstacle_manager.get_all_inner_circles()
+        vehicle_inner_circles = self.get_inner_circles_world()
+        return self._circles_collision(vehicle_inner_circles, obstacle_inner_circles)
+
+    def _circles_collision(self, circles1, circles2):
+        """
+        두 원 집합 간의 충돌 검사
+
+        Args:
+            circles1: 첫 번째 원 집합 [(x, y, radius), ...]
+            circles2: 두 번째 원 집합 [(x, y, radius), ...]
+
+        Returns:
+            충돌 여부 (Boolean)
+        """
+        for x1, y1, r1 in circles1:
+            for x2, y2, r2 in circles2:
+                # 두 원 중심 간 거리의 제곱 계산 (제곱근 계산 회피)
+                dist_sq = (x1 - x2)**2 + (y1 - y2)**2
+                # 두 원 반지름 합의 제곱과 비교
+                if dist_sq < (r1 + r2)**2:
+                    return True
+
+        return False
 
     def _update_tire_marks(self):
         """타이어 자국 업데이트 - 드리프트 중일 때만 추가"""
@@ -148,16 +232,16 @@ class Vehicle:
 
             # 좌/우 조향각 계산 (아커만 공식)
             if steer < 0:  # 좌회전
-                steer_inner = -np.arctan(wheelbase / (R - track/2))  # 왼쪽 바퀴 (안쪽)
-                steer_outer = -np.arctan(wheelbase / (R + track/2))  # 오른쪽 바퀴 (바깥쪽)
+                left_steer = -np.arctan(wheelbase / (R - track/2))
+                right_steer = -np.arctan(wheelbase / (R + track/2))
             else:  # 우회전
-                steer_inner = np.arctan(wheelbase / (R - track/2))  # 오른쪽 바퀴 (안쪽)
-                steer_outer = np.arctan(wheelbase / (R + track/2))  # 왼쪽 바퀴 (바깥쪽)
+                left_steer = np.arctan(wheelbase / (R + track/2))
+                right_steer = np.arctan(wheelbase / (R - track/2))
 
             # 조향각 배열 [FR, FL, RR, RL]
             steer_angles = [
-                steer_outer if steer > 0 else steer_inner,  # 우회전시 바깥쪽, 좌회전시 안쪽
-                steer_inner if steer > 0 else steer_outer,  # 우회전시 안쪽, 좌회전시 바깥쪽
+                right_steer,
+                left_steer,
                 0.0,  # 뒷바퀴는 조향 없음
                 0.0   # 뒷바퀴는 조향 없음
             ]
@@ -197,6 +281,11 @@ class Vehicle:
 
         # 차체 그리기
         self._draw_body(screen, world_to_screen_func)
+
+        # 디버그 모드: 경계 원 표시
+        if self.sim_config.ENABLE_DEBUG_INFO:
+            # 충돌 바디의 경계 원 그리기 메서드 활용
+            self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
     def _draw_trajectory(self, screen, world_to_screen_func):
         """차량 궤적 그리기"""
