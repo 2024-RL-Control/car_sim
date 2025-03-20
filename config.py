@@ -28,7 +28,7 @@ class VehicleConfig:
     MAX_ACCEL: float = 4.0         # 최대 가속도 [m/s²]
     MAX_BRAKE: float = 6.0         # 최대 제동 [m/s²]
     MAX_SPEED: float = 65.0        # 최대 속도 [m/s] (약 234 km/h)
-    MIN_SPEED: float = -20.0       # 최소 속도 [m/s] (약 -72 km/h) - 수정: 음수 속도는 후진
+    MIN_SPEED: float = -20.0       # 최소 속도 [m/s] (약 -72 km/h)
 
     # Tire Parameters (Pacejka Magic Formula)
     TIRE_B: float = 10.0           # Stiffness Factor
