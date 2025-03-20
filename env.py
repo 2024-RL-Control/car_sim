@@ -11,6 +11,7 @@ from math import radians, degrees, pi, cos, sin
 from config import VehicleConfig, SimConfig
 from state import VehicleState
 from physics import DynamicModel
+from path_planning import PathPlanner
 
 # ======================
 # Simulation Environment
@@ -70,6 +71,61 @@ class CarSimulatorEnv(gym.Env):
         # 시간 관리 변수
         self._last_update_time = time.time()
         self._frame_times = deque(maxlen=60)  # 최근 60프레임 시간 (FPS 계산용)
+    def set_global_path(self, start, goal, obstacles):
+        """
+        RRT + Dubins 기반 글로벌 경로 설정
+        장애물과 경로를 한 번 변환하여 고정
+        """
+        print(f"📌 글로벌 경로 탐색 시작: Start {start} → Goal {goal}")
+
+        self.obstacles = obstacles  # 장애물 저장 (월드 좌표)
+        
+        # 🔥 장애물 화면 좌표 변환하여 저장
+        self.obstacle_screen_positions = [
+            (self._world_to_screen(ox, oy), int(radius * self.sim_config.SCALE))
+            for ox, oy, radius in obstacles
+        ]
+
+        planner = PathPlanner(start, goal, obstacles, x_range=(0, self.sim_config.SIM_WIDTH), y_range=(0, self.sim_config.SIM_HEIGHT))
+        path = planner.plan()
+
+        if path:
+            print("✅ 경로 탐색 성공!")
+            self.global_path = path
+
+            # 🔥 경로를 한 번 변환하여 저장
+            self.global_path_screen = [(self._world_to_screen(p[0], p[1])) for p in self.global_path]
+        else:
+            print("❌ 경로 탐색 실패! 장애물 회피 불가능")
+            self.global_path = []
+            self.global_path_screen = []
+    
+    def _draw_obstacles(self):
+        """장애물을 화면에 그리는 함수 (자연스럽게 가려지는 효과)"""
+        if not hasattr(self, 'obstacles') or not self.obstacles:
+            print("⚠ 장애물 데이터 없음.")
+            return  
+
+        for ox, oy, radius in self.obstacles:
+            # 🚀 월드 좌표 → 화면 좌표 변환 (출발점, 목표점과 동일한 방식)
+            screen_x, screen_y = self._world_to_screen(ox, oy)
+            screen_radius = max(3, int(radius * self.sim_config.SCALE * 0.5))  # 반지름 보정
+
+            # ✅ 원의 경계 계산 (실제 그릴 수 있는 범위 확인)
+            left_bound = screen_x - screen_radius
+            right_bound = screen_x + screen_radius
+            top_bound = screen_y - screen_radius
+            bottom_bound = screen_y + screen_radius
+
+            # ✅ 화면 범위 내에 있는 경우에만 원을 그림
+            if right_bound > 0 and left_bound < self.sim_config.SIM_WIDTH and \
+            bottom_bound > 0 and top_bound < self.sim_config.SIM_HEIGHT:
+
+                # 🚀 원을 화면 크기 안에서만 그리도록 처리
+                pygame.draw.circle(self.screen, (255, 0, 0), (screen_x, screen_y), screen_radius)
+
+
+
 
     def _init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
@@ -646,11 +702,40 @@ class CarSimulatorEnv(gym.Env):
         # 고정 그리드 그리기
         self._draw_grid()
 
+        # 🔴 장애물 시각화 추가 김형선 코드 추가
+        self._draw_obstacles()
+
         # 타이어 자국 그리기
         self._draw_tire_marks()
 
         # 차량 궤적 그리기
         self._draw_trajectory()
+
+        # ✅ 글로벌 경로 그리기 (초록색 선)
+        if self.global_path:
+            for i in range(len(self.global_path) - 1):
+                start = self._world_to_screen(self.global_path[i][0], self.global_path[i][1])
+                end = self._world_to_screen(self.global_path[i+1][0], self.global_path[i+1][1])
+                pygame.draw.line(self.screen, (0, 255, 0), start, end, 2)
+
+            # ✅ 출발 지점 표시 (파란색 점)
+            start_screen = self._world_to_screen(self.global_path[0][0], self.global_path[0][1])
+            pygame.draw.circle(self.screen, (0, 0, 255), start_screen, 8)  # 반지름 8
+
+            # ✅ 목표 지점 표시 (빨간색 점)
+            goal_screen = self._world_to_screen(self.global_path[-1][0], self.global_path[-1][1])
+            pygame.draw.circle(self.screen, (255, 0, 0), goal_screen, 8)  # 반지름 8
+
+            # ✅ 목표 위치와 실제 도착지 차이 계산
+            actual_x, actual_y,_ = self.global_path[-1]  # 실제 마지막 경로 지점
+            goal_x, goal_y = (1000,100)  # 사용자가 입력한 목표 지점
+
+            error_distance = ((actual_x - goal_x) ** 2 + (actual_y - goal_y) ** 2) ** 0.5
+
+            # 🔹 HUD에 차이 표시
+            error_text = self.font.render(f"Goal Error: {error_distance:.2f}m", True, (255, 255, 0))
+            self.screen.blit(error_text, (20, 70))  # 화면 좌측 상단에 표시
+
 
         # 차체 렌더링
         rotated_surf = pygame.transform.rotate(self.car_surf, degrees(self.state.yaw))
@@ -669,6 +754,9 @@ class CarSimulatorEnv(gym.Env):
         # 화면 업데이트
         pygame.display.flip()
         self.clock.tick(self.sim_config.FPS)  # FPS 제한
+
+
+
 
     def close(self):
         """환경 종료"""

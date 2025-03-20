@@ -96,12 +96,21 @@ def manual_control():
     print("  F9: Load state")
     print("  ESC: Quit")
 
+    print("=== Vehicle Simulator ===")
+    print("📌 장애물 포함 글로벌 경로 테스트 실행")
+    
+    # 장애물 리스트 추가
+    obstacles = [[200, 200, 50], [400, 300, 50], [600, 150, 70],[100,100,30]] #장애물 3개 통과과
+
+    # ✅ 차량 현재 위치를 start_pos로 설정
+    start_pos = (env.state.x, env.state.y)
+    goal_pos = (1000, 100)
+    env.set_global_path(start_pos, goal_pos, obstacles)
+
     running = True
     while running:
-        # 기본 액션: 정지, 직진
         action = np.zeros(2)
 
-        # 이벤트 처리
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -109,20 +118,17 @@ def manual_control():
                 if event.key == pygame.K_ESCAPE:
                     running = False
 
-        # 키보드 입력 처리 및 액션 생성
         action = env._handle_keyboard_input()
 
-        # 환경 스텝
+        # 환경 스텝 실행
         _, _, done, _ = env.step(action)
 
-        # 렌더링
+        # 환경 렌더링
         env.render()
 
-        # 종료 조건
         if done:
             break
 
-    # 환경 종료
     env.close()
 
 # ==============
