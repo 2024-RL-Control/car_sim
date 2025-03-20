@@ -340,10 +340,11 @@ class RectangleObstacle(BaseObstacle):
 # ======================
 class Goal(BaseObstacle):
     """목적지 클래스"""
-    def __init__(self, x: float, y: float, yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
+    def __init__(self, x: float, y: float, yaw: float = 0.0,
                  color: Tuple[int, int, int] = (0, 255, 0),
                  radius: float = 1.0):
-        super().__init__(x, y, yaw, yaw_rate, vel, "goal", color)
+        # 기본적으로 정적 목적지
+        super().__init__(x, y, yaw, 0, 0, "goal", color)
         self.radius = radius
 
         # 목적지는 원형으로 표시
@@ -408,7 +409,8 @@ class Goal(BaseObstacle):
 
         # 디버그 모드: 추가 시각화
         if debug:
-            self._draw_bounding_circles(screen, world_to_screen_func)
+            pass
+            # self._draw_bounding_circles(screen, world_to_screen_func)
 
 # ======================
 # Obstacle Manager
@@ -532,3 +534,149 @@ class ObstacleManager:
         """
         obstacle = RectangleObstacle(x, y, yaw, yaw_rate, vel, "rectangle", color, width, height)
         return self.add_obstacle(obstacle)
+
+# ======================
+# Goal Manager
+# ======================
+class GoalManager:
+    """목적지들을 관리하고 차량에 할당하는 클래스"""
+    def __init__(self):
+        self.goals = {}  # {goal_id: Goal 객체}
+        self.vehicle_goals = {}  # {vehicle_id: goal_id}
+        self.next_goal_id = 0  # 목적지 ID 자동 생성용
+
+    def add_goal(self, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0), is_static=True):
+        """
+        새 목적지 추가
+
+        Args:
+            x: 목적지 X 좌표
+            y: 목적지 Y 좌표
+            yaw: 방향각 [rad]
+            radius: 목적지 반경
+            color: 색상 (RGB)
+            is_static: 정적 목적지 여부 (True: 고정, False: 이동 가능)
+
+        Returns:
+            goal_id: 생성된 목적지 ID
+        """
+        goal_id = self.next_goal_id
+        self.next_goal_id += 1
+
+        goal = Goal(x, y, yaw, color=color, radius=radius, is_static=is_static)
+        self.goals[goal_id] = goal
+
+        return goal_id
+
+    def add_goal_with_id(self, goal_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
+        """
+        특정 ID로 목적지 추가 (상태 로드용)
+
+        Args:
+            goal_id: 목적지 ID (저장된 상태에서 복원된 ID)
+            x: 목적지 X 좌표
+            y: 목적지 Y 좌표
+            yaw: 방향각 [rad]
+            radius: 목적지 반경
+            color: 색상 (RGB)
+
+        Returns:
+            goal_id: 동일한 입력 목적지 ID
+        """
+        goal = Goal(x, y, yaw, color=color, radius=radius)
+        self.goals[goal_id] = goal
+
+        # 다음 ID가 현재 ID보다 작으면 업데이트
+        if self.next_goal_id <= goal_id:
+            self.next_goal_id = goal_id + 1
+
+        return goal_id
+
+    def remove_goal(self, goal_id):
+        """
+        목적지 제거
+
+        Args:
+            goal_id: 제거할 목적지 ID
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        if goal_id in self.goals:
+            del self.goals[goal_id]
+
+            # 차량-목적지 매핑에서도 제거
+            for vehicle_id, assigned_goal_id in list(self.vehicle_goals.items()):
+                if assigned_goal_id == goal_id:
+                    del self.vehicle_goals[vehicle_id]
+
+            return True
+        return False
+
+    def assign_goal_to_vehicle(self, vehicle_id, goal_id):
+        """
+        차량에 목적지 할당
+
+        Args:
+            vehicle_id: 차량 ID
+            goal_id: 목적지 ID
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        if goal_id in self.goals:
+            self.vehicle_goals[vehicle_id] = goal_id
+            return True
+        return False
+
+    def get_vehicle_goal(self, vehicle_id):
+        """
+        차량의 할당된 목적지 반환
+
+        Args:
+            vehicle_id: 차량 ID
+
+        Returns:
+            Goal 객체 또는 None
+        """
+        goal_id = self.vehicle_goals.get(vehicle_id)
+        if goal_id is not None:
+            return self.goals.get(goal_id)
+        return None
+
+    def get_vehicle_goal_id(self, vehicle_id):
+        """
+        차량의 할당된 목적지 ID 반환
+
+        Args:
+            vehicle_id: 차량 ID
+
+        Returns:
+            goal_id 또는 None
+        """
+        return self.vehicle_goals.get(vehicle_id)
+
+    def draw(self, screen, world_to_screen_func, debug=False):
+        """
+        모든 목적지 렌더링
+
+        Args:
+            screen: Pygame 화면 객체
+            world_to_screen_func: 좌표 변환 함수
+            debug: 디버그 정보 표시 여부
+        """
+        for goal in self.goals.values():
+            goal.draw(screen, world_to_screen_func, debug)
+
+    def get_all_goals(self):
+        """모든 목적지 객체 반환"""
+        return list(self.goals.values())
+
+    def get_goal_count(self):
+        """목적지 수 반환"""
+        return len(self.goals)
+
+    def clear_goals(self):
+        """모든 목적지 제거"""
+        self.goals.clear()
+        self.vehicle_goals.clear()

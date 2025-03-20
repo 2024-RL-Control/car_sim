@@ -10,7 +10,7 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 from config import VehicleConfig, SimConfig
 from vehicle import Vehicle
-from object import ObstacleManager
+from object import ObstacleManager, GoalManager
 
 # ======================
 # Simulation Environment
@@ -19,19 +19,37 @@ class CarSimulatorEnv(gym.Env):
     """2D Top-Down 시점 차량 시뮬레이터(Gym) 환경"""
     metadata = {'render.modes': ['human']}
 
-    def __init__(self):
+    def __init__(self, multi_vehicle=False, num_vehicles=1):
         """
         시뮬레이터 환경 초기화
+
+        Args:
+            multi_vehicle: 다중 차량 모드 여부
+            num_vehicles: 차량 수 (multi_vehicle=True일 때만 유효)
         """
         # 설정 객체 초기화
         self.sim_config = SimConfig()
         self.vehicle_config = VehicleConfig()
 
-        # Vehicle 클래스 생성
-        self.vehicle = Vehicle(self.vehicle_config, self.sim_config)
+        # 다중 차량 모드 설정
+        self.multi_vehicle = multi_vehicle
+        self.num_vehicles = max(1, num_vehicles if multi_vehicle else 1)
+
+        # 차량 리스트 생성
+        self.vehicles = []
+        for i in range(self.num_vehicles):
+            vehicle = Vehicle(vehicle_id=i, vehicle_config=self.vehicle_config, sim_config=self.sim_config)
+            self.vehicles.append(vehicle)
+
+        # 주 차량 설정
+        self.active_vehicle_idx = 0
+        self.vehicle = self.vehicles[self.active_vehicle_idx]
 
         # 장애물 매니저 초기화
         self.obstacle_manager = ObstacleManager()
+
+        # 목적지 매니저 초기화
+        self.goal_manager = GoalManager()
 
         # 카메라 관련 변수
         self._camera_offset = (0, 0)    # 카메라 오프셋 (팬/줌 기능용)
@@ -47,22 +65,9 @@ class CarSimulatorEnv(gym.Env):
         # 차량 상태 기록 (리플레이용)
         self._state_history = deque(maxlen=100)
 
-        # Pygame 초기화
-        self._init_pygame()
-
-        # Gym 인터페이스
-        self.action_space = spaces.Box(
-            low=np.array([-1, -1]),  # [가속, 조향]
-            high=np.array([1, 1]),
-            dtype=np.float32
-        )
-
-        # 관측 공간 확장: [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1]]
-        self.observation_space = spaces.Box(
-            low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -np.pi, -5, -5]),
-            high=np.array([np.inf, np.inf, 1, 1, 60, 10, np.pi, 5, 5]),
-            dtype=np.float32
-        )
+        # 시간 관리 변수
+        self._last_update_time = time.time()
+        self._frame_times = deque(maxlen=60)  # 최근 60프레임 시간 (FPS 계산용)
 
         # 키보드 상태 (연속 입력 처리)
         self._keys_pressed = {
@@ -73,12 +78,42 @@ class CarSimulatorEnv(gym.Env):
             'brake': False,  # 수동 브레이크 (Space)
         }
 
-        # 충돌 관련 변수
-        self._collision_state = False
+        # Pygame 초기화
+        self._init_pygame()
 
-        # 시간 관리 변수
-        self._last_update_time = time.time()
-        self._frame_times = deque(maxlen=60)  # 최근 60프레임 시간 (FPS 계산용)
+        # Gym 인터페이스
+        if not multi_vehicle:
+            # 단일 차량 모드
+            self.action_space = spaces.Box(
+                low=np.array([-1, -1]),  # [가속, 조향]
+                high=np.array([1, 1]),
+                dtype=np.float32
+            )
+
+            # 관측 공간: [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
+            self.observation_space = spaces.Box(
+                low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -np.pi, -5, -5, 0, -np.pi]),
+                high=np.array([np.inf, np.inf, 1, 1, 60, 10, np.pi, 5, 5, np.inf, np.pi]),
+                dtype=np.float32
+            )
+        else:
+            # 다중 차량 모드 - 각 차량마다 별도 액션
+            self.action_space = spaces.Tuple([
+                spaces.Box(
+                    low=np.array([-1, -1]),  # [가속, 조향]
+                    high=np.array([1, 1]),
+                    dtype=np.float32
+                ) for _ in range(self.num_vehicles)
+            ])
+
+            # 다중 차량 관측 공간 - 각 차량마다 별도 관측
+            self.observation_space = spaces.Tuple([
+                spaces.Box(
+                    low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -np.pi, -5, -5, 0, -np.pi]),
+                    high=np.array([np.inf, np.inf, 1, 1, 60, 10, np.pi, 5, 5, np.inf, np.pi]),
+                    dtype=np.float32
+                ) for _ in range(self.num_vehicles)
+            ])
 
     def _init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
@@ -101,22 +136,27 @@ class CarSimulatorEnv(gym.Env):
         # G-force 표시기
         self.g_force_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
 
-    def _world_to_screen(self, x, y):
+    def _world_to_screen(self, x, y, cam_x=None, cam_y=None):
         """
         월드 좌표 → 화면 좌표 변환
         월드: 원점 중앙, Y축 위로 증가
         화면: 원점 좌상단, Y축 아래로 증가
 
-        항상 차량이 화면 중앙에 오도록 변환
+        항상 현재 활성 차량이 화면 중앙에 오도록 변환
+
+        Args:
+            x, y: 변환할 월드 좌표
+            cam_x, cam_y: 카메라 위치 (None이면 활성 차량 위치 사용)
         """
-        # 차량의 현재 위치를 화면 중앙으로
-        cam_x = self.vehicle.state.x
-        cam_y = self.vehicle.state.y
+        # 카메라 위치가 주어지지 않은 경우 활성 차량 위치 사용
+        if cam_x is None or cam_y is None:
+            cam_x = self.vehicle.state.x
+            cam_y = self.vehicle.state.y
 
         # 줌 처리
         scale = self.sim_config.SCALE * self._camera_zoom
 
-        # 월드 좌표를 차량 기준으로 상대화
+        # 월드 좌표를 카메라 기준으로 상대화
         rel_x = x - cam_x
         rel_y = y - cam_y
 
@@ -132,7 +172,7 @@ class CarSimulatorEnv(gym.Env):
 
     def _update_camera(self):
         """카메라 위치 업데이트 (시선 위치 조정)"""
-        # 기본적으로 차량은 항상 화면 중심에 위치 (월드-스크린 변환에서 처리)
+        # 기본적으로 활성 차량은 항상 화면 중심에 위치 (월드-스크린 변환에서 처리)
         if self.sim_config.CAMERA_FOLLOW:
             # 전방 주시 효과 (시선 약간 앞쪽으로)
             look_ahead_distance = min(self.vehicle.state.vel * 0.5, 50)  # 속도에 비례하여 전방 주시
@@ -162,7 +202,7 @@ class CarSimulatorEnv(gym.Env):
         scale = self.sim_config.SCALE * self._camera_zoom
         grid_size = 10 * self.sim_config.SCALE   # 그리드 단위 (100 픽셀) * 스케일
 
-        # 카메라 위치 계산 (차량 중심)
+        # 카메라 위치 계산 (활성 차량 중심)
         cam_x = self.vehicle.state.x
         cam_y = self.vehicle.state.y
 
@@ -187,9 +227,9 @@ class CarSimulatorEnv(gym.Env):
             # 그리드 라인의 월드 좌표
             grid_x = i * grid_size
 
-            # 화면 좌표로 변환하여 그리기
-            start_v = self._world_to_screen(grid_x, world_bottom)
-            end_v = self._world_to_screen(grid_x, world_top)
+            # 화면 좌표로 변환하여 그리기 (카메라 위치 전달)
+            start_v = self._world_to_screen(grid_x, world_bottom, cam_x, cam_y)
+            end_v = self._world_to_screen(grid_x, world_top, cam_x, cam_y)
             pygame.draw.line(self.screen, self.sim_config.GRID_COLOR, start_v, end_v, 1)
 
             # 좌표 표시 (원점 제외)
@@ -203,9 +243,9 @@ class CarSimulatorEnv(gym.Env):
             # 그리드 라인의 월드 좌표
             grid_y = i * grid_size
 
-            # 화면 좌표로 변환하여 그리기
-            start_h = self._world_to_screen(world_left, grid_y)
-            end_h = self._world_to_screen(world_right, grid_y)
+            # 화면 좌표로 변환하여 그리기 (카메라 위치 전달)
+            start_h = self._world_to_screen(world_left, grid_y, cam_x, cam_y)
+            end_h = self._world_to_screen(world_right, grid_y, cam_x, cam_y)
             pygame.draw.line(self.screen, self.sim_config.GRID_COLOR, start_h, end_h, 1)
 
             # 좌표 표시 (원점 제외)
@@ -291,6 +331,7 @@ class CarSimulatorEnv(gym.Env):
 
         # 기본 정보
         hud = [
+            f"Vehicle {self.active_vehicle_idx + 1}/{self.num_vehicles}",
             f"Velocity: {state.vel:.2f} m/s ({state.vel * 3.6:.1f} km/h)",
             f"Steering: {np.degrees(state.steer):.1f}°",
             f"Left wheel: {np.degrees(left_steer):.1f}°, Right wheel: {np.degrees(right_steer):.1f}°",
@@ -298,6 +339,17 @@ class CarSimulatorEnv(gym.Env):
             f"Heading: {np.degrees(state.yaw):.1f}°",
             f"Accel: {state.accel:.2f} m/s²"
         ]
+
+        # 목적지 정보 추가
+        goal = self.goal_manager.get_vehicle_goal(self.vehicle.get_id())
+        if goal:
+            distance = state.distance_to_target
+            yaw_diff = np.degrees(state.yaw_diff_to_target)
+            hud.extend([
+                f"Target: ({state.target_x:.1f}, {state.target_y:.1f})",
+                f"Distance to target: {distance:.2f}m",
+                f"Heading diff: {yaw_diff:.1f}°"
+            ])
 
         # 디버그 정보 추가
         if self.sim_config.ENABLE_DEBUG_INFO:
@@ -337,6 +389,43 @@ class CarSimulatorEnv(gym.Env):
         self.screen.blit(speed_text, speed_rect)
         self.screen.blit(kmh_text, kmh_rect)
 
+    def _draw_target_direction_arrows(self):
+        """각 차량의 목표 방향 화살표 그리기"""
+        for vehicle in self.vehicles:
+            goal = self.goal_manager.get_vehicle_goal(vehicle.id)
+            if goal:
+                # 차량 위치와 목표 위치를 화면 좌표로 변환
+                vehicle_pos = self._world_to_screen(vehicle.state.x, vehicle.state.y)
+                target_pos = self._world_to_screen(vehicle.state.target_x, vehicle.state.target_y)
+
+                # 화살표 그리기 (차량에서 목표로)
+                # 화살표 색상은 활성 차량이면 밝은 노란색, 아니면 어두운 노란색
+                arrow_color = (255, 255, 0) if vehicle.id == self.vehicles[self.active_vehicle_idx].id else (180, 180, 0)
+                pygame.draw.line(self.screen, arrow_color, vehicle_pos, target_pos, 2)
+
+                # 화살표 머리 그리기
+                # 화살표 방향 계산
+                dx = target_pos[0] - vehicle_pos[0]
+                dy = target_pos[1] - vehicle_pos[1]
+                length = np.sqrt(dx*dx + dy*dy)
+
+                if length > 10:  # 일정 거리 이상일 때만 화살표 머리 그리기
+                    # 단위 벡터
+                    dx, dy = dx/length, dy/length
+
+                    # 화살표 머리 크기
+                    head_length = 10
+
+                    # 화살표 머리 끝점 좌표
+                    arrow_head1_x = target_pos[0] - head_length * (dx*0.866 + dy*0.5)
+                    arrow_head1_y = target_pos[1] - head_length * (-dx*0.5 + dy*0.866)
+                    arrow_head2_x = target_pos[0] - head_length * (dx*0.866 - dy*0.5)
+                    arrow_head2_y = target_pos[1] - head_length * (dx*0.5 + dy*0.866)
+
+                    # 화살표 머리 그리기
+                    pygame.draw.line(self.screen, arrow_color, target_pos, (int(arrow_head1_x), int(arrow_head1_y)), 2)
+                    pygame.draw.line(self.screen, arrow_color, target_pos, (int(arrow_head2_x), int(arrow_head2_y)), 2)
+
     def handle_keyboard_input(self):
         """키보드 입력 처리 (상태 업데이트)"""
         pressed = pygame.key.get_pressed()
@@ -347,6 +436,13 @@ class CarSimulatorEnv(gym.Env):
         self._keys_pressed['left'] = pressed[pygame.K_LEFT] or pressed[pygame.K_a]
         self._keys_pressed['right'] = pressed[pygame.K_RIGHT] or pressed[pygame.K_d]
         self._keys_pressed['brake'] = pressed[pygame.K_SPACE]
+
+        # 차량 전환 (다중 차량 모드일 때만)
+        if self.multi_vehicle and pressed[pygame.K_TAB]:
+            # 다음 차량으로 전환
+            self.active_vehicle_idx = (self.active_vehicle_idx + 1) % self.num_vehicles
+            self.vehicle = self.vehicles[self.active_vehicle_idx]
+            print(f"현재 차량: {self.active_vehicle_idx + 1}/{self.num_vehicles}")
 
         # 카메라 컨트롤
         if pressed[pygame.K_PLUS] or pressed[pygame.K_EQUALS]:
@@ -409,18 +505,45 @@ class CarSimulatorEnv(gym.Env):
         if self._keys_pressed['right']:
             action[1] = 1.0  # 우회전
 
-        return action
+        # 다중 차량 모드에서는 활성 차량만 입력으로 제어
+        if self.multi_vehicle:
+            actions = [np.zeros(2) for _ in range(self.num_vehicles)]
+            actions[self.active_vehicle_idx] = action
+            return actions
+        else:
+            return action
 
     def get_obstacle_manager(self):
         """장애물 관리자 객체 반환"""
         return self.obstacle_manager
 
+    def get_goal_manager(self):
+        """목적지 관리자 객체 반환"""
+        return self.goal_manager
+
     def _save_state(self):
         """현재 시뮬레이션 상태 저장"""
+        # 타이어 자국을 리스트로 변환 (pickle 직렬화를 위해)
+        track_marks_list = []
+        for v in self.vehicles:
+            # deque 객체를 리스트로 변환
+            track_marks_list.append(list(v.get_track_marks()))
+
+        # 차량 상태 및 설정 저장
         save_data = {
-            'state': self.vehicle.state,
-            'track_marks': self.vehicle.get_track_marks(),
-            'vehicle_config': self.vehicle.config
+            'states': [v.state for v in self.vehicles],
+            'track_marks': track_marks_list,
+            'vehicle_configs': [v.config for v in self.vehicles],
+            # 목적지 매니저 관련 데이터
+            'goals': {gid: {
+                'x': goal.x,
+                'y': goal.y,
+                'yaw': goal.yaw,
+                'radius': goal.radius,
+                'color': goal.color
+            } for gid, goal in self.goal_manager.goals.items()},
+            'vehicle_goals': self.goal_manager.vehicle_goals,
+            'next_goal_id': self.goal_manager.next_goal_id
         }
 
         try:
@@ -432,7 +555,7 @@ class CarSimulatorEnv(gym.Env):
             print(f"저장 오류: {e}")
 
     def _load_state(self):
-        """시뮬레이션 상태 불러오기"""
+        """시뮬레이션 상태 불러오기 (add_goal_with_id 메소드 활용)"""
         try:
             save_files = sorted([f for f in os.listdir('saves') if f.startswith('sim_state_')])
             if not save_files:
@@ -444,12 +567,72 @@ class CarSimulatorEnv(gym.Env):
             with open(f'saves/{latest_file}', 'rb') as f:
                 save_data = pickle.load(f)
 
-            self.vehicle.state = save_data['state']
-            self.vehicle.set_track_marks(save_data['track_marks'])
-            self.vehicle.config = save_data['vehicle_config']
+            # 차량 상태 복원
+            states = save_data.get('states', [])
+            track_marks = save_data.get('track_marks', [])
+            vehicle_configs = save_data.get('vehicle_configs', [])
+
+            # 불러온 상태 정보에 맞게 차량 수 조정
+            self.num_vehicles = len(states)
+            self.multi_vehicle = self.num_vehicles > 1
+
+            # 차량 리스트 재생성
+            self.vehicles = []
+            for i in range(self.num_vehicles):
+                vehicle = Vehicle(
+                    vehicle_id=i,
+                    vehicle_config=vehicle_configs[i] if i < len(vehicle_configs) else self.vehicle_config,
+                    sim_config=self.sim_config
+                )
+                if i < len(states):
+                    vehicle.state = states[i]
+                if i < len(track_marks):
+                    # track_marks는 리스트로 저장했으므로, deque로 변환
+                    vehicle_track_marks = deque(track_marks[i], maxlen=2000)
+                    vehicle.set_track_marks(vehicle_track_marks)
+                self.vehicles.append(vehicle)
+
+            # 현재 활성 차량 설정
+            self.active_vehicle_idx = min(self.active_vehicle_idx, self.num_vehicles - 1)
+            self.vehicle = self.vehicles[self.active_vehicle_idx]
+
+            # 목적지 정보 복원
+            self.goal_manager.clear_goals()  # 기존 목적지 삭제
+
+            # 목적지 객체 복원 (원래 ID 유지)
+            saved_goals = save_data.get('goals', {})
+            for goal_id_str, goal_data in saved_goals.items():
+                # 문자열 키를 정수로 변환 (pickle로 저장할 때 키가 문자열로 변환될 수 있음)
+                goal_id = int(goal_id_str) if isinstance(goal_id_str, str) else goal_id_str
+
+                # add_goal_with_id 메소드로 원래 ID 유지하며 목적지 추가
+                self.goal_manager.add_goal_with_id(
+                    goal_id=goal_id,
+                    x=goal_data['x'],
+                    y=goal_data['y'],
+                    yaw=goal_data['yaw'],
+                    radius=goal_data['radius'],
+                    color=goal_data['color']
+                )
+
+            # 차량-목적지 매핑 복원 (ID 변환 불필요)
+            self.goal_manager.vehicle_goals = save_data.get('vehicle_goals', {})
+
+            # 각 차량에 목적지 정보 전달
+            for vehicle_id, goal_id in self.goal_manager.vehicle_goals.items():
+                # vehicle_id가 문자열로 저장되었을 수 있음
+                v_id = int(vehicle_id) if isinstance(vehicle_id, str) else vehicle_id
+
+                if v_id < len(self.vehicles):
+                    vehicle = self.vehicles[v_id]
+                    vehicle.goal_id = goal_id
+                    goal = self.goal_manager.goals.get(goal_id)
+                    if goal:
+                        vehicle.update_target(goal.x, goal.y, goal.yaw)
 
             # 그래픽 리소스 다시 로드
-            self.vehicle._load_graphics()
+            for vehicle in self.vehicles:
+                vehicle._load_graphics()
 
             print(f"시뮬레이션 상태를 불러왔습니다: {latest_file}")
         except Exception as e:
@@ -471,10 +654,11 @@ class CarSimulatorEnv(gym.Env):
         환경 스텝 실행
 
         Args:
-            action: [가속도, 조향] 명령 [-1, 1]
+            action: 단일 차량 모드: [가속도, 조향] 명령 [-1, 1]
+                    다중 차량 모드: 차량별 [가속도, 조향] 명령 리스트
 
         Returns:
-            obs: 관측 [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1]]
+            obs: 관측 [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
             reward: 보상
             done: 종료 여부
             info: 추가 정보
@@ -490,34 +674,67 @@ class CarSimulatorEnv(gym.Env):
         # 장애물 업데이트
         self.obstacle_manager.update(dt)
 
-        # 차량 업데이트
-        self.vehicle.step(action, dt)
+        # 차량 업데이트 및 충돌 감지
+        collisions = {}
+        reached_targets = {}
 
-        # 충돌 감지
-        collision = self.vehicle.check_collision(self.obstacle_manager)
+        if self.multi_vehicle:
+            # 다중 차량 모드 - action은 차량별 액션 리스트
+            for i, vehicle in enumerate(self.vehicles):
+                vehicle_action = action[i] if i < len(action) else np.zeros(2)
+                vehicle.step(vehicle_action, dt)
+
+                # 충돌 감지
+                collision = vehicle.check_collision(self.obstacle_manager)
+                collisions[vehicle.id] = collision
+
+                # 목적지 도달 확인
+                goal = self.goal_manager.get_vehicle_goal(vehicle.id)
+                if goal:
+                    # 도달 확인
+                    reached = vehicle.check_target_reached()
+                    reached_targets[vehicle.id] = reached
+        else:
+            # 단일 차량 모드 - action은 단일 차량 액션
+            # 현재 차량만 업데이트
+            self.vehicle.step(action, dt)
+
+            # 충돌 감지
+            collision = self.vehicle.check_collision(self.obstacle_manager)
+            collisions[self.vehicle.id] = collision
+
+            # 목적지 도달 확인
+            goal = self.goal_manager.get_vehicle_goal(self.vehicle.id)
+            if goal:
+                # 도달 확인
+                reached = self.vehicle.check_target_reached()
+                reached_targets[self.vehicle.id] = reached
 
         # 물리 시뮬레이션 시간 측정
         self._performance_metrics['physics_time'] = time.time() - physics_start
 
+
+        # 충돌 여부 확인인
+        any_collision = any(collisions.values())
+
         # 관측 반환
         obs = self._get_obs()
-        reward = self._calculate_reward()
+        reward = self._calculate_reward(collisions, reached_targets)
         done = False
 
-        info = {}
+        info = {
+            'collisions': collisions,
+            'reached_targets': reached_targets,
+            'collision': any_collision
+        }
 
         # 충돌 처리
-        if collision:
-            # 충돌 상태 설정
-            self._collision_state = True
-
-            # 충돌로 인한 보상 감소 및 종료 상태 설정
-            reward -= 50.0
+        if any_collision:
+            # 충돌로 인한 종료 상태 설정 (보상은 이미 계산됨)
             done = True
-            info['collision'] = True
 
         # 상태 기록 (리플레이용)
-        self._state_history.append(self.vehicle.state.__dict__.copy())
+        self._state_history.append({v.id: v.state.__dict__.copy() for v in self.vehicles})
 
         # 성능 측정 업데이트
         self._update_performance_metrics()
@@ -526,10 +743,23 @@ class CarSimulatorEnv(gym.Env):
 
     def reset(self):
         """환경 초기화"""
-        self.vehicle.reset()
-        self._state_history = []
+        # 차량 초기화
+        for vehicle in self.vehicles:
+            vehicle.reset()
+
+        # 상태 기록 초기화
+        self._state_history.clear()
+
+        # 카메라 설정 초기화
         self._camera_offset = (0, 0)
         self._camera_zoom = 1.0
+
+        # 장애물 관리자 초기화 (모든 장애물 제거)
+        self.obstacle_manager.clear_obstacles()
+
+        # 목적지 관리자 초기화
+        self.goal_manager.clear_goals()
+
         return self._get_obs()
 
     def render(self, mode='human'):
@@ -546,14 +776,21 @@ class CarSimulatorEnv(gym.Env):
         # 고정 그리드 그리기
         self._draw_grid()
 
+        # 목적지 그리기
+        self.goal_manager.draw(self.screen, self._world_to_screen, self.sim_config.ENABLE_DEBUG_INFO)
+
         # 장애물 그리기
         self.obstacle_manager.draw(self.screen, self._world_to_screen, self.sim_config.ENABLE_DEBUG_INFO)
 
-        # 차량 및 타이어 자국 그리기
-        self.vehicle.draw(self.screen, self._world_to_screen)
+        # 모든 차량 그리기
+        for vehicle in self.vehicles:
+            vehicle.draw(self.screen, self._world_to_screen)
 
         # HUD 표시
         self._draw_hud()
+
+        # 차량 목표 방향 화살표 그리기
+        self._draw_target_direction_arrows()
 
         # 렌더링 시간 측정
         self._performance_metrics['render_time'] = time.time() - render_start
@@ -566,11 +803,55 @@ class CarSimulatorEnv(gym.Env):
         """환경 종료"""
         pygame.quit()
 
+    def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
+        """
+        차량에 목적지 추가
+
+        Args:
+            vehicle_id: 차량 ID
+            x: 목적지 X 좌표
+            y: 목적지 Y 좌표
+            yaw: 목적지 방향
+            radius: 목적지 반경
+            color: 목적지 색상 (RGB)
+
+        Returns:
+            추가된 목적지 ID
+        """
+        # 목적지 추가
+        goal_id = self.goal_manager.add_goal(x, y, yaw, radius, color)
+
+        # 목적지 관리 정보 추가
+        self.goal_manager.assign_goal_to_vehicle(vehicle_id, goal_id)
+
+        # 차량에 목적지 추가
+        vehicle = self.vehicles[vehicle_id]
+
+        if vehicle:
+            vehicle.set_goal(goal_id, self.goal_manager)
+
+        return goal_id
+
     def _get_obs(self):
-        """관측 정보 반환 [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1]]"""
-        state = self.vehicle.state
+        """
+        관측 정보 반환 [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
+        단일 차량: 단일 차량 상태
+        다중 차량: 차량별 상태 리스트
+        """
+        if self.multi_vehicle:
+            # 다중 차량 모드 - 차량별 관측 리스트 반환
+            return [self._get_vehicle_obs(vehicle) for vehicle in self.vehicles]
+        else:
+            # 단일 차량 모드 - 현재 차량 관측만 반환
+            return self._get_vehicle_obs(self.vehicle)
+
+    def _get_vehicle_obs(self, vehicle):
+        """단일 차량에 대한 관측 정보 반환"""
+        state = vehicle.state
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
-        return np.array([
+
+        # 기본 차량 상태
+        obs = np.array([
             state.x,
             state.y,
             cos_yaw,
@@ -579,15 +860,77 @@ class CarSimulatorEnv(gym.Env):
             state.vel_lateral,
             state.drift_angle,
             state.g_forces[0],
-            state.g_forces[1]
+            state.g_forces[1],
+            state.distance_to_target,
+            state.yaw_diff_to_target
         ])
 
-    def _calculate_reward(self):
-        """보상 함수 (드리프트 및 속도 기반)"""
+        return obs
+
+    def _calculate_reward(self, collisions, reached_targets):
+        """
+        보상 함수 계산
+        다중 차량 모드: 차량별 보상 리스트 반환
+        단일 차량 모드: 단일 값 반환
+
+        Args:
+            collisions: 차량별 충돌 여부 {vehicle_id: bool}
+            reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
+        """
+        if self.multi_vehicle:
+            # 다중 차량 모드 - 차량별 보상 계산
+            rewards = []
+            for vehicle in self.vehicles:
+                reward = self._calculate_vehicle_reward(
+                    vehicle,
+                    collisions.get(vehicle.id, False),
+                    reached_targets.get(vehicle.id, False)
+                )
+                rewards.append(reward)
+            return rewards
+        else:
+            # 단일 차량 모드 - 현재 차량 보상만 계산
+            return self._calculate_vehicle_reward(
+                self.vehicle,
+                collisions.get(self.vehicle.id, False),
+                reached_targets.get(self.vehicle.id, False)
+            )
+
+    def _calculate_vehicle_reward(self, vehicle, collision, reached_target):
+        """
+        단일 차량에 대한 보상 계산
+
+        Args:
+            vehicle: 차량 객체
+            collision: 충돌 여부
+            reached_target: 목표 도달 여부
+        """
+        state = vehicle.state
+
         # 속도 보상 (최대 속도에 가까울수록 높은 보상)
-        speed_reward = self.vehicle.state.vel / self.vehicle.config.MAX_SPEED
+        speed_reward = state.vel / vehicle.config.MAX_SPEED * 0.2
+
+        # 목표 관련 보상
+        goal_reward = 0
+        if self.goal_manager.get_vehicle_goal(vehicle.id):
+            # 목표 거리에 따른 보상 (가까울수록 높은 보상)
+            if state.distance_to_target > 0:
+                proximity_reward = 1.0 / (1.0 + state.distance_to_target) * 0.1
+                goal_reward += proximity_reward
+
+            # 방향 일치 보상 (차량이 목표를 바라볼수록 높은 보상)
+            direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * 0.2
+            goal_reward += direction_reward
+
+            # 목표 도달 보상
+            if reached_target:
+                goal_reward += 1.0
 
         # 종합 보상
-        reward = 0.6 * speed_reward
+        reward = speed_reward + goal_reward
+
+        # 충돌 패널티
+        if collision:
+            reward -= 2.0
 
         return reward
