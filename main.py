@@ -1,7 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 import pygame
 import numpy as np
-from env import CarSimulatorEnv
+from src.env import CarSimulatorEnv
 
 # ==============
 # Manual Control

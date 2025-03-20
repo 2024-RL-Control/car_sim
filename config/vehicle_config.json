@@ -1,0 +1,22 @@
+{
+    "LENGTH": 4.72,
+    "WIDTH": 1.935,
+    "HEIGHT": 1.44,
+    "WHEELBASE": 2.875,
+    "TRACK": 1.585,
+    "MASS": 1830.0,
+    "INERTIA": 2500.0,
+    "MAX_STEER": 35.0,
+    "CG_HEIGHT": 0.55,
+    "TIRE_WIDTH": 0.235,
+    "TIRE_HEIGHT": 0.669,
+    "TIRE_RADIUS": 0.334,
+    "MAX_ACCEL": 4.0,
+    "MAX_BRAKE": 6.0,
+    "MAX_SPEED": 65.0,
+    "MIN_SPEED": -20.0,
+    "TIRE_B": 10.0,
+    "TIRE_C": 1.9,
+    "TIRE_D": 1.0,
+    "TIRE_E": 0.97
+}

@@ -5,8 +5,8 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
-from physics import DynamicModel
-from object import RectangleObstacle
+from .physics import DynamicModel
+from .object import RectangleObstacle
 
 # ======================
 # State Management
