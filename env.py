@@ -760,7 +760,7 @@ class CarSimulatorEnv(gym.Env):
 
         # 모든 차량 그리기
         for vehicle in self.vehicles:
-            vehicle.draw(self.screen, self._world_to_screen)
+            vehicle.draw(self.screen, self._world_to_screen, self._camera_zoom)
 
         # HUD 표시
         self._draw_hud()

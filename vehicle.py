@@ -70,16 +70,9 @@ class Vehicle:
         )
         self.goal_id = None
         self._track_marks = deque(maxlen=2000)  # 타이어 자국 [(x,y,width), ...]
-        self._accumulated_time = 0.0  # 누적 시간
 
         # 그래픽 리소스 초기화
         self._load_graphics()
-
-        # 성능 최적화를 위한 충돌 및 그리기 관련 캐시
-        self._tire_cache = {}
-        self._tire_positions = None
-        self._last_yaw = None
-        self._last_steer = None
 
     def get_id(self):
         """차량 ID 반환"""
@@ -118,19 +111,13 @@ class Vehicle:
     def reset(self):
         """차량 상태 초기화"""
         self.state = VehicleState()
+        self._load_graphics()
         self._update_collision_body()
         self.clear_goal()
         self.clear_track_marks()
-        self._accumulated_time = 0.0
-        self._tire_cache = {}
-        self._tire_positions = None
-        self._last_yaw = None
-        self._last_steer = None
 
     def step(self, action, dt):
         """차량 상태 업데이트"""
-        # 누적 시간 업데이트
-        self._accumulated_time += dt
 
         # 물리 모델 적용
         DynamicModel.apply_forces(self.state, action, dt, self.sim_config, self.config)
@@ -285,8 +272,11 @@ class Vehicle:
         self.state.distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
 
-    def draw(self, screen, world_to_screen_func):
+    def draw(self, screen, world_to_screen_func, camera_zoom=1.0):
         """차량 및 타이어 렌더링"""
+        # 스케일 계산
+        self._update_scale(camera_zoom)
+
         # 타이어 자국 그리기
         self._draw_tire_marks(screen, world_to_screen_func)
 
@@ -306,6 +296,15 @@ class Vehicle:
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
+        self._camera_zoom = 1.0
+
+        # 성능 최적화를 위한 그리기 관련 캐시
+        self._car_cache = {}
+        self._tire_angle_cache = {}
+        self._tire_positions = None
+        self._last_yaw = None
+        self._last_steer = None
+
         # 차체
         car_length = self.config.LENGTH * self.sim_config.SCALE
         car_width = self.config.WIDTH * self.sim_config.SCALE
@@ -319,6 +318,96 @@ class Vehicle:
         self.tire_surf = pygame.Surface((tire_h, tire_w), pygame.SRCALPHA)
         pygame.draw.rect(self.tire_surf, self.sim_config.TIRE_COLOR,
                          (0, 0, tire_h, tire_w), 2)
+
+        # 실제 렌더링에 사용될 스케일된 Surface 초기화
+        self._update_scaled_surfaces(self.sim_config.SCALE)
+
+    def _update_scale(self, camera_zoom):
+        """카메라 줌 변경 시 스케일 및 Surface 업데이트"""
+        if camera_zoom != self._camera_zoom:
+            self._camera_zoom = camera_zoom
+            # 현재 시뮬레이션 스케일과 카메라 줌을 곱한 유효 스케일 계산
+            effective_scale = self.sim_config.SCALE * camera_zoom
+            # 스케일된 Surface 업데이트
+            self._update_scaled_surfaces(effective_scale)
+
+    def _update_scaled_surfaces(self, effective_scale):
+        """현재 스케일에 맞게 차량과 타이어 Surface 생성"""
+        # 이미 캐시에 있는 경우 재사용
+        if effective_scale in self._car_cache:
+            self.car_surf = self._car_cache[effective_scale]
+        else:
+            # 새 크기 계산
+            new_length = self.config.LENGTH * effective_scale
+            new_width = self.config.WIDTH * effective_scale
+
+            # 차체 Surface 재생성
+            self.car_surf = pygame.Surface((new_length, new_width), pygame.SRCALPHA)
+            pygame.draw.rect(self.car_surf, self.sim_config.VEHICLE_COLOR,
+                            (0, 0, new_length, new_width), 2, border_radius=int(new_width * 0.2))
+
+            # 캐시에 저장
+            self._car_cache[effective_scale] = self.car_surf
+
+            # 캐시 크기 제한 (10개 이상이면 가장 오래된 항목 제거)
+            if len(self._car_cache) > 10:
+                oldest_scale = next(iter(self._car_cache))
+                if oldest_scale != effective_scale:
+                    del self._car_cache[oldest_scale]
+
+        # 타이어 Surface 스케일링 - 각도별 캐시는 무효화 (새 스케일에 맞게 다시 생성 필요)
+        self._tire_angle_cache.clear()
+
+        # 새 크기 계산
+        new_tire_h = self.config.TIRE_HEIGHT * effective_scale
+        new_tire_w = self.config.TIRE_WIDTH * effective_scale
+
+        # 타이어 Surface 재생성
+        self.tire_surf = pygame.Surface((new_tire_h, new_tire_w), pygame.SRCALPHA)
+        pygame.draw.rect(self.tire_surf, self.sim_config.TIRE_COLOR,
+                         (0, 0, new_tire_h, new_tire_w), 2)
+
+    def _draw_tires(self, screen, world_to_screen_func):
+        """4개의 타이어 렌더링 (아커만 조향 적용, 스케일 적용)"""
+        # 타이어 위치와 각도 가져오기
+        tire_data = self._calculate_tire_positions()
+
+        for world_x, world_y, total_angle in tire_data:
+            # 회전 각도를 정수로 반올림 (캐싱용)
+            angle_deg = int(degrees(total_angle))
+
+            # 해당 각도의 회전된 타이어 이미지가 캐시에 없으면 생성
+            if angle_deg not in self._tire_angle_cache:
+                self._tire_angle_cache[angle_deg] = pygame.transform.rotate(self.tire_surf, angle_deg)
+
+                # 캐시 크기 제한 (36개 각도 이상이면 랜덤하게 하나 제거)
+                if len(self._tire_angle_cache) > 36:
+                    random_key = next(iter(self._tire_angle_cache))
+                    if random_key != angle_deg:
+                        del self._tire_angle_cache[random_key]
+
+            # 캐시된 회전 이미지 사용
+            rotated_tire = self._tire_angle_cache[angle_deg]
+            tire_rect = rotated_tire.get_rect(center=world_to_screen_func(world_x, world_y))
+            screen.blit(rotated_tire, tire_rect.topleft)
+
+    def _draw_tire_marks(self, screen, world_to_screen_func):
+        """타이어 자국 그리기 (스케일 적용)"""
+        if not self.sim_config.ENABLE_TRACK_MARKS:
+            return
+
+        # 타이어 자국 렌더링 (모든 자국)
+        for x, y, base_width in self._track_marks:
+            pos = world_to_screen_func(x, y)
+            # 줌 레벨에 맞게 자국 너비 조정
+            adjusted_width = max(1, base_width * self._camera_zoom)
+            pygame.draw.circle(screen, self.sim_config.MARK_COLOR, pos, adjusted_width)
+
+    def _draw_body(self, screen, world_to_screen_func):
+        """차체 렌더링"""
+        rotated_surf = pygame.transform.rotate(self.car_surf, degrees(self.state.yaw))
+        rect = rotated_surf.get_rect(center=world_to_screen_func(self.state.x, self.state.y))
+        screen.blit(rotated_surf, rect.topleft)
 
     def _update_tire_marks(self):
         """타이어 자국 업데이트 - 드리프트 중일 때만 추가"""
@@ -413,41 +502,10 @@ class Vehicle:
         # 지난 궤적을 점선으로 표시
         trajectory_points = [world_to_screen_func(x, y) for x, y in self.state.trajectory]
 
+        # 줌 레벨에 맞게 선 너비 조정
+        width = max(1, int(2 * self._camera_zoom))
+
         # 부드러운 곡선 대신 선분으로 그림 (성능)
         if len(trajectory_points) > 1:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
-            pygame.draw.lines(screen, trajectory_color, False, trajectory_points, 2)
-
-    def _draw_tire_marks(self, screen, world_to_screen_func):
-        """타이어 자국 그리기"""
-        if not self.sim_config.ENABLE_TRACK_MARKS:
-            return
-
-        # 타이어 자국 렌더링 (모든 자국)
-        for x, y, width in self._track_marks:
-            pos = world_to_screen_func(x, y)
-            pygame.draw.circle(screen, self.sim_config.MARK_COLOR, pos, width)
-
-    def _draw_tires(self, screen, world_to_screen_func):
-        """4개의 타이어 렌더링 (아커만 조향 적용)"""
-        # 타이어 위치와 각도 가져오기
-        tire_data = self._calculate_tire_positions()
-
-        for world_x, world_y, total_angle in tire_data:
-            # 회전 각도를 정수로 반올림 (캐싱용)
-            angle_deg = int(degrees(total_angle))
-
-            # 캐싱된 이미지 사용
-            if angle_deg not in self._tire_cache:
-                # 타이어 회전 및 위치 변환
-                self._tire_cache[angle_deg] = pygame.transform.rotate(self.tire_surf, angle_deg)
-
-            rotated_tire = self._tire_cache[angle_deg]
-            tire_rect = rotated_tire.get_rect(center=world_to_screen_func(world_x, world_y))
-            screen.blit(rotated_tire, tire_rect.topleft)
-
-    def _draw_body(self, screen, world_to_screen_func):
-        """차체 렌더링"""
-        rotated_surf = pygame.transform.rotate(self.car_surf, degrees(self.state.yaw))
-        rect = rotated_surf.get_rect(center=world_to_screen_func(self.state.x, self.state.y))
-        screen.blit(rotated_surf, rect.topleft)
+            pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
