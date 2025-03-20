@@ -19,17 +19,24 @@ class CarSimulatorEnv(gym.Env):
     """2D Top-Down 시점 차량 시뮬레이터(Gym) 환경"""
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, multi_vehicle=False, num_vehicles=1):
+    def __init__(self, multi_vehicle=False, num_vehicles=1, config_path=None):
         """
         시뮬레이터 환경 초기화
 
         Args:
             multi_vehicle: 다중 차량 모드 여부
             num_vehicles: 차량 수 (multi_vehicle=True일 때만 유효)
+            config_path: 설정 파일 경로 (None이면 기본값 사용)
         """
         # 설정 객체 초기화
-        self.sim_config = SimConfig()
-        self.vehicle_config = VehicleConfig()
+        if config_path:
+            sim_config_path = os.path.join(config_path, 'sim_config.json')
+            vehicle_config_path = os.path.join(config_path, 'vehicle_config.json')
+            self.sim_config = SimConfig.from_json(sim_config_path)
+            self.vehicle_config = VehicleConfig.from_json(vehicle_config_path)
+        else:
+            self.sim_config = SimConfig()
+            self.vehicle_config = VehicleConfig()
 
         # 다중 차량 모드 설정
         self.multi_vehicle = multi_vehicle
@@ -54,6 +61,10 @@ class CarSimulatorEnv(gym.Env):
         # 카메라 관련 변수
         self._camera_offset = (0, 0)    # 카메라 오프셋 (팬/줌 기능용)
         self._camera_zoom = 1.0         # 카메라 줌 수준
+
+        # 그리드 렌더링 최적화용 캐시
+        self._grid_cache = None
+        self._grid_cache_params = None
 
         # 성능 측정 변수
         self._performance_metrics = {   # 성능 측정 데이터
@@ -132,7 +143,6 @@ class CarSimulatorEnv(gym.Env):
 
     def _load_assets(self):
         """그래픽 리소스 생성"""
-
         # G-force 표시기
         self.g_force_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
 
@@ -170,37 +180,10 @@ class CarSimulatorEnv(gym.Env):
 
         return (int(screen_x), int(screen_y))
 
-    def _update_camera(self):
-        """카메라 위치 업데이트 (시선 위치 조정)"""
-        # 기본적으로 활성 차량은 항상 화면 중심에 위치 (월드-스크린 변환에서 처리)
-        if self.sim_config.CAMERA_FOLLOW:
-            # 전방 주시 효과 (시선 약간 앞쪽으로)
-            look_ahead_distance = min(self.vehicle.state.vel * 0.5, 50)  # 속도에 비례하여 전방 주시
-
-            if look_ahead_distance > 5:  # 일정 속도 이상일 때만 전방 주시
-                # 전방 주시 방향으로 약간의 오프셋 적용
-                target_offset_x = look_ahead_distance * np.cos(self.vehicle.state.yaw) * self.sim_config.SCALE * self._camera_zoom * 0.3
-                target_offset_y = -look_ahead_distance * np.sin(self.vehicle.state.yaw) * self.sim_config.SCALE * self._camera_zoom * 0.3
-
-                # 부드러운 카메라 이동
-                smoothing = 0.05  # 낮을수록 부드럽게
-
-                self._camera_offset = (
-                    self._camera_offset[0] * (1 - smoothing) + target_offset_x * smoothing,
-                    self._camera_offset[1] * (1 - smoothing) + target_offset_y * smoothing
-                )
-            else:
-                # 저속에서는 서서히 중앙으로 복귀
-                smoothing = 0.05
-                self._camera_offset = (
-                    self._camera_offset[0] * (1 - smoothing),
-                    self._camera_offset[1] * (1 - smoothing)
-                )
-
     def _draw_grid(self):
         """고정 그리드 그리기"""
-        scale = self.sim_config.SCALE * self._camera_zoom
-        grid_size = 10 * self.sim_config.SCALE   # 그리드 단위 (100 픽셀) * 스케일
+        scale = self.sim_config.SCALE
+        grid_size = 10 * scale   # 그리드 단위 (픽셀 수) * 스케일
 
         # 카메라 위치 계산 (활성 차량 중심)
         cam_x = self.vehicle.state.x
@@ -317,9 +300,6 @@ class CarSimulatorEnv(gym.Env):
         track = config.TRACK
         steer = state.steer
 
-        left_steer = steer
-        right_steer = steer
-
         if abs(steer) > 0.001:
             R = wheelbase / np.tan(abs(steer))
             if steer < 0:  # 좌회전
@@ -328,6 +308,8 @@ class CarSimulatorEnv(gym.Env):
             else:  # 우회전
                 left_steer = np.arctan(wheelbase / (R + track/2))
                 right_steer = np.arctan(wheelbase / (R - track/2))
+        else:
+            left_steer = right_steer = 0.0
 
         # 기본 정보
         hud = [
@@ -446,9 +428,9 @@ class CarSimulatorEnv(gym.Env):
 
         # 카메라 컨트롤
         if pressed[pygame.K_PLUS] or pressed[pygame.K_EQUALS]:
-            self._camera_zoom = min(2.0, self._camera_zoom * 1.05)
+            self._camera_zoom = min(3.0, self._camera_zoom * 1.05)
         if pressed[pygame.K_MINUS]:
-            self._camera_zoom = max(0.5, self._camera_zoom / 1.05)
+            self._camera_zoom = max(0.25, self._camera_zoom / 1.05)
 
         # 카메라 리셋
         if pressed[pygame.K_r]:
@@ -691,7 +673,6 @@ class CarSimulatorEnv(gym.Env):
                 # 목적지 도달 확인
                 goal = self.goal_manager.get_vehicle_goal(vehicle.id)
                 if goal:
-                    # 도달 확인
                     reached = vehicle.check_target_reached()
                     reached_targets[vehicle.id] = reached
         else:
@@ -706,13 +687,11 @@ class CarSimulatorEnv(gym.Env):
             # 목적지 도달 확인
             goal = self.goal_manager.get_vehicle_goal(self.vehicle.id)
             if goal:
-                # 도달 확인
                 reached = self.vehicle.check_target_reached()
                 reached_targets[self.vehicle.id] = reached
 
         # 물리 시뮬레이션 시간 측정
         self._performance_metrics['physics_time'] = time.time() - physics_start
-
 
         # 충돌 여부 확인인
         any_collision = any(collisions.values())
@@ -766,9 +745,6 @@ class CarSimulatorEnv(gym.Env):
         """환경 렌더링"""
         # 렌더링 시작 시간
         render_start = time.time()
-
-        # 카메라 업데이트
-        self._update_camera()
 
         # 배경 지우기
         self.screen.fill(self.sim_config.BACKGROUND_COLOR)
@@ -825,9 +801,8 @@ class CarSimulatorEnv(gym.Env):
         self.goal_manager.assign_goal_to_vehicle(vehicle_id, goal_id)
 
         # 차량에 목적지 추가
-        vehicle = self.vehicles[vehicle_id]
-
-        if vehicle:
+        if 0 <= vehicle_id < len(self.vehicles):
+            vehicle = self.vehicles[vehicle_id]
             vehicle.set_goal(goal_id, self.goal_manager)
 
         return goal_id

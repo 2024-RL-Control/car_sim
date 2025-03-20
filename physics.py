@@ -93,10 +93,15 @@ class KinematicModel:
 class DynamicModel:
     """차량 동역학 모델 (Magic Formula 기반)"""
 
+    # 정적 변수: 계산 결과 캐싱을 위한 딕셔너리
+    _slip_angle_cache = {}
+    _cache_precision = 1000  # 캐시 정밀도 (소수점 3자리까지 캐싱)
+    _cache_max_size = 10000  # 최대 캐시 크기
+
     @staticmethod
     def magic_formula(slip_angle, config, terrain_friction=1.0):
         """
-        Pacejka Magic Formula 타이어 모델
+        Pacejka Magic Formula 타이어 모델 (캐싱 최적화)
 
         Args:
             slip_angle: 타이어 슬립각 [rad]
@@ -106,40 +111,142 @@ class DynamicModel:
         Returns:
             타이어 측면력 계수
         """
+        # 캐시 키 생성 (slip_angle을 정밀도에 맞게 반올림)
+        key = (
+            int(slip_angle * DynamicModel._cache_precision) / DynamicModel._cache_precision,
+            terrain_friction
+        )
+
+        # 캐시에 있으면 반환
+        if key in DynamicModel._slip_angle_cache:
+            return DynamicModel._slip_angle_cache[key]
+
+        # 캐시에 없으면 계산
         B = config.TIRE_B
         C = config.TIRE_C
         D = config.TIRE_D * terrain_friction  # 지형에 따른 최대 마찰력 조정
         E = config.TIRE_E
 
-        return D * np.sin(C * np.arctan(B * slip_angle - E * (B * slip_angle - np.arctan(B * slip_angle))))
+        # 계산 단계 분리 (가독성 및 최적화)
+        B_alpha = B * slip_angle
+        arctan_B_alpha = np.arctan(B_alpha)
+        result = D * np.sin(C * np.arctan(B_alpha - E * (B_alpha - arctan_B_alpha)))
+
+        # 결과 캐싱 (캐시 크기 제한)
+        if len(DynamicModel._slip_angle_cache) > DynamicModel._cache_max_size:
+            DynamicModel._slip_angle_cache.clear()  # 캐시 크기 초과 시 클리어
+
+        DynamicModel._slip_angle_cache[key] = result
+        return result
 
     @staticmethod
-    def calculate_forces(state, sim_config, vehicle_config):
+    def _process_control_input(action, state, dt, vehicle_config):
         """
-        차량에 작용하는 힘 계산
+        제어 입력 처리
 
         Args:
-            state: 차량 상태 (VehicleState)
-            sim_config: 시뮬레이션 설정 (SimConfig)
-            vehicle_config: 차량 설정 (VehicleConfig)
+            action: 제어 입력 [accel, steer] (-1 ~ 1 사이 값)
+            state: 차량 상태
+            dt: 시간 간격 [s]
+            vehicle_config: 차량 설정
 
         Returns:
-            aero_drag: 공기 저항 [N]
-            rolling_resist: 구름 저항 [N]
-            lateral_forces: 각 타이어의 횡방향 힘 [N]
-            longitudinal_forces: 각 타이어의 종방향 힘 [N]
+            accel_cmd: 가속/제동 명령 [m/s²]
+            steer_cmd: 조향 명령 [rad]
         """
-        # 지형에 따른 마찰 계수 적용
-        terrain_friction = sim_config.TERRAIN_FRICTION.get(state.terrain_type, 1.0)
+        # 입력 정규화
+        accel_cmd = np.clip(action[0], -1, 1) * (
+            vehicle_config.MAX_BRAKE if action[0] < 0 else vehicle_config.MAX_ACCEL
+        )
+        steer_cmd = np.clip(action[1], -1, 1) * vehicle_config.MAX_STEER
 
-        # 공기 저항 (차량 전면적 고려)
-        frontal_area = vehicle_config.WIDTH * vehicle_config.HEIGHT
-        aero_drag = 0.5 * sim_config.AIR_DENSITY * sim_config.DRAG_COEFF * frontal_area * state.vel**2
+        # 현재 값에서 목표 조향각으로 점진적 변화 (급격한 변화 방지)
+        max_steer_change = vehicle_config.MAX_STEER * 2.0 * dt  # 초당 최대 조향각 변화율
+        current_steer = state.steer
+        target_steer = steer_cmd
+        steer_diff = target_steer - current_steer
+        steer_change = np.clip(steer_diff, -max_steer_change, max_steer_change)
+        steer_cmd = current_steer + steer_change
 
-        # 구름 저항
-        rolling_resist = vehicle_config.MASS * sim_config.GRAVITY * sim_config.ROLL_RESIST * np.sign(state.vel)
+        return accel_cmd, steer_cmd
 
-        # 각 타이어의 수직 하중 계산 (무게 배분, 하중 이동 고려)
+    @staticmethod
+    def _calculate_tire_slip_angles(state, vehicle_config):
+        """
+        각 타이어의 슬립각 계산 (아커만 지오메트리 기반)
+
+        Args:
+            state: 차량 상태
+            vehicle_config: 차량 설정
+
+        Returns:
+            slip_angles: 각 타이어의 슬립각 [FR, FL, RR, RL]
+        """
+        wheelbase = vehicle_config.WHEELBASE
+        track = vehicle_config.TRACK
+        steer = state.steer
+
+        # 아커만 조향 각도 계산 최적화
+        if abs(steer) > 0.001:
+            # 계산 요소 미리 계산 (반복 사용되는 값)
+            abs_steer = abs(steer)
+            tan_abs_steer = np.tan(abs_steer)
+
+            # 회전 반경 계산 (제수가 0이 되지 않도록 보호)
+            if tan_abs_steer > 1e-6:  # 0으로 나누기 방지
+                R = wheelbase / tan_abs_steer
+            else:
+                R = 1e6  # 매우 큰 회전 반경 (거의 직선)
+
+            # 트랙 반폭
+            half_track = track / 2
+
+            # 내측/외측 휠 계산에 사용될 반경
+            R_inner = R - half_track
+            R_outer = R + half_track
+
+            # 내측/외측 휠 계산에 사용될 비율
+            if R_inner > 0.001:  # 0으로 나누기 방지
+                inner_ratio = wheelbase / R_inner
+            else:
+                inner_ratio = 100  # 매우 급격한 회전
+
+            if R_outer > 0.001:  # 0으로 나누기 방지
+                outer_ratio = wheelbase / R_outer
+            else:
+                outer_ratio = 100  # 매우 급격한 회전
+
+            # 부호 규약: 양수=우회전, 음수=좌회전
+            if steer > 0:  # 우회전
+                alpha_fr = np.arctan(inner_ratio) - steer   # 안쪽 (우측 앞)
+                alpha_fl = np.arctan(outer_ratio) - steer   # 바깥쪽 (좌측 앞)
+            else:  # 좌회전
+                alpha_fl = -np.arctan(inner_ratio) - steer  # 안쪽 (좌측 앞)
+                alpha_fr = -np.arctan(outer_ratio) - steer  # 바깥쪽 (우측 앞)
+        else:
+            alpha_fl = alpha_fr = 0.0
+
+        # 후륜 슬립각 (후륜 조향이 없을 경우)
+        alpha_rr = alpha_rl = state.slip_angle
+
+        # 각 타이어 슬립각 [FR, FL, RR, RL]
+        slip_angles = [alpha_fr, alpha_fl, alpha_rr, alpha_rl]
+
+        return slip_angles
+
+    @staticmethod
+    def _calculate_vertical_loads(state, sim_config, vehicle_config):
+        """
+        각 타이어의 수직 하중 계산
+
+        Args:
+            state: 차량 상태
+            sim_config: 시뮬레이션 설정
+            vehicle_config: 차량 설정
+
+        Returns:
+            vertical_loads: 각 타이어의 수직 하중 [FR, FL, RR, RL]
+        """
         # 간단한 모델: 50:50 정적 무게 배분 가정
         static_load = vehicle_config.MASS * sim_config.GRAVITY / 4
 
@@ -159,40 +266,126 @@ class DynamicModel:
             static_load - load_transfer_longitudinal/2 - load_transfer_lateral/2   # RL (좌측 뒤)
         ]
 
-        # 각 타이어 슬립각 계산 (아커만 지오메트리 기반)
-        wheelbase = vehicle_config.WHEELBASE
-        track = vehicle_config.TRACK
-        steer = state.steer
+        return vertical_loads, lateral_accel
 
-        if abs(steer) > 0.001:
-            # 회전 반경 계산
-            R = wheelbase / np.tan(abs(steer))
+    @staticmethod
+    def _calculate_aero_forces(state, sim_config, vehicle_config):
+        """
+        공기역학적 힘 계산
 
-            # 부호 규약: 양수=우회전, 음수=좌회전
-            if steer > 0:  # 우회전
-                alpha_fr = np.arctan(wheelbase / (R - track/2)) - steer  # 안쪽 (우측 앞)
-                alpha_fl = np.arctan(wheelbase / (R + track/2)) - steer  # 바깥쪽 (좌측 앞)
-            else:  # 좌회전
-                alpha_fl = -np.arctan(wheelbase / (R - track/2)) - steer  # 안쪽 (좌측 앞)
-                alpha_fr = -np.arctan(wheelbase / (R + track/2)) - steer  # 바깥쪽 (우측 앞)
-        else:
-            alpha_fl = alpha_fr = 0.0
+        Args:
+            state: 차량 상태
+            sim_config: 시뮬레이션 설정
+            vehicle_config: 차량 설정
 
-        # 후륜 슬립각 (후륜 조향이 없을 경우)
-        alpha_rr = alpha_rl = state.slip_angle
+        Returns:
+            aero_drag: 공기 저항 [N]
+        """
+        # 공기 저항 (차량 전면적 고려)
+        frontal_area = vehicle_config.WIDTH * vehicle_config.HEIGHT
+        aero_drag = 0.5 * sim_config.AIR_DENSITY * sim_config.DRAG_COEFF * frontal_area * state.vel**2
 
-        # 각 타이어 슬립각 [FR, FL, RR, RL]
-        slip_angles = [alpha_fr, alpha_fl, alpha_rr, alpha_rl]
+        return aero_drag
 
+    @staticmethod
+    def _calculate_rolling_resistance(state, sim_config, vehicle_config):
+        """
+        구름 저항 계산
+
+        Args:
+            state: 차량 상태
+            sim_config: 시뮬레이션 설정
+            vehicle_config: 차량 설정
+
+        Returns:
+            rolling_resist: 구름 저항 [N]
+        """
+        # 구름 저항
+        rolling_resist = vehicle_config.MASS * sim_config.GRAVITY * sim_config.ROLL_RESIST * np.sign(state.vel)
+
+        return rolling_resist
+
+    @staticmethod
+    def _calculate_lateral_forces(slip_angles, vertical_loads, terrain_friction, vehicle_config):
+        """
+        각 타이어의 횡방향 힘 계산
+
+        Args:
+            slip_angles: 각 타이어의 슬립각 [FR, FL, RR, RL]
+            vertical_loads: 각 타이어의 수직 하중 [FR, FL, RR, RL]
+            terrain_friction: 지형 마찰 계수
+            vehicle_config: 차량 설정
+
+        Returns:
+            lateral_forces: 각 타이어의 횡방향 힘 [FR, FL, RR, RL]
+        """
         # 타이어별 횡방향 힘 계산
         lateral_forces = [DynamicModel.magic_formula(alpha, vehicle_config, terrain_friction) * load
-                        for alpha, load in zip(slip_angles, vertical_loads)]
+                         for alpha, load in zip(slip_angles, vertical_loads)]
 
+        return lateral_forces
+
+    @staticmethod
+    def _calculate_longitudinal_forces(state, accel_cmd, vehicle_config):
+        """
+        각 타이어의 종방향 힘 계산
+
+        Args:
+            state: 차량 상태
+            accel_cmd: 가속/제동 명령 [m/s²]
+            vehicle_config: 차량 설정
+
+        Returns:
+            longitudinal_forces: 각 타이어의 종방향 힘 [FR, FL, RR, RL]
+        """
         # 종방향 힘은 단순화 (4륜 구동 가정, 구동력 균등 분배)
-        drive_force = state.accel * vehicle_config.MASS
+        drive_force = accel_cmd * vehicle_config.MASS
         longitudinal_forces = [drive_force/4 for _ in range(4)]
 
-        return aero_drag, rolling_resist, lateral_forces, longitudinal_forces
+        return longitudinal_forces
+
+    @staticmethod
+    def calculate_forces(state, accel_cmd, sim_config, vehicle_config):
+        """
+        차량에 작용하는 힘 계산 (모듈화된 버전)
+
+        Args:
+            state: 차량 상태 (VehicleState)
+            sim_config: 시뮬레이션 설정 (SimConfig)
+            vehicle_config: 차량 설정 (VehicleConfig)
+
+        Returns:
+            aero_drag: 공기 저항 [N]
+            rolling_resist: 구름 저항 [N]
+            vertical_loads: 각 타이어의 수직 하중 [FR, FL, RR, RL]
+            slip_angles: 각 타이어의 슬립각 [FR, FL, RR, RL]
+            longitudinal_forces: 각 타이어의 종방향 힘 [FR, FL, RR, RL]
+            lateral_forces: 각 타이어의 횡방향 힘 [FR, FL, RR, RL]
+            lateral_accel: 횡방향 가속도 [m/s²]
+        """
+        # 지형에 따른 마찰 계수 적용
+        terrain_friction = sim_config.get_terrain_friction(state.terrain_type)
+
+        # 공기 저항 계산
+        aero_drag = DynamicModel._calculate_aero_forces(state, sim_config, vehicle_config)
+
+        # 구름 저항 계산
+        rolling_resist = DynamicModel._calculate_rolling_resistance(state, sim_config, vehicle_config)
+
+        # 각 타이어의 수직 하중 계산
+        vertical_loads, lateral_accel = DynamicModel._calculate_vertical_loads(state, sim_config, vehicle_config)
+
+        # 각 타이어의 슬립각 계산
+        slip_angles = DynamicModel._calculate_tire_slip_angles(state, vehicle_config)
+
+        # 횡방향 힘 계산
+        lateral_forces = DynamicModel._calculate_lateral_forces(slip_angles, vertical_loads, terrain_friction, vehicle_config)
+
+        # 종방향 힘 계산
+        longitudinal_forces = DynamicModel._calculate_longitudinal_forces(state, accel_cmd, vehicle_config)
+
+        # 결과 반환
+        return aero_drag, rolling_resist, vertical_loads, slip_angles, longitudinal_forces, lateral_forces, lateral_accel
 
     @staticmethod
     def update_g_forces(state, accel_cmd, dt, sim_config, vehicle_config):
@@ -277,9 +470,8 @@ class DynamicModel:
             sim_config: 시뮬레이션 설정 (SimConfig)
             lateral_accel: 횡방향 가속도 [m/s²]
         """
-
         # 기존 슬립 자연 감소
-        terrain_slip_recovery = sim_config.TERRAIN_FRICTION.get(state.terrain_type, 1.0)  # 지형에 따른 회복 계수
+        terrain_slip_recovery = sim_config.get_terrain_friction(state.terrain_type)  # 지형에 따른 회복 계수
         recovery_rate = 1.2 * terrain_slip_recovery  # 기본 회복률에 지형 효과 적용
         state.vel_lateral *= (1.0 - recovery_rate * dt)
 
@@ -330,7 +522,7 @@ class DynamicModel:
     @staticmethod
     def apply_forces(state, action, dt, sim_config, vehicle_config):
         """
-        동역학 모델 기반 힘 적용
+        동역학 모델 기반 힘 적용 (모듈화된 버전)
 
         Args:
             state: 차량 상태 (VehicleState)
@@ -343,33 +535,22 @@ class DynamicModel:
         substep_dt = dt / sim_config.PHYSICS_SUBSTEPS
 
         for _ in range(sim_config.PHYSICS_SUBSTEPS):
-            # 입력 정규화
-            accel_cmd = np.clip(action[0], -1, 1) * (
-                vehicle_config.MAX_BRAKE if action[0] < 0 else vehicle_config.MAX_ACCEL
-            )
-            steer_cmd = np.clip(action[1], -1, 1) * vehicle_config.MAX_STEER
-
-            # 현재 값에서 목표 조향각으로 점진적 변화 (급격한 변화 방지)
-            max_steer_change = vehicle_config.MAX_STEER * 2.0 * substep_dt  # 초당 최대 조향각 변화율
-            current_steer = state.steer
-            target_steer = steer_cmd
-            steer_diff = target_steer - current_steer
-            steer_change = np.clip(steer_diff, -max_steer_change, max_steer_change)
-            steer_cmd = current_steer + steer_change
+            # 제어 입력 처리
+            accel_cmd, steer_cmd = DynamicModel._process_control_input(action, state, substep_dt, vehicle_config)
 
             # 힘 계산
-            aero_drag, rolling_resist, lateral_forces, longitudinal_forces = DynamicModel.calculate_forces(state, sim_config, vehicle_config)
+            aero_drag, rolling_resist, _, _, _, lateral_forces, lateral_accel = DynamicModel.calculate_forces(state, accel_cmd, sim_config, vehicle_config)
 
             # 순 가속도 계산
-            net_accel = accel_cmd - (aero_drag + rolling_resist)/vehicle_config.MASS
+            net_accel = accel_cmd - (aero_drag + rolling_resist) / vehicle_config.MASS
 
-            # 타이어 횡방향 힘으로 인한 차량의 횡방향 가속도 계산
+            # 횡방향 가속도 계산
             lateral_accel = sum(lateral_forces) / vehicle_config.MASS
 
-            # 슬립 모델링 (횡방향 가속도, 조향 입력, 시간 간격)
+            # 슬립 모델링
             DynamicModel.calculate_slip(state, steer_cmd, substep_dt, sim_config, lateral_accel)
 
-            # 운동학 모델 업데이트 (위치, 방향 등 업데이트)
+            # 운동학 모델 업데이트 (위치, 방향 등)
             KinematicModel.update(state, substep_dt, net_accel, steer_cmd, vehicle_config)
 
             # G-force 계산 및 업데이트

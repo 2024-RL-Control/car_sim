@@ -70,9 +70,16 @@ class Vehicle:
         )
         self.goal_id = None
         self._track_marks = deque(maxlen=2000)  # 타이어 자국 [(x,y,width), ...]
+        self._accumulated_time = 0.0  # 누적 시간
 
         # 그래픽 리소스 초기화
         self._load_graphics()
+
+        # 성능 최적화를 위한 충돌 및 그리기 관련 캐시
+        self._tire_cache = {}
+        self._tire_positions = None
+        self._last_yaw = None
+        self._last_steer = None
 
     def get_id(self):
         """차량 ID 반환"""
@@ -114,9 +121,17 @@ class Vehicle:
         self._update_collision_body()
         self.clear_goal()
         self.clear_track_marks()
+        self._accumulated_time = 0.0
+        self._tire_cache = {}
+        self._tire_positions = None
+        self._last_yaw = None
+        self._last_steer = None
 
     def step(self, action, dt):
         """차량 상태 업데이트"""
+        # 누적 시간 업데이트
+        self._accumulated_time += dt
+
         # 물리 모델 적용
         DynamicModel.apply_forces(self.state, action, dt, self.sim_config, self.config)
 
@@ -189,15 +204,33 @@ class Vehicle:
         Returns:
             충돌 여부 (Boolean)
         """
-        for x1, y1, r1 in circles1:
-            for x2, y2, r2 in circles2:
-                # 두 원 중심 간 거리의 제곱 계산 (제곱근 계산 회피)
-                dist_sq = (x1 - x2)**2 + (y1 - y2)**2
-                # 두 원 반지름 합의 제곱과 비교
-                if dist_sq < (r1 + r2)**2:
-                    return True
+        # 원 집합이 비어있는 경우 충돌 없음
+        if not circles1 or not circles2:
+            return False
 
-        return False
+        array1 = np.array(circles1)
+        array2 = np.array(circles2)
+
+        # N1 x 1 배열
+        x1 = array1[:, 0][:, np.newaxis]
+        y1 = array1[:, 1][:, np.newaxis]
+        r1 = array1[:, 2][:, np.newaxis]
+
+        # 1 x N2 배열
+        x2 = array2[:, 0]
+        y2 = array2[:, 1]
+        r2 = array2[:, 2]
+
+        # 거리 제곱 계산 (모든 조합에 대해 한 번에 계산)
+        dist_sq = (x1 - x2)**2 + (y1 - y2)**2
+
+        # 반지름 합의 제곱 계산
+        radii_sum_sq = (r1 + r2)**2
+
+        # 충돌 여부 확인: 거리 제곱 < 반지름 합의 제곱
+        collisions = dist_sq < radii_sum_sq
+
+        return np.any(collisions)
 
     def update_target(self, x, y, yaw):
         """
@@ -247,7 +280,9 @@ class Vehicle:
 
     def _update_target_info(self):
         """목표 위치까지의 거리, 각도도 계산 및 업데이트"""
-        self.state.distance_to_target = ((self.state.x - self.state.target_x) ** 2 + (self.state.y - self.state.target_y) ** 2) ** 0.5
+        dx = self.state.x - self.state.target_x
+        dy = self.state.y - self.state.target_y
+        self.state.distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
 
     def draw(self, screen, world_to_screen_func):
@@ -293,34 +328,23 @@ class Vehicle:
         # 드리프트 중일 때만 타이어 자국 추가
         if abs(self.state.drift_angle) > radians(5) and abs(self.state.vel) > 5.0:
             # 각 타이어 위치 계산
-            wheelbase = self.config.WHEELBASE
-            track = self.config.TRACK
+            tire_positions = self._calculate_tire_positions()
 
-            # 타이어 상대 위치 계산 (차량 좌표계 기준)
-            tire_positions = [
-                ( wheelbase/2,  track/2),  # Front Right
-                ( wheelbase/2, -track/2),  # Front Left
-                (-wheelbase/2,  track/2),  # Rear Right
-                (-wheelbase/2, -track/2)   # Rear Left
-            ]
+            # 마크 너비는 드리프트 각도에 비례
+            mark_width = max(1, min(5, abs(self.state.drift_angle) * 10))
 
-            for dx, dy in tire_positions:
-                # 차량 회전 변환
-                rotated_x = dx * cos(self.state.yaw) - dy * sin(self.state.yaw)
-                rotated_y = dx * sin(self.state.yaw) + dy * cos(self.state.yaw)
-
-                # 월드 좌표 계산
-                world_x = self.state.x + rotated_x
-                world_y = self.state.y + rotated_y
-
-                # 마크 너비는 드리프트 각도에 비례
-                mark_width = max(1, min(5, abs(self.state.drift_angle) * 10))
-
-                # 타이어 자국 추가
+            # 각 타이어 위치에 자국 추가
+            for world_x, world_y, _ in tire_positions:
                 self._track_marks.append((world_x, world_y, mark_width))
 
     def _calculate_tire_positions(self):
         """각 타이어의 위치 및 각도 계산"""
+        # 캐시 사용 가능한지 확인
+        if (self._tire_positions is not None and
+            self._last_yaw == self.state.yaw and
+            self._last_steer == self.state.steer):
+            return self._tire_positions
+
         wheelbase = self.config.WHEELBASE
         track = self.config.TRACK
         steer = self.state.steer
@@ -374,6 +398,11 @@ class Vehicle:
 
             result.append((world_x, world_y, total_angle))
 
+        # 계산 결과 캐싱
+        self._tire_positions = result
+        self._last_yaw = self.state.yaw
+        self._last_steer = self.state.steer
+
         return result
 
     def _draw_trajectory(self, screen, world_to_screen_func):
@@ -405,8 +434,15 @@ class Vehicle:
         tire_data = self._calculate_tire_positions()
 
         for world_x, world_y, total_angle in tire_data:
-            # 타이어 회전 및 위치 변환
-            rotated_tire = pygame.transform.rotate(self.tire_surf, degrees(total_angle))
+            # 회전 각도를 정수로 반올림 (캐싱용)
+            angle_deg = int(degrees(total_angle))
+
+            # 캐싱된 이미지 사용
+            if angle_deg not in self._tire_cache:
+                # 타이어 회전 및 위치 변환
+                self._tire_cache[angle_deg] = pygame.transform.rotate(self.tire_surf, angle_deg)
+
+            rotated_tire = self._tire_cache[angle_deg]
             tire_rect = rotated_tire.get_rect(center=world_to_screen_func(world_x, world_y))
             screen.blit(rotated_tire, tire_rect.topleft)
 
