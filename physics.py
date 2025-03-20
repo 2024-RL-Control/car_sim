@@ -229,7 +229,7 @@ class DynamicModel:
 
             # 원심 가속도: a = v²/r
             centripetal_accel = (state.vel ** 2) / R
-            lat_g = np.sign(state.steer) * centripetal_accel / sim_config.GRAVITY
+            lat_g = -np.sign(state.steer) * centripetal_accel / sim_config.GRAVITY
 
             # 물리적 한계 적용 (현실적인 범위로 제한)
             max_lat_g = 1.3  # 고성능 스포츠카 기준
