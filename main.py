@@ -4,74 +4,6 @@ import numpy as np
 from env import CarSimulatorEnv
 
 # ==============
-# Reinforcement Learning (SB3)
-# ==============
-def rl_learn():
-    """강화 학습 수행"""
-    # 환경 초기화
-    env = CarSimulatorEnv()
-    env.reset()
-
-    # 안내 메시지 출력
-    print("=== Vehicle Simulator(RL Learning) ===")
-    print("Controls:")
-    print("  F1: Toggle Environment Rendering")
-    print("  F5: Save state")
-    print("  F9: Load state")
-    print("  ESC: Quit")
-
-# ==============
-# Reinforcement Basic Inference (SB3)
-# ==============
-def rl_test1():
-    """강화 학습 추론(기본)"""
-    # 환경 초기화
-    env = CarSimulatorEnv()
-    env.reset()
-
-    # 안내 메시지 출력
-    print("=== Vehicle Simulator(RL Inference; Basic) ===")
-    print("Controls:")
-    print("  F1: Toggle Environment Rendering")
-    print("  F5: Save state")
-    print("  F9: Load state")
-    print("  ESC: Quit")
-
-# ==============
-# Reinforcement Maze Agent Inference (SB3)
-# ==============
-def rl_test2():
-    """강화 학습 추론(미로 환경)"""
-    # 환경 초기화
-    env = CarSimulatorEnv()
-    env.reset()
-
-    # 안내 메시지 출력
-    print("=== Vehicle Simulator(RL Inference; Maze) ===")
-    print("Controls:")
-    print("  F1: Toggle Environment Rendering")
-    print("  F5: Save state")
-    print("  F9: Load state")
-    print("  ESC: Quit")
-
-# ==============
-# Reinforcement Multi Inference (SB3)
-# ==============
-def rl_test3():
-    """강화 학습 추론(다중 에이전트)"""
-    # 환경 초기화
-    env = CarSimulatorEnv()
-    env.reset()
-
-    # 안내 메시지 출력
-    print("=== Vehicle Simulator(RL Inference; Multi Agent) ===")
-    print("Controls:")
-    print("  F1: Toggle Environment Rendering")
-    print("  F5: Save state")
-    print("  F9: Load state")
-    print("  ESC: Quit")
-
-# ==============
 # Manual Control
 # ==============
 def manual_control():
@@ -124,6 +56,311 @@ def manual_control():
 
     # 환경 종료
     env.close()
+
+# ==============
+# Multi-Vehicle Test
+# ==============
+def multi_vehicle_test():
+    """다중 차량 테스트 모드"""
+    # 두 대의 차량으로 환경 초기화
+    env = CarSimulatorEnv(multi_vehicle=True, num_vehicles=2)
+    env.reset()
+
+    # 안내 메시지 출력
+    print("=== Multi-Vehicle Test ===")
+    print("Controls:")
+    print("  Arrow Keys / WASD: Drive the active vehicle")
+    print("  Tab: Switch between vehicles")
+    print("  Space: Handbrake")
+    print("  T: Toggle tire marks")
+    print("  C: Toggle camera follow")
+    print("  H: Toggle debug info")
+    print("  F: Clear all tire marks")
+    print("  R: Reset camera view")
+    print("  +/-: Zoom in/out")
+    print("  I/J/K/L: Pan camera")
+    print("  F5: Save state")
+    print("  F9: Load state")
+    print("  ESC: Quit")
+
+    # 초기 목적지 생성 (각 차량마다)
+    for i in range(env.num_vehicles):
+        create_random_goal(env, i)
+
+    running = True
+    while running:
+        # 키보드 입력 처리 및 액션 생성
+        action = env.handle_keyboard_input()
+
+        # 환경 스텝
+        _, _, done, info = env.step(action)
+
+        # 목적지 도달 확인 및 새 목적지 생성
+        for i in range(env.num_vehicles):
+            if info['reached_targets'].get(i, False):
+                # 목적지 도달 시 새 목적지 생성
+                create_random_goal(env, i)
+
+        # 렌더링
+        env.render()
+
+        # 이벤트 처리
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+
+        # 충돌로 인한 종료 시 잠시 대기 후 재시작
+        if done:
+            if info.get('collision', False):
+                pygame.time.wait(1000)  # 1초 대기
+                env.reset()
+                # 초기 목적지 다시 생성
+                for i in range(env.num_vehicles):
+                    create_random_goal(env, i)
+
+    # 환경 종료
+    env.close()
+
+def create_random_goal(env, vehicle_id, min_distance=15.0, max_distance=30.0):
+    """
+    지정된 차량에 대한 랜덤 목적지 생성
+
+    Args:
+        env: CarSimulatorEnv 객체
+        vehicle_id: 차량 ID
+        min_distance: 현재 위치로부터 최소 거리 (m)
+        max_distance: 현재 위치로부터 최대 거리 (m)
+    """
+    vehicle = env.vehicles[vehicle_id]
+    goal_manager = env.get_goal_manager()
+
+    # 현재 차량 위치
+    current_x = vehicle.state.x
+    current_y = vehicle.state.y
+
+    # 현재 목적지 정보 (있는 경우)
+    current_goal_id = goal_manager.get_vehicle_goal_id(vehicle_id)
+    if current_goal_id is not None:
+        goal_manager.remove_goal(current_goal_id)
+
+    # 적절한 거리에 새 목적지 생성
+    while True:
+        # 랜덤 방향 (0-2π)
+        angle = np.random.random() * 2 * np.pi
+        # 랜덤 거리 (min_distance-max_distance)
+        distance = min_distance + np.random.random() * (max_distance - min_distance)
+
+        # 새 위치 계산
+        new_x = current_x + distance * np.cos(angle)
+        new_y = current_y + distance * np.sin(angle)
+
+        # 목표 방향 (차량이 도착 시 가질 방향) - 무작위 설정
+        target_yaw = np.random.random() * 2 * np.pi
+
+        # 다른 차량의 목적지와 일정 거리 이상 떨어지게 (충돌 방지)
+        valid_position = True
+        for other_id in range(env.num_vehicles):
+            if other_id == vehicle_id:
+                continue
+
+            other_goal = goal_manager.get_vehicle_goal(other_id)
+            if other_goal:
+                dist_to_other_goal = np.sqrt((new_x - other_goal.x)**2 + (new_y - other_goal.y)**2)
+                if dist_to_other_goal < 10.0:  # 최소 10m 떨어지게
+                    valid_position = False
+                    break
+
+        if valid_position:
+            # 적절한 위치를 찾았으면 목적지 생성
+            goal_color = (0, 255, 0) if vehicle_id == 0 else (255, 255, 0)  # 첫 번째 차량은 녹색, 두 번째는 노란색
+            env.add_goal_for_vehicle(vehicle_id, new_x, new_y, target_yaw, 2.0, goal_color)
+            break
+
+# ==============
+# Waypoint Navigation Test
+# ==============
+def waypoint_navigation_test():
+    """웨이포인트 주행 테스트 모드"""
+    # 환경 초기화
+    env = CarSimulatorEnv()
+    env.reset()
+
+    # 안내 메시지 출력
+    print("=== Waypoint Navigation Test ===")
+    print("Controls:")
+    print("  Arrow Keys / WASD: Drive the vehicle")
+    print("  Space: Handbrake")
+    print("  N: Generate new waypoint sequence")
+    print("  T: Toggle tire marks")
+    print("  C: Toggle camera follow")
+    print("  H: Toggle debug info")
+    print("  F: Clear all tire marks")
+    print("  R: Reset camera view")
+    print("  +/-: Zoom in/out")
+    print("  I/J/K/L: Pan camera")
+    print("  F5: Save state")
+    print("  F9: Load state")
+    print("  ESC: Quit")
+
+    # 웨이포인트 시퀀스 상태 변수들
+    waypoints = []
+    current_waypoint_index = 0
+
+    # 초기 웨이포인트 시퀀스 생성
+    waypoints = create_waypoint_sequence(env)
+    set_next_waypoint(env, waypoints, current_waypoint_index)
+
+    running = True
+    generate_new_waypoints = False
+
+    while running:
+        # 키보드 입력 처리 및 액션 생성
+        action = env.handle_keyboard_input()
+
+        # 이벤트 처리
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
+                elif event.key == pygame.K_n:
+                    # 새 웨이포인트 시퀀스 생성
+                    generate_new_waypoints = True
+
+        # 환경 스텝
+        _, _, done, info = env.step(action)
+
+        # 목적지 도달 확인
+        if info['reached_targets'].get(env.vehicle.id, False):
+            # 다음 웨이포인트로 이동
+            current_waypoint_index += 1
+
+            # 모든 웨이포인트 완료 시 새 시퀀스 생성
+            if current_waypoint_index >= len(waypoints):
+                generate_new_waypoints = True
+            else:
+                set_next_waypoint(env, waypoints, current_waypoint_index)
+
+        # 새 웨이포인트 시퀀스 생성이 필요한 경우
+        if generate_new_waypoints:
+            # 기존 목적지 모두 제거
+            env.get_goal_manager().clear_goals()
+
+            # 새 웨이포인트 시퀀스 생성
+            waypoints = create_waypoint_sequence(env)
+            current_waypoint_index = 0
+            set_next_waypoint(env, waypoints, current_waypoint_index)
+
+            generate_new_waypoints = False
+
+        # 렌더링
+        env.render()
+
+        # 충돌로 인한 종료 시 잠시 대기 후 재시작
+        if done:
+            if info.get('collision', False):
+                pygame.time.wait(1000)  # 1초 대기
+                env.reset()
+
+                # 새 웨이포인트 시퀀스 생성
+                waypoints = create_waypoint_sequence(env)
+                current_waypoint_index = 0
+                set_next_waypoint(env, waypoints, current_waypoint_index)
+
+    # 환경 종료
+    env.close()
+
+def create_waypoint_sequence(env, num_waypoints=5, min_distance=10.0, max_distance=25.0):
+    """
+    웨이포인트 시퀀스 생성
+
+    Args:
+        env: CarSimulatorEnv 객체
+        num_waypoints: 생성할 웨이포인트 수
+        min_distance: 웨이포인트 간 최소 거리 (m)
+        max_distance: 웨이포인트 간 최대 거리 (m)
+
+    Returns:
+        웨이포인트 리스트: [(x, y, yaw), ...]
+    """
+    vehicle = env.vehicle
+    waypoints = []
+
+    # 시작점 (현재 차량 위치)
+    current_x = vehicle.state.x
+    current_y = vehicle.state.y
+
+    for i in range(num_waypoints):
+        # 랜덤 방향 (이전 방향에서 ±90도 이내로 제한하여 자연스러운 경로 생성)
+        if i == 0:
+            # 첫 웨이포인트는 현재 차량 방향 기준 ±45도 내에서 생성
+            base_angle = vehicle.state.yaw
+            angle = base_angle + (np.random.random() - 0.5) * np.pi/2
+        else:
+            # 이전 웨이포인트 방향 기준 ±90도 내에서 생성
+            dx = current_x - waypoints[-1][0]
+            dy = current_y - waypoints[-1][1]
+            base_angle = np.arctan2(dy, dx)
+            angle = base_angle + (np.random.random() - 0.5) * np.pi
+
+        # 랜덤 거리
+        distance = min_distance + np.random.random() * (max_distance - min_distance)
+
+        # 새 위치 계산
+        new_x = current_x + distance * np.cos(angle)
+        new_y = current_y + distance * np.sin(angle)
+
+        # 도착 방향 (다음 웨이포인트를 향하도록, 마지막은 랜덤)
+        if i < num_waypoints - 1:
+            target_yaw = angle
+        else:
+            target_yaw = np.random.random() * 2 * np.pi
+
+        # 웨이포인트 추가
+        waypoints.append((new_x, new_y, target_yaw))
+
+        # 현재 위치 업데이트
+        current_x, current_y = new_x, new_y
+
+    # 모든 웨이포인트를 미리 생성하여 표시 (현재 활성 목표만 활성 색상)
+    goal_manager = env.get_goal_manager()
+
+    for i, (x, y, yaw) in enumerate(waypoints):
+        # 웨이포인트 색상: 비활성 웨이포인트는 회색으로 표시
+        if i > 0:  # 첫 번째 웨이포인트는 set_next_waypoint에서 추가
+            color = (150, 150, 150)  # 회색
+            radius = 1.5  # 기본 반경
+            goal_id = goal_manager.add_goal(x, y, yaw, radius, color)
+
+    return waypoints
+
+def set_next_waypoint(env, waypoints, index):
+    """
+    다음 웨이포인트를 활성 목표로 설정
+
+    Args:
+        env: CarSimulatorEnv 객체
+        waypoints: 웨이포인트 리스트
+        index: 활성화할 웨이포인트 인덱스
+    """
+    if index >= len(waypoints):
+        return
+
+    goal_manager = env.get_goal_manager()
+    vehicle_id = env.vehicle.id
+
+    # 기존 목표가 있으면 제거
+    current_goal_id = goal_manager.get_vehicle_goal_id(vehicle_id)
+    if current_goal_id is not None:
+        goal_manager.remove_goal(current_goal_id)
+
+    # 새 목표 생성 및 활성화
+    x, y, yaw = waypoints[index]
+    new_goal_id = env.add_goal_for_vehicle(vehicle_id, x, y, yaw, 2.0, (0, 255, 0))
 
 # ==============
 # Course Builder Helper Functions
@@ -274,7 +511,9 @@ def show_main_menu():
     menu_items = [
         "1. Manual Driving",
         "2. Obstacle Course Driving",
-        "4. Quit"
+        "3. Multi-Vehicle Test",
+        "4. Waypoint Navigation Test",
+        "5. Quit"
     ]
 
     running = True
@@ -311,7 +550,17 @@ def show_main_menu():
                     pygame.quit()
                     manual_control_with_obstacles()
                     return
-                elif event.key == pygame.K_4 or event.key == pygame.K_ESCAPE:
+                elif event.key == pygame.K_3:
+                    # 다중 차량 테스트 모드
+                    pygame.quit()
+                    multi_vehicle_test()
+                    return
+                elif event.key == pygame.K_4:
+                    # 웨이포인트 주행 테스트 모드
+                    pygame.quit()
+                    waypoint_navigation_test()
+                    return
+                elif event.key == pygame.K_5 or event.key == pygame.K_ESCAPE:
                     # 종료
                     running = False
 

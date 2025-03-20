@@ -545,7 +545,7 @@ class GoalManager:
         self.vehicle_goals = {}  # {vehicle_id: goal_id}
         self.next_goal_id = 0  # 목적지 ID 자동 생성용
 
-    def add_goal(self, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0), is_static=True):
+    def add_goal(self, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
         """
         새 목적지 추가
 
@@ -555,7 +555,6 @@ class GoalManager:
             yaw: 방향각 [rad]
             radius: 목적지 반경
             color: 색상 (RGB)
-            is_static: 정적 목적지 여부 (True: 고정, False: 이동 가능)
 
         Returns:
             goal_id: 생성된 목적지 ID
@@ -563,7 +562,7 @@ class GoalManager:
         goal_id = self.next_goal_id
         self.next_goal_id += 1
 
-        goal = Goal(x, y, yaw, color=color, radius=radius, is_static=is_static)
+        goal = Goal(x, y, yaw, color=color, radius=radius)
         self.goals[goal_id] = goal
 
         return goal_id
@@ -628,6 +627,18 @@ class GoalManager:
             self.vehicle_goals[vehicle_id] = goal_id
             return True
         return False
+
+    def get_goal(self, goal_id):
+        """
+        목적지 객체 반환
+
+        Args:
+            goal_id: 목적지 ID
+
+        Returns:
+            Goal 객체 또는 None
+        """
+        return self.goals.get(goal_id)
 
     def get_vehicle_goal(self, vehicle_id):
         """
