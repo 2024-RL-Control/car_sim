@@ -428,69 +428,77 @@ class Vehicle:
 
     def _calculate_tire_positions(self):
         """각 타이어의 위치 및 각도 계산"""
-        # 캐시 사용 가능한지 확인
-        if (self._tire_positions is not None and
-            self._last_yaw == self.state.yaw and
-            self._last_steer == self.state.steer):
-            return self._tire_positions
+        # 상대 위치 및 각도 캐싱 - yaw와 steer가 변하지 않으면 재사용
+        recalculate_angles = (self._tire_positions is None or
+                              self._last_yaw != self.state.yaw or
+                              self._last_steer != self.state.steer)
 
-        wheelbase = self.config.WHEELBASE
-        track = self.config.TRACK
-        steer = self.state.steer
+        if recalculate_angles:
+            # yaw 또는 steer가 변경되었을 때만 상대 위치 및 각도 재계산
+            wheelbase = self.config.WHEELBASE
+            track = self.config.TRACK
+            steer = self.state.steer
 
-        # 타이어 상대 위치 계산 (차량 좌표계 기준)
-        tire_positions = [
-            ( wheelbase/2,  track/2),  # Front Right
-            ( wheelbase/2, -track/2),  # Front Left
-            (-wheelbase/2,  track/2),  # Rear Right
-            (-wheelbase/2, -track/2)   # Rear Left
-        ]
-
-        # pygame 시각화를 위한 아커만 조향각 계산 (좌/우 앞바퀴 각도 차이 계산)
-        if abs(steer) > 0.001:  # 조향 중일 때만 아커만 계산
-            # 회전 반경 계산 (자전거 모델 기준)
-            R = wheelbase / np.tan(abs(steer))
-
-            # 좌/우 조향각 계산 (아커만 공식)
-            if steer < 0:  # 좌회전
-                steer_inner = np.arctan(wheelbase / (R - track/2))  # 왼쪽 바퀴 (안쪽)
-                steer_outer = np.arctan(wheelbase / (R + track/2))  # 오른쪽 바퀴 (바깥쪽)
-            else:  # 우회전
-                steer_inner = -np.arctan(wheelbase / (R - track/2))  # 오른쪽 바퀴 (안쪽)
-                steer_outer = -np.arctan(wheelbase / (R + track/2))  # 왼쪽 바퀴 (바깥쪽)
-
-            # 조향각 배열 [FR, FL, RR, RL]
-            steer_angles = [
-                steer_outer if steer > 0 else steer_inner,  # 우회전시 바깥쪽, 좌회전시 안쪽
-                steer_inner if steer > 0 else steer_outer,  # 우회전시 안쪽, 좌회전시 바깥쪽
-                0.0,  # 뒷바퀴는 조향 없음
-                0.0   # 뒷바퀴는 조향 없음
+            # 타이어 상대 위치 계산 (차량 좌표계 기준)
+            tire_positions = [
+                ( wheelbase/2,  track/2),  # Front Right
+                ( wheelbase/2, -track/2),  # Front Left
+                (-wheelbase/2,  track/2),  # Rear Right
+                (-wheelbase/2, -track/2)   # Rear Left
             ]
-        else:
-            # 직진 시 모든 바퀴 조향각 0
-            steer_angles = [0.0, 0.0, 0.0, 0.0]
 
-        # 각 타이어의 위치와 각도 계산
+            # pygame 시각화를 위한 아커만 조향각 계산 (좌/우 앞바퀴 각도 차이 계산)
+            if abs(steer) > 0.001:  # 조향 중일 때만 아커만 계산
+                # 회전 반경 계산 (자전거 모델 기준)
+                R = wheelbase / np.tan(abs(steer))
+
+                # 좌/우 조향각 계산 (아커만 공식)
+                if steer < 0:  # 좌회전
+                    steer_inner = np.arctan(wheelbase / (R - track/2))  # 왼쪽 바퀴 (안쪽)
+                    steer_outer = np.arctan(wheelbase / (R + track/2))  # 오른쪽 바퀴 (바깥쪽)
+                else:  # 우회전
+                    steer_inner = -np.arctan(wheelbase / (R - track/2))  # 오른쪽 바퀴 (안쪽)
+                    steer_outer = -np.arctan(wheelbase / (R + track/2))  # 왼쪽 바퀴 (바깥쪽)
+
+                # 조향각 배열 [FR, FL, RR, RL]
+                steer_angles = [
+                    steer_outer if steer > 0 else steer_inner,  # 우회전시 바깥쪽, 좌회전시 안쪽
+                    steer_inner if steer > 0 else steer_outer,  # 우회전시 안쪽, 좌회전시 바깥쪽
+                    0.0,  # 뒷바퀴는 조향 없음
+                    0.0   # 뒷바퀴는 조향 없음
+                ]
+            else:
+                # 직진 시 모든 바퀴 조향각 0
+                steer_angles = [0.0, 0.0, 0.0, 0.0]
+
+            # 회전 및 각도 정보 캐싱
+            self._cached_tire_data = []
+            for i, (dx, dy) in enumerate(tire_positions):
+                # 차량 회전 변환 (상대 좌표)
+                rotated_x = dx * cos(self.state.yaw) - dy * sin(self.state.yaw)
+                rotated_y = dx * sin(self.state.yaw) + dy * cos(self.state.yaw)
+
+                # 타이어 각도 계산 (앞바퀴는 아커만 스티어링 적용)
+                tire_angle = steer_angles[i]
+                total_angle = self.state.yaw + tire_angle
+
+                # 상대 위치와 각도 저장
+                self._cached_tire_data.append((rotated_x, rotated_y, total_angle))
+
+            # 캐싱 상태 업데이트
+            self._last_yaw = self.state.yaw
+            self._last_steer = self.state.steer
+
+        # 월드 좌표 계산 (매 프레임 업데이트)
         result = []
-        for i, (dx, dy) in enumerate(tire_positions):
-            # 차량 회전 변환
-            rotated_x = dx * cos(self.state.yaw) - dy * sin(self.state.yaw)
-            rotated_y = dx * sin(self.state.yaw) + dy * cos(self.state.yaw)
-
-            # 월드 좌표 계산
+        for rotated_x, rotated_y, total_angle in self._cached_tire_data:
+            # 현재 차량 위치에 상대 좌표 더하기
             world_x = self.state.x + rotated_x
             world_y = self.state.y + rotated_y
-
-            # 타이어 각도 계산 (앞바퀴는 아커만 스티어링 적용)
-            tire_angle = steer_angles[i]
-            total_angle = self.state.yaw + tire_angle
-
             result.append((world_x, world_y, total_angle))
 
-        # 계산 결과 캐싱
+        # 최종 결과 저장 (월드 좌표)
         self._tire_positions = result
-        self._last_yaw = self.state.yaw
-        self._last_steer = self.state.steer
 
         return result
 

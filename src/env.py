@@ -428,7 +428,7 @@ class CarSimulatorEnv(gym.Env):
 
         # 카메라 컨트롤
         if pressed[pygame.K_PLUS] or pressed[pygame.K_EQUALS]:
-            self._camera_zoom = min(3.0, self._camera_zoom * 1.05)
+            self._camera_zoom = min(5.0, self._camera_zoom * 1.05)
         if pressed[pygame.K_MINUS]:
             self._camera_zoom = max(0.25, self._camera_zoom / 1.05)
 
