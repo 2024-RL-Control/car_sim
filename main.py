@@ -97,15 +97,9 @@ def manual_control():
     print("  ESC: Quit")
 
     print("=== Vehicle Simulator ===")
-    print("📌 장애물 포함 글로벌 경로 테스트 실행")
-    
-    # 장애물 리스트 추가
-    obstacles = [[200, 200, 50], [400, 300, 50], [600, 150, 70],[100,100,30]] #장애물 3개 통과과
 
-    # ✅ 차량 현재 위치를 start_pos로 설정
-    start_pos = (env.state.x, env.state.y)
-    goal_pos = (1000, 100)
-    env.set_global_path(start_pos, goal_pos, obstacles)
+
+
 
     running = True
     while running:

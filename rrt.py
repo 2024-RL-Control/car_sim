@@ -23,7 +23,7 @@ class RRT:
 
     def get_random_node(self):
         """랜덤 노드 생성 (목표 지점을 샘플링할 확률 포함)"""
-        goal_sample_rate = 5  # 목표 샘플링 확률 (5% 확률로 목표 지점 선택)
+        goal_sample_rate = 10  # 목표 샘플링 확률 (5% 확률로 목표 지점 선택)
 
         if random.randint(0, 100) < goal_sample_rate:
             node = Node(self.goal.x, self.goal.y, self.goal.theta)
@@ -41,11 +41,21 @@ class RRT:
         return min(self.nodes, key=lambda node: np.linalg.norm([node.x - random_node.x, node.y - random_node.y]))
 
     def is_collision(self, node):
-        """노드가 장애물과 충돌하는지 검사 (안전 마진 추가)"""
+        """노드가 장애물과 충돌하는지 검사 (디버깅 기능 추가)"""
         for ox, oy, r in self.obstacles:
-            if np.sqrt((node.x - ox) ** 2 + (node.y - oy) ** 2) < (r + 3.0):  # 안전 마진 추가
-                return True
-        return False
+            dist = np.sqrt((node.x - ox) ** 2 + (node.y - oy) ** 2)
+
+            if dist < (r + 1.0):  # 안전 마진 3.0 추가
+                print(f"🚨 충돌 발생! 노드 위치: ({node.x:.2f}, {node.y:.2f}) 장애물: ({ox:.2f}, {oy:.2f}) 거리: {dist:.2f}")
+
+                # 🔥 충돌 노드 시각화 (빨간색 점)
+                if hasattr(self, 'screen'):
+                    screen_x, screen_y = self._world_to_screen(node.x, node.y)
+                    pygame.draw.circle(self.screen, (255, 0, 0), (screen_x, screen_y), 5)  # 빨간색
+
+                return True  # 충돌 감지
+
+        return False  # 충돌 없음
 
     def get_new_node(self, nearest_node, random_node):
         """새로운 노드 생성 (목표 방향으로 이동)"""
