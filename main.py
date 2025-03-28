@@ -28,12 +28,15 @@ def manual_control():
     print("  F9: Load state")
     print("  ESC: Quit")
 
+    print("=== Vehicle Simulator ===")
+
+
+
+
     running = True
     while running:
-        # 기본 액션: 정지, 직진
         action = np.zeros(2)
 
-        # 이벤트 처리
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -44,17 +47,15 @@ def manual_control():
         # 키보드 입력 처리 및 액션 생성
         action = env.handle_keyboard_input()
 
-        # 환경 스텝
+        # 환경 스텝 실행
         _, _, done, _ = env.step(action)
 
-        # 렌더링
+        # 환경 렌더링
         env.render()
 
-        # 종료 조건
         if done:
             break
 
-    # 환경 종료
     env.close()
 
 # ==============
