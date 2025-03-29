@@ -281,19 +281,18 @@ class Vehicle:
         # 궤적 그리기
         self._draw_trajectory(screen, world_to_screen_func)
 
-        # 차량 센서 그리기
-        self.sensor_manager.draw(screen, world_to_screen_func)
+        # 디버그 모드
+        if self.sim_config.ENABLE_DEBUG_INFO:
+            # 충돌 바디의 경계 원 그리기 메서드 활용
+            self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
+            # 차량 센서 그리기
+            self.sensor_manager.draw(screen, world_to_screen_func, self.sim_config.ENABLE_DEBUG_INFO)
 
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)
 
         # 차체 그리기
         self._draw_body(screen, world_to_screen_func)
-
-        # 디버그 모드: 경계 원 표시
-        if self.sim_config.ENABLE_DEBUG_INFO:
-            # 충돌 바디의 경계 원 그리기 메서드 활용
-            self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
     def _init_sensors(self):
         """기본 센서 초기화 (라이다 등)"""

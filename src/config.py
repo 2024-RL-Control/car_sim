@@ -190,7 +190,7 @@ class LidarConfig(SensorConfig):
     MAX_RANGE: float = 50.0             # 최대 감지 거리 [m]
     MIN_RANGE: float = 0.1              # 최소 감지 거리 [m]
     SCAN_RATE: int = 10                 # 스캔 주기 [Hz]
-    DRAW_RAYS: bool = False              # 레이 시각화 여부
+    DRAW_RAYS: bool = True              # 레이 시각화 여부
     SCAN_HISTORY: int = 10              # 스캔 히스토리 개수
 
     # 노이즈 파라미터

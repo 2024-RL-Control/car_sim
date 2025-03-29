@@ -371,13 +371,13 @@ class LidarSensor(BaseSensor):
         # 센서 본체 그리기
         pygame.draw.circle(screen, (0, 200, 255), sensor_screen_pos, 3)
 
-        # 히스토리 그리기 (있는 경우)
-        if self.scan_history:
-            for scan in self.scan_history:
-                for hit in scan.ranges:
-                    hit_screen_pos = world_to_screen_func(hit.hit_x, hit.hit_y)
-                    # 작은 반투명 점으로 히스토리 표시
-                    pygame.draw.circle(screen, (0, 100, 200, 100), hit_screen_pos, 1)
+        # # 히스토리 그리기 (있는 경우)
+        # if self.scan_history:
+        #     for scan in self.scan_history:
+        #         for hit in scan.ranges:
+        #             hit_screen_pos = world_to_screen_func(hit.hit_x, hit.hit_y)
+        #             # 작은 반투명 점으로 히스토리 표시
+        #             pygame.draw.circle(screen, (0, 100, 200, 100), hit_screen_pos, 1)
 
         # 현재 스캔 결과 그리기
         for i, hit in enumerate(self.current_data.ranges):
@@ -395,20 +395,7 @@ class LidarSensor(BaseSensor):
 
         # 디버그 모드: 추가 정보 표시
         if debug:
-            # 스캔 각도 범위 표시
-            start_angle = self.current_data.sensor_pose[2] + self.angle_start
-            end_angle = self.current_data.sensor_pose[2] + self.angle_end
-            radius = 10  # 각도 표시 아크의 반지름
-
-            # 시작 방향 표시
-            start_dir_x = sensor_screen_pos[0] + radius * np.cos(start_angle)
-            start_dir_y = sensor_screen_pos[1] - radius * np.sin(start_angle)
-            pygame.draw.line(screen, (0, 255, 0), sensor_screen_pos, (start_dir_x, start_dir_y), 2)
-
-            # 종료 방향 표시
-            end_dir_x = sensor_screen_pos[0] + radius * np.cos(end_angle)
-            end_dir_y = sensor_screen_pos[1] - radius * np.sin(end_angle)
-            pygame.draw.line(screen, (0, 255, 0), sensor_screen_pos, (end_dir_x, end_dir_y), 2)
+            pass
 
 # ======================
 # 센서 매니저 구현
