@@ -48,7 +48,6 @@
     "DRAG_COEFF": 0.3,
     "ROLL_RESIST": 0.015,
     "PHYSICS_SUBSTEPS": 4,
-    "ENABLE_TRACK_MARKS": true,
     "ENABLE_DEBUG_INFO": true,
     "CAMERA_FOLLOW": true,
     "TERRAIN_FRICTION": {

@@ -5,7 +5,7 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
-from .physics import DynamicModel
+from .physics import PhysicsEngine
 from .object import RectangleObstacle
 
 # ======================
@@ -18,17 +18,14 @@ class VehicleState:
     x: float = 0.0                 # 글로벌 X 좌표 [m]
     y: float = 0.0                 # 글로벌 Y 좌표 [m]
     yaw: float = pi/2              # 요각 [rad]
-    vel: float = 0.0               # 종방향 속도 [m/s]
-    vel_lateral: float = 0.0       # 횡방향 속도 [m/s] (신규)
+    yaw_rate: float = 0.0          # 요 회전 속도 [rad/s]
+    vel_long: float = 0.0          # 종방향 속도 [m/s]
+    acc_long: float = 0.0          # 종방향 가속도 [m/s²]
+    vel_lat: float = 0.0           # 횡방향 속도 [m/s]
+    acc_lat: float = 0.0           # 횡방향 가속도 [m/s²]
+    throttle: float = 0.0          # 스로틀 [-1, 1]
     steer: float = 0.0             # 조향각 [rad]
-    accel: float = 0.0             # 종방향 가속도 [m/s²]
-    slip_angle: float = 0.0        # 차체 슬립각 [rad]
-    drift_angle: float = 0.0       # 드리프트 각도 [rad]
     g_forces: List[float] = field(default_factory=lambda: [0.0, 0.0])  # [종방향, 횡방향] G-포스
-    trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
-
-    # 환경 속성
-    terrain_type: str = "asphalt"  # 현재 지형 유형
 
     # 목적지 관련 속성
     target_x: float = 0.0         # 목표 X 좌표
@@ -36,6 +33,12 @@ class VehicleState:
     target_yaw: float = 0.0       # 목표 요각
     distance_to_target: float = 0.0  # 목표까지의 거리
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
+
+    # 환경 속성
+    terrain_type: str = "asphalt"  # 현재 지형 유형
+
+    # 차량 궤적
+    trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
@@ -69,7 +72,6 @@ class Vehicle:
             color=self.sim_config.VEHICLE_COLOR
         )
         self.goal_id = None
-        self._track_marks = deque(maxlen=2000)  # 타이어 자국 [(x,y,width), ...]
 
         # 그래픽 리소스 초기화
         self._load_graphics()
@@ -77,18 +79,6 @@ class Vehicle:
     def get_id(self):
         """차량 ID 반환"""
         return self.id
-
-    def set_track_marks(self, track_marks):
-        """타이어 자국 데이터 설정"""
-        self._track_marks = track_marks
-
-    def get_track_marks(self):
-        """타이어 자국 데이터 반환"""
-        return self._track_marks
-
-    def clear_track_marks(self):
-        """모든 타이어 자국 삭제"""
-        self._track_marks.clear()
 
     def set_goal(self, goal_id, goal_manager=None):
         """목적지 ID 설정 및 목적지 정보 업데이트"""
@@ -114,19 +104,15 @@ class Vehicle:
         self._load_graphics()
         self._update_collision_body()
         self.clear_goal()
-        self.clear_track_marks()
 
     def step(self, action, dt):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
-        DynamicModel.apply_forces(self.state, action, dt, self.sim_config, self.config)
+        PhysicsEngine.update(self.state, action, dt, self.sim_config, self.config)
 
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
-
-        # 타이어 자국 업데이트
-        self._update_tire_marks()
 
         return self.state
 
@@ -277,9 +263,6 @@ class Vehicle:
         # 스케일 계산
         self._update_scale(camera_zoom)
 
-        # 타이어 자국 그리기
-        self._draw_tire_marks(screen, world_to_screen_func)
-
         # 궤적 그리기
         self._draw_trajectory(screen, world_to_screen_func)
 
@@ -391,40 +374,11 @@ class Vehicle:
             tire_rect = rotated_tire.get_rect(center=world_to_screen_func(world_x, world_y))
             screen.blit(rotated_tire, tire_rect.topleft)
 
-    def _draw_tire_marks(self, screen, world_to_screen_func):
-        """타이어 자국 그리기 (스케일 적용)"""
-        if not self.sim_config.ENABLE_TRACK_MARKS:
-            return
-
-        # 타이어 자국 렌더링 (모든 자국)
-        for x, y, base_width in self._track_marks:
-            pos = world_to_screen_func(x, y)
-            # 줌 레벨에 맞게 자국 너비 조정
-            adjusted_width = max(1, base_width * self._camera_zoom)
-            pygame.draw.circle(screen, self.sim_config.MARK_COLOR, pos, adjusted_width)
-
     def _draw_body(self, screen, world_to_screen_func):
         """차체 렌더링"""
         rotated_surf = pygame.transform.rotate(self.car_surf, degrees(self.state.yaw))
         rect = rotated_surf.get_rect(center=world_to_screen_func(self.state.x, self.state.y))
         screen.blit(rotated_surf, rect.topleft)
-
-    def _update_tire_marks(self):
-        """타이어 자국 업데이트 - 드리프트 중일 때만 추가"""
-        if not self.sim_config.ENABLE_TRACK_MARKS:
-            return
-
-        # 드리프트 중일 때만 타이어 자국 추가
-        if abs(self.state.drift_angle) > radians(5) and abs(self.state.vel) > 5.0:
-            # 각 타이어 위치 계산
-            tire_positions = self._calculate_tire_positions()
-
-            # 마크 너비는 드리프트 각도에 비례
-            mark_width = max(1, min(5, abs(self.state.drift_angle) * 10))
-
-            # 각 타이어 위치에 자국 추가
-            for world_x, world_y, _ in tire_positions:
-                self._track_marks.append((world_x, world_y, mark_width))
 
     def _calculate_tire_positions(self):
         """각 타이어의 위치 및 각도 계산"""

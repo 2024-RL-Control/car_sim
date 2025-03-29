@@ -101,10 +101,10 @@ class CarSimulatorEnv(gym.Env):
                 dtype=np.float32
             )
 
-            # 관측 공간: [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
+            # 관측 공간: [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
             self.observation_space = spaces.Box(
-                low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -np.pi, -5, -5, 0, -np.pi]),
-                high=np.array([np.inf, np.inf, 1, 1, 60, 10, np.pi, 5, 5, np.inf, np.pi]),
+                low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -5, -5, 0, -np.pi]),
+                high=np.array([np.inf, np.inf, 1, 1, 60, 10, 5, 5, np.inf, np.pi]),
                 dtype=np.float32
             )
         else:
@@ -120,8 +120,8 @@ class CarSimulatorEnv(gym.Env):
             # 다중 차량 관측 공간 - 각 차량마다 별도 관측
             self.observation_space = spaces.Tuple([
                 spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -np.pi, -5, -5, 0, -np.pi]),
-                    high=np.array([np.inf, np.inf, 1, 1, 60, 10, np.pi, 5, 5, np.inf, np.pi]),
+                    low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -5, -5, 0, -np.pi]),
+                    high=np.array([np.inf, np.inf, 1, 1, 60, 10, 5, 5, np.inf, np.pi]),
                     dtype=np.float32
                 ) for _ in range(self.num_vehicles)
             ])
@@ -314,12 +314,9 @@ class CarSimulatorEnv(gym.Env):
         # 기본 정보
         hud = [
             f"Vehicle {self.active_vehicle_idx + 1}/{self.num_vehicles}",
-            f"Velocity: {state.vel:.2f} m/s ({state.vel * 3.6:.1f} km/h)",
-            f"Steering: {np.degrees(state.steer):.1f}°",
-            f"Left wheel: {np.degrees(left_steer):.1f}°, Right wheel: {np.degrees(right_steer):.1f}°",
             f"Position: ({state.x:.1f}, {state.y:.1f})",
             f"Heading: {np.degrees(state.yaw):.1f}°",
-            f"Accel: {state.accel:.2f} m/s²"
+            f"Velocity: {state.vel_long:.2f} m/s ({state.vel_long * 3.6:.1f} km/h)"
         ]
 
         # 목적지 정보 추가
@@ -336,8 +333,12 @@ class CarSimulatorEnv(gym.Env):
         # 디버그 정보 추가
         if self.sim_config.ENABLE_DEBUG_INFO:
             hud.extend([
-                f"Lateral Vel: {state.vel_lateral:.2f} m/s",
-                f"Drift Angle: {np.degrees(state.drift_angle):.1f}°",
+                f"Throttling: {state.throttle:.2f} m/s²",
+                f"Longitude Accel: {state.acc_long:.2f} m/s²",
+                f"Steering: {np.degrees(state.steer):.1f}°",
+                f"Left wheel: {np.degrees(left_steer):.1f}°, Right wheel: {np.degrees(right_steer):.1f}°",
+                f"Lateral Vel: {state.vel_lat:.2f} m/s",
+                f"Lateral Accel: {state.acc_lat:.2f} m/s²",
                 f"G-Forces: Long {state.g_forces[0]:.2f}g, Lat {state.g_forces[1]:.2f}g",
                 f"FPS: {self._performance_metrics['fps']:.1f}",
             ])
@@ -360,7 +361,7 @@ class CarSimulatorEnv(gym.Env):
         self._draw_g_force_meter(self.sim_config.SIM_WIDTH - 90, 20)
 
         # 큰 속도계
-        speed_kmh = state.vel * 3.6
+        speed_kmh = state.vel_long * 3.6
         speed_text = self.large_font.render(f"{speed_kmh:.0f}", True, (255, 255, 255))
         kmh_text = self.font.render("km/h", True, (200, 200, 200))
 
@@ -449,17 +450,11 @@ class CarSimulatorEnv(gym.Env):
             self._camera_offset = (self._camera_offset[0] - pan_speed, self._camera_offset[1])
 
         # 시뮬레이션 설정 토글
-        if pressed[pygame.K_t]:  # 타이어 자국 토글
-            self.sim_config.ENABLE_TRACK_MARKS = not self.sim_config.ENABLE_TRACK_MARKS
-
         if pressed[pygame.K_c]:  # 카메라 추적 토글
             self.sim_config.CAMERA_FOLLOW = not self.sim_config.CAMERA_FOLLOW
 
         if pressed[pygame.K_h]:  # 디버그 정보 토글
             self.sim_config.ENABLE_DEBUG_INFO = not self.sim_config.ENABLE_DEBUG_INFO
-
-        if pressed[pygame.K_f]:  # 모든 자국 지우기
-            self.vehicle.clear_track_marks()
 
         # 저장 및 로드
         if pressed[pygame.K_F5]:  # 상태 저장
@@ -505,16 +500,9 @@ class CarSimulatorEnv(gym.Env):
 
     def _save_state(self):
         """현재 시뮬레이션 상태 저장"""
-        # 타이어 자국을 리스트로 변환 (pickle 직렬화를 위해)
-        track_marks_list = []
-        for v in self.vehicles:
-            # deque 객체를 리스트로 변환
-            track_marks_list.append(list(v.get_track_marks()))
-
         # 차량 상태 및 설정 저장
         save_data = {
             'states': [v.state for v in self.vehicles],
-            'track_marks': track_marks_list,
             'vehicle_configs': [v.config for v in self.vehicles],
             # 목적지 매니저 관련 데이터
             'goals': {gid: {
@@ -551,7 +539,6 @@ class CarSimulatorEnv(gym.Env):
 
             # 차량 상태 복원
             states = save_data.get('states', [])
-            track_marks = save_data.get('track_marks', [])
             vehicle_configs = save_data.get('vehicle_configs', [])
 
             # 불러온 상태 정보에 맞게 차량 수 조정
@@ -568,10 +555,6 @@ class CarSimulatorEnv(gym.Env):
                 )
                 if i < len(states):
                     vehicle.state = states[i]
-                if i < len(track_marks):
-                    # track_marks는 리스트로 저장했으므로, deque로 변환
-                    vehicle_track_marks = deque(track_marks[i], maxlen=2000)
-                    vehicle.set_track_marks(vehicle_track_marks)
                 self.vehicles.append(vehicle)
 
             # 현재 활성 차량 설정
@@ -640,7 +623,7 @@ class CarSimulatorEnv(gym.Env):
                     다중 차량 모드: 차량별 [가속도, 조향] 명령 리스트
 
         Returns:
-            obs: 관측 [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
+            obs: 관측 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
             reward: 보상
             done: 종료 여부
             info: 추가 정보
@@ -809,7 +792,7 @@ class CarSimulatorEnv(gym.Env):
 
     def _get_obs(self):
         """
-        관측 정보 반환 [x, y, cos(yaw), sin(yaw), vel, vel_lateral, drift_angle, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
+        관측 정보 반환 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, g_forces[0], g_forces[1], distance_to_target, yaw_diff_to_target]
         단일 차량: 단일 차량 상태
         다중 차량: 차량별 상태 리스트
         """
@@ -831,9 +814,8 @@ class CarSimulatorEnv(gym.Env):
             state.y,
             cos_yaw,
             sin_yaw,
-            state.vel,
-            state.vel_lateral,
-            state.drift_angle,
+            state.vel_long,
+            state.vel_lat,
             state.g_forces[0],
             state.g_forces[1],
             state.distance_to_target,
@@ -883,7 +865,7 @@ class CarSimulatorEnv(gym.Env):
         state = vehicle.state
 
         # 속도 보상 (최대 속도에 가까울수록 높은 보상)
-        speed_reward = state.vel / vehicle.config.MAX_SPEED * 0.2
+        speed_reward = state.vel_long / vehicle.config.MAX_SPEED * 0.2
 
         # 목표 관련 보상
         goal_reward = 0

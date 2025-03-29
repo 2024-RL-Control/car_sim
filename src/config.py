@@ -105,7 +105,6 @@ class SimConfig:
     PHYSICS_SUBSTEPS: int = 4      # 물리 시뮬레이션 세부 단계
 
     # 시뮬레이션 환경 설정
-    ENABLE_TRACK_MARKS: bool = True  # 타이어 자국 시각화
     ENABLE_DEBUG_INFO: bool = True   # 디버그 정보 표시
     CAMERA_FOLLOW: bool = True       # 카메라가 차량 추적
 
