@@ -124,58 +124,33 @@ class LidarSensor(BaseSensor):
     2D 라이다 센서 클래스
     레이캐스팅을 통한 거리 측정 구현
     """
-    def __init__(self, vehicle,
-                 num_samples=180,         # 샘플(레이) 수
-                 angle_start=-np.pi/2,    # 시작 각도 [rad]
-                 angle_end=np.pi/2,       # 종료 각도 [rad]
-                 max_range=50.0,          # 최대 감지 거리 [m]
-                 min_range=0.1,           # 최소 감지 거리 [m]
-                 scan_rate=10,            # 스캔 주기 [Hz]
-                 relative_pos=(0, 0),     # 차량 기준 상대 위치 [m]
-                 relative_angle=0,        # 차량 기준 상대 각도 [rad]
-                 noise_params=None,       # 노이즈 파라미터
-                 draw_rays=True,          # 레이 시각화 여부
-                 scan_point_history=0):   # 스캔 히스토리 개수
+    def __init__(self, vehicle, config=None):
         """
         라이다 센서 초기화
 
         Args:
             vehicle: 센서가 부착된 차량 객체
-            num_samples: 샘플(레이) 수
-            angle_start: 시작 각도 [rad] (센서 기준 왼쪽)
-            angle_end: 종료 각도 [rad] (센서 기준 오른쪽)
-            max_range: 최대 감지 거리 [m]
-            min_range: 최소 감지 거리 [m]
-            scan_rate: 스캔 주기 [Hz]
-            relative_pos: 차량 중심으로부터의 상대적 위치 (x, y) [m]
-            relative_angle: 차량 방향에 대한 상대적 각도 [rad]
-            noise_params: 노이즈 파라미터 (dict)
-                - gaussian_sigma: 가우시안 노이즈 표준편차 [m]
-                - distance_factor: 거리에 따른 노이즈 증가 계수 [m/m]
-            draw_rays: 레이 시각화 여부
-            scan_point_history: 저장할 스캔 히스토리 개수
+            config: 라이다 설정 객체 (LidarConfig, None이면 기본값 사용)
         """
-        super().__init__(vehicle, relative_pos, relative_angle)
+        self.config = config
+        super().__init__(vehicle, self.config.RELATIVE_POS, self.config.RELATIVE_ANGLE)
 
-        self.num_samples = num_samples
-        self.angle_start = angle_start
-        self.angle_end = angle_end
-        self.max_range = max_range
-        self.min_range = min_range
-        self.scan_rate = scan_rate
-        self.scan_interval = 1.0 / scan_rate if scan_rate > 0 else 0
-        self.draw_rays = draw_rays
+        self.num_samples = self.config.NUM_SAMPLES
+        self.angle_start = self.config.ANGLE_START
+        self.angle_end = self.config.ANGLE_END
+        self.max_range = self.config.MAX_RANGE
+        self.min_range = self.config.MIN_RANGE
+        self.scan_rate = self.config.SCAN_RATE
+        self.scan_interval = 1.0 / self.scan_rate if self.scan_rate > 0 else 0
+        self.draw_rays = self.config.DRAW_RAYS
 
         # 노이즈 파라미터 설정
-        self.noise_params = noise_params or {
-            'gaussian_sigma': 0.05,     # 기본 가우시안 노이즈 표준편차 [m]
-            'distance_factor': 0.01,    # 거리에 따른 노이즈 증가 계수 [m/m]
-        }
+        self.noise_params = self.config.get_noise_params()
 
         # 센서 상태 및 데이터
         self.last_scan_time = 0
         self.current_data = None
-        self.scan_history = deque(maxlen=scan_point_history) if scan_point_history > 0 else None
+        self.scan_history = deque(maxlen=self.config.SCAN_HISTORY) if self.config.SCAN_HISTORY > 0 else None
 
         # 레이 방향 벡터 미리 계산 (최적화)
         self._precompute_ray_directions()

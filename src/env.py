@@ -8,7 +8,7 @@ import pickle
 import os
 from collections import deque
 from math import radians, degrees, pi, cos, sin
-from .config import VehicleConfig, SimConfig
+from .config import VehicleConfig, SimConfig, SensorsConfigManager
 from .vehicle import Vehicle
 from .object import ObstacleManager, GoalManager
 
@@ -32,11 +32,14 @@ class CarSimulatorEnv(gym.Env):
         if config_path:
             sim_config_path = os.path.join(config_path, 'sim_config.json')
             vehicle_config_path = os.path.join(config_path, 'vehicle_config.json')
+            sensor_config_path = os.path.join(config_path, 'sensor_config.json')
             self.sim_config = SimConfig.from_json(sim_config_path)
             self.vehicle_config = VehicleConfig.from_json(vehicle_config_path)
+            self.sensor_config = SensorsConfigManager().load_from_json(sensor_config_path)
         else:
             self.sim_config = SimConfig()
             self.vehicle_config = VehicleConfig()
+            self.sensor_config = SensorsConfigManager().create_default_configs()
 
         # 다중 차량 모드 설정
         self.multi_vehicle = multi_vehicle
@@ -45,7 +48,7 @@ class CarSimulatorEnv(gym.Env):
         # 차량 리스트 생성
         self.vehicles = []
         for i in range(self.num_vehicles):
-            vehicle = Vehicle(vehicle_id=i, vehicle_config=self.vehicle_config, sim_config=self.sim_config)
+            vehicle = Vehicle(vehicle_id=i, vehicle_config=self.vehicle_config, sensors_config=self.sensor_config, sim_config=self.sim_config)
             self.vehicles.append(vehicle)
 
         # 주 차량 설정
@@ -764,7 +767,7 @@ class CarSimulatorEnv(gym.Env):
 
         # 화면 업데이트
         pygame.display.flip()
-        # self.clock.tick(self.sim_config.FPS)  # FPS 제한
+        self.clock.tick(self.sim_config.FPS)  # FPS 제한
 
     def close(self):
         """환경 종료"""

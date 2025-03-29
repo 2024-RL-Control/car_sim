@@ -59,10 +59,11 @@ class VehicleState:
 class Vehicle:
     """차량 모델링, 제어 및 시각화를 담당하는 클래스"""
 
-    def __init__(self, vehicle_id=None, vehicle_config=None, sim_config=None):
+    def __init__(self, vehicle_id=None, vehicle_config=None, sensors_config=None, sim_config=None):
         """차량 객체 초기화"""
         self.id = vehicle_id if vehicle_id is not None else id(self)
         self.config = vehicle_config
+        self.sensors_config = sensors_config
         self.sim_config = sim_config
         self.state = VehicleState()
         self.collision_body = RectangleObstacle(
@@ -75,7 +76,7 @@ class Vehicle:
         self.goal_id = None
 
         self.sensor_manager = SensorManager(self)
-        self._init_default_sensors()
+        self._init_sensors()
 
         # 그래픽 리소스 초기화
         self._load_graphics()
@@ -114,7 +115,7 @@ class Vehicle:
         """차량 상태 초기화"""
         self.state = VehicleState()
         self.sensor_manager = SensorManager(self)
-        self._init_default_sensors()
+        self._init_sensors()
         self._load_graphics()
         self._update_collision_body()
         self.clear_goal()
@@ -294,20 +295,11 @@ class Vehicle:
             # 충돌 바디의 경계 원 그리기 메서드 활용
             self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
-    def _init_default_sensors(self):
+    def _init_sensors(self):
         """기본 센서 초기화 (라이다 등)"""
-        # 중앙앙 라이다 센서 추가
-        self.lidar_id = self.sensor_manager.add_sensor(
-            LidarSensor,
-            num_samples=360,             # 360개의 샘플 (1도 간격)
-            angle_start=-np.pi,          # 왼쪽 180도부터
-            angle_end=np.pi,            # 오른쪽 180도까지
-            max_range=50.0,             # 최대 50m 감지
-            min_range=0.1,              # 최소 0.1m 감지
-            scan_rate=10,               # 초당 10회 스캔
-            relative_pos=(0, 0),        # 중앙 위치
-            draw_rays=False             # 시각화 비활성화
-        )
+        for sensor_id, config in self.sensors_config.items():
+            if config.SENSOR_TYPE == "LIDAR":
+                self.sensor_manager.add_sensor(LidarSensor, config)
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
