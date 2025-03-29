@@ -6,7 +6,7 @@
             0.0
         ],
         "RELATIVE_ANGLE": 0.0,
-        "NUM_SAMPLES": 36,
+        "NUM_SAMPLES": 360,
         "ANGLE_START": -180.0,
         "ANGLE_END": 180.0,
         "MAX_RANGE": 50.0,

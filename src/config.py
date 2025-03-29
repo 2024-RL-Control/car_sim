@@ -40,7 +40,7 @@ class VehicleConfig:
     def from_json(cls, json_path: str) -> 'VehicleConfig':
         """JSON 파일에서 차량 설정 로드"""
         if not os.path.exists(json_path):
-            print(f"설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
+            print(f"차량 설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
             return cls()
 
         try:
@@ -127,7 +127,7 @@ class SimConfig:
     def from_json(cls, json_path: str) -> 'SimConfig':
         """JSON 파일에서 시뮬레이션 설정 로드"""
         if not os.path.exists(json_path):
-            print(f"설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
+            print(f"시뮬레이션 설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
             return cls()
 
         try:
@@ -214,8 +214,8 @@ class SensorsConfigManager:
     def load_from_json(json_path: str) -> Dict[str, SensorConfig]:
         """JSON 파일에서 센서 설정 불러오기"""
         if not os.path.exists(json_path):
-            print(f"센서 설정 파일이 없습니다: {json_path}. 빈 설정을 반환합니다.")
-            return {}
+            print(f"센서 설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
+            return SensorsConfigManager.create_default_configs()
 
         try:
             with open(json_path, 'r', encoding='utf-8') as f:
@@ -238,18 +238,30 @@ class SensorsConfigManager:
                         sensor_data[field] = tuple(sensor_data[field])
 
                 # 센서 타입에 따라 적절한 설정 객체 생성
-                if sensor_type == 'LIDAR':
-                    configs[sensor_id] = LidarConfig(**sensor_data)
-                # 여기에 다른 센서 타입 추가 가능
+                if sensor_type == 'lidar':
+                    # LidarConfig에 허용된 필드 목록
+                    lidar_fields = [
+                        'SENSOR_TYPE', 'RELATIVE_POS', 'RELATIVE_ANGLE',
+                        'NUM_SAMPLES', 'ANGLE_START', 'ANGLE_END',
+                        'MAX_RANGE', 'MIN_RANGE', 'SCAN_RATE',
+                        'DRAW_RAYS', 'SCAN_HISTORY',
+                        'NOISE_GAUSSIAN_SIGMA', 'NOISE_DISTANCE_FACTOR'
+                    ]
+                    # 허용된 필드만 필터링
+                    filtered_data = {k: v for k, v in sensor_data.items() if k in lidar_fields}
+                    configs[sensor_id] = LidarConfig(**filtered_data)
                 else:
-                    # 알 수 없는 타입은 기본 SensorConfig 사용
-                    configs[sensor_id] = SensorConfig(**sensor_data)
+                    # SensorConfig에 허용된 필드 목록
+                    sensor_fields = ['SENSOR_TYPE', 'RELATIVE_POS', 'RELATIVE_ANGLE']
+                    # 허용된 필드만 필터링
+                    filtered_data = {k: v for k, v in sensor_data.items() if k in sensor_fields}
+                    configs[sensor_id] = SensorConfig(**filtered_data)
 
             return configs
 
         except Exception as e:
-            print(f"센서 설정 파일 로드 오류: {e}. 빈 설정을 반환합니다.")
-            return {}
+            print(f"센서 설정 파일 로드 오류: {e}. 기본 설정을 사용합니다.")
+            return SensorsConfigManager.create_default_configs()
 
     @staticmethod
     def save_to_json(configs: Dict[str, SensorConfig], json_path: str) -> bool:

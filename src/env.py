@@ -30,7 +30,7 @@ class CarSimulatorEnv(gym.Env):
         """
         # 설정 객체 초기화
         if config_path:
-            sim_config_path = os.path.join(config_path, 'sim_config.json')
+            sim_config_path = os.path.join(config_path, 'simulation_config.json')
             vehicle_config_path = os.path.join(config_path, 'vehicle_config.json')
             sensor_config_path = os.path.join(config_path, 'sensor_config.json')
             self.sim_config = SimConfig.from_json(sim_config_path)

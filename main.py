@@ -9,7 +9,7 @@ from src.env import CarSimulatorEnv
 def manual_control():
     """키보드로 차량 직접 제어하는 함수"""
     # 환경 초기화
-    env = CarSimulatorEnv()
+    env = CarSimulatorEnv(config_path="./config/")
     env.reset()
 
     # 안내 메시지 출력
