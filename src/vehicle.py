@@ -7,6 +7,7 @@ import pygame
 import numpy as np
 from .physics import PhysicsEngine
 from .object import RectangleObstacle
+from .sensor import SensorManager, LidarSensor
 
 # ======================
 # State Management
@@ -73,8 +74,19 @@ class Vehicle:
         )
         self.goal_id = None
 
+        self.sensor_manager = SensorManager(self)
+        self._init_default_sensors()
+
         # 그래픽 리소스 초기화
         self._load_graphics()
+
+    def get_state(self):
+        """차량 상태 반환"""
+        return self.state
+
+    def get_sensor_manager(self):
+        """센서 관리자 반환"""
+        return self.sensor_manager
 
     def get_id(self):
         """차량 ID 반환"""
@@ -101,6 +113,8 @@ class Vehicle:
     def reset(self):
         """차량 상태 초기화"""
         self.state = VehicleState()
+        self.sensor_manager = SensorManager(self)
+        self._init_default_sensors()
         self._load_graphics()
         self._update_collision_body()
         self.clear_goal()
@@ -266,6 +280,9 @@ class Vehicle:
         # 궤적 그리기
         self._draw_trajectory(screen, world_to_screen_func)
 
+        # 차량 센서 그리기
+        self.sensor_manager.draw(screen, world_to_screen_func)
+
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)
 
@@ -276,6 +293,21 @@ class Vehicle:
         if self.sim_config.ENABLE_DEBUG_INFO:
             # 충돌 바디의 경계 원 그리기 메서드 활용
             self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
+
+    def _init_default_sensors(self):
+        """기본 센서 초기화 (라이다 등)"""
+        # 중앙앙 라이다 센서 추가
+        self.lidar_id = self.sensor_manager.add_sensor(
+            LidarSensor,
+            num_samples=360,             # 360개의 샘플 (1도 간격)
+            angle_start=-np.pi,          # 왼쪽 180도부터
+            angle_end=np.pi,            # 오른쪽 180도까지
+            max_range=50.0,             # 최대 50m 감지
+            min_range=0.1,              # 최소 0.1m 감지
+            scan_rate=10,               # 초당 10회 스캔
+            relative_pos=(0, 0),        # 중앙 위치
+            draw_rays=False             # 시각화 비활성화
+        )
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""

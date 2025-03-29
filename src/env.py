@@ -643,11 +643,16 @@ class CarSimulatorEnv(gym.Env):
         collisions = {}
         reached_targets = {}
 
+        self._time_elapsed = getattr(self, '_time_elapsed', 0) + dt
+
         if self.multi_vehicle:
             # 다중 차량 모드 - action은 차량별 액션 리스트
             for i, vehicle in enumerate(self.vehicles):
                 vehicle_action = action[i] if i < len(action) else np.zeros(2)
                 vehicle.step(vehicle_action, dt)
+
+                # 센서 업데이트
+                vehicle.get_sensor_manager().update(dt, self.obstacle_manager, self._time_elapsed)
 
                 # 충돌 감지
                 collision = vehicle.check_collision(self.obstacle_manager)
@@ -662,6 +667,9 @@ class CarSimulatorEnv(gym.Env):
             # 단일 차량 모드 - action은 단일 차량 액션
             # 현재 차량만 업데이트
             self.vehicle.step(action, dt)
+
+            # 센서 업데이트
+            self.vehicle.get_sensor_manager().update(dt, self.obstacle_manager, self._time_elapsed)
 
             # 충돌 감지
             collision = self.vehicle.check_collision(self.obstacle_manager)
@@ -756,7 +764,7 @@ class CarSimulatorEnv(gym.Env):
 
         # 화면 업데이트
         pygame.display.flip()
-        self.clock.tick(self.sim_config.FPS)  # FPS 제한
+        # self.clock.tick(self.sim_config.FPS)  # FPS 제한
 
     def close(self):
         """환경 종료"""
@@ -805,7 +813,8 @@ class CarSimulatorEnv(gym.Env):
 
     def _get_vehicle_obs(self, vehicle):
         """단일 차량에 대한 관측 정보 반환"""
-        state = vehicle.state
+        state = vehicle.get_state()
+        sensor_manager = vehicle.get_sensor_manager()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
 
         # 기본 차량 상태
