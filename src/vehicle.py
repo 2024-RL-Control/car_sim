@@ -120,18 +120,30 @@ class Vehicle:
         self._update_collision_body()
         self.clear_goal()
 
-    def step(self, action, dt):
+    def step(self, action, dt, time_elapsed, obstacle_manager, goal_manager):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
         PhysicsEngine.update(self.state, action, dt, self.sim_config, self.config)
 
+        # 차량 센서 업데이트
+        self.sensor_manager.update(dt, time_elapsed, obstacle_manager)
+
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
 
-        return self.state
+        # 충돌 검사
+        collision = self._check_collision(obstacle_manager)
 
-    def check_collision(self, obstacle_manager):
+        # 목표 도달 여부 확인
+        goal = goal_manager.get_vehicle_goal(self.id)
+        reached = False
+        if goal:
+            reached = self._check_target_reached()
+
+        return self.state, collision, reached
+
+    def _check_collision(self, obstacle_manager):
         """
         장애물과의 충돌 검사 (3단계 검사)
 
@@ -234,7 +246,7 @@ class Vehicle:
         self.state.target_yaw = yaw
         self._update_target_info()
 
-    def check_target_reached(self, position_tolerance=None, yaw_tolerance=None):
+    def _check_target_reached(self, position_tolerance=None, yaw_tolerance=None):
         """
         목표 위치 도달 여부 확인
 
@@ -278,15 +290,16 @@ class Vehicle:
         # 스케일 계산
         self._update_scale(camera_zoom)
 
-        # 궤적 그리기
-        self._draw_trajectory(screen, world_to_screen_func)
-
         # 디버그 모드
         if self.sim_config.ENABLE_DEBUG_INFO:
-            # 충돌 바디의 경계 원 그리기 메서드 활용
-            self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
             # 차량 센서 그리기
             self.sensor_manager.draw(screen, world_to_screen_func, self.sim_config.ENABLE_DEBUG_INFO)
+
+            # 충돌 바디의 경계 원 그리기 메서드 활용
+            self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
+
+        # 궤적 그리기
+        self._draw_trajectory(screen, world_to_screen_func)
 
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)

@@ -165,14 +165,14 @@ class LidarSensor(BaseSensor):
         self.ray_angles = np.linspace(self.angle_start, self.angle_end, self.num_samples)
         self.ray_directions = np.array([(np.cos(angle), np.sin(angle)) for angle in self.ray_angles])
 
-    def update(self, dt, obstacle_manager=None, time_elapsed=0):
+    def update(self, dt, time_elapsed=0, obstacle_manager=None):
         """
         라이다 센서 업데이트 및 스캔 수행
 
         Args:
             dt: 시간 간격 [s]
-            obstacle_manager: 장애물 관리 객체
             time_elapsed: 시뮬레이션 누적 시간 [s]
+            obstacle_manager: 장애물 관리 객체
 
         Returns:
             측정이 수행되었는지 여부 (Boolean)
@@ -181,7 +181,7 @@ class LidarSensor(BaseSensor):
         if time_elapsed - self.last_scan_time >= self.scan_interval:
             if obstacle_manager:
                 # 스캔 수행
-                self.current_data = self._perform_scan(obstacle_manager, time_elapsed)
+                self.current_data = self._perform_scan(time_elapsed, obstacle_manager)
 
                 # 스캔 결과 히스토리 저장
                 if self.scan_history is not None:
@@ -192,7 +192,7 @@ class LidarSensor(BaseSensor):
 
         return False
 
-    def _perform_scan(self, obstacle_manager, timestamp):
+    def _perform_scan(self, timestamp, obstacle_manager):
         """
         라이다 스캔 수행
 

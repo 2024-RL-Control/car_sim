@@ -82,6 +82,7 @@ class CarSimulatorEnv(gym.Env):
         # 시간 관리 변수
         self._last_update_time = time.time()
         self._frame_times = deque(maxlen=60)  # 최근 60프레임 시간 (FPS 계산용)
+        self._time_elapsed = 0.0  # 경과 시간 (초 단위)
 
         # 키보드 상태 (연속 입력 처리)
         self._keys_pressed = {
@@ -646,43 +647,24 @@ class CarSimulatorEnv(gym.Env):
         collisions = {}
         reached_targets = {}
 
-        self._time_elapsed = getattr(self, '_time_elapsed', 0) + dt
+        self._time_elapsed += dt
 
         if self.multi_vehicle:
             # 다중 차량 모드 - action은 차량별 액션 리스트
             for i, vehicle in enumerate(self.vehicles):
                 vehicle_action = action[i] if i < len(action) else np.zeros(2)
-                vehicle.step(vehicle_action, dt)
+                _, collision, reached = vehicle.step(vehicle_action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager)
 
-                # 센서 업데이트
-                vehicle.get_sensor_manager().update(dt, self.obstacle_manager, self._time_elapsed)
-
-                # 충돌 감지
-                collision = vehicle.check_collision(self.obstacle_manager)
                 collisions[vehicle.id] = collision
-
-                # 목적지 도달 확인
-                goal = self.goal_manager.get_vehicle_goal(vehicle.id)
-                if goal:
-                    reached = vehicle.check_target_reached()
-                    reached_targets[vehicle.id] = reached
+                reached_targets[vehicle.id] = reached
         else:
             # 단일 차량 모드 - action은 단일 차량 액션
             # 현재 차량만 업데이트
-            self.vehicle.step(action, dt)
-
-            # 센서 업데이트
-            self.vehicle.get_sensor_manager().update(dt, self.obstacle_manager, self._time_elapsed)
+            _, collision, reached = self.vehicle.step(action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager)
 
             # 충돌 감지
-            collision = self.vehicle.check_collision(self.obstacle_manager)
             collisions[self.vehicle.id] = collision
-
-            # 목적지 도달 확인
-            goal = self.goal_manager.get_vehicle_goal(self.vehicle.id)
-            if goal:
-                reached = self.vehicle.check_target_reached()
-                reached_targets[self.vehicle.id] = reached
+            reached_targets[self.vehicle.id] = reached
 
         # 물리 시뮬레이션 시간 측정
         self._performance_metrics['physics_time'] = time.time() - physics_start
