@@ -53,6 +53,13 @@ class VehicleState:
         """현재 위치를 궤적에 추가"""
         self.trajectory.append((self.x, self.y))
 
+    def set_position(self, x, y, yaw=None):
+        """차량 위치 및 방향 설정"""
+        self.x = x
+        self.y = y
+        if yaw is not None:
+            self.yaw = self.normalize_angle(yaw)
+
 # ======================
 # Vehicle Model
 # ======================
@@ -92,6 +99,11 @@ class Vehicle:
     def get_id(self):
         """차량 ID 반환"""
         return self.id
+
+    def set_position(self, x, y, yaw = None):
+        """차량 위치 및 방향 설정"""
+        self.state.set_position(x, y, yaw)
+        self._update_collision_body()
 
     def set_goal(self, goal_id, goal_manager=None):
         """목적지 ID 설정 및 목적지 정보 업데이트"""
@@ -156,29 +168,31 @@ class Vehicle:
         # 위치 및 방향 업데이트 (만약 step 이외에서 호출될 경우 대비)
         self._update_collision_body()
 
-        # 장애물이 없으면 충돌 없음
-        if obstacle_manager.get_obstacle_count() == 0 and len(vehicles) == 1:
-            return False
-
-        # 광역 검사 (빠른 제외)
-        obstacle_outer_circles = obstacle_manager.get_all_outer_circles()
-        # 다른 차량의 경계 원 추가
+        # 다른 차량과의 충돌 검사 (외접원만)
+        vehicle_outer_circles = self._get_outer_circles_world()
         if vehicles:
             for vehicle in vehicles:
                 # 자기 자신은 제외
                 if vehicle.id != self.id:
-                    vehicle_circles = vehicle._get_outer_circles_world()
-                    obstacle_outer_circles.extend(vehicle_circles)
+                    other_vehicle_circles = vehicle._get_outer_circles_world()
+                    # 외접원끼리 충돌 시 바로 True 반환
+                    if self._circles_collision(vehicle_outer_circles, other_vehicle_circles):
+                        return True
 
-        vehicle_outer_circles = self._get_outer_circles_world()
-        if not self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
+        # 장애물이 없으면 충돌 없음
+        if obstacle_manager.get_obstacle_count() == 0:
             return False
+
+        # 광역 검사 (빠른 제외)
+        obstacle_outer_circles = obstacle_manager.get_all_outer_circles()
+        if self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
+            return True
 
         # 중간 수준 검사
         obstacle_middle_circles = obstacle_manager.get_all_middle_circles()
         vehicle_middle_circles = self._get_middle_circles_world()
-        if not self._circles_collision(vehicle_middle_circles, obstacle_middle_circles):
-            return False
+        if self._circles_collision(vehicle_middle_circles, obstacle_middle_circles):
+            return True
 
         # 정밀 검사
         obstacle_inner_circles = obstacle_manager.get_all_inner_circles()
@@ -298,10 +312,11 @@ class Vehicle:
         # 스케일 계산
         self._update_scale(camera_zoom)
 
-        # 디버그 모드 - 활성 차량인 경우에만 디버그 정보 표시
-        if self.sim_config.ENABLE_DEBUG_INFO and is_active:
-            # 차량 센서 그리기
-            self.sensor_manager.draw(screen, world_to_screen_func, self.sim_config.ENABLE_DEBUG_INFO)
+        # 디버그 모드 - 활성 차량인 경우에만 센서 시각화
+        if self.sim_config.ENABLE_DEBUG_INFO:
+            if is_active:
+                # 차량 센서 그리기
+                self.sensor_manager.draw(screen, world_to_screen_func, self.sim_config.ENABLE_DEBUG_INFO)
 
             # 충돌 바디의 경계 원 그리기 메서드 활용
             self.collision_body._draw_bounding_circles(screen, world_to_screen_func)

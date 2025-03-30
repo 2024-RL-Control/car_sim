@@ -699,8 +699,9 @@ class CarSimulatorEnv(gym.Env):
     def reset(self):
         """환경 초기화"""
         # 차량 초기화
-        for vehicle in self.vehicles:
+        for i, vehicle in enumerate(self.vehicles):
             vehicle.reset()
+            vehicle.set_position(i*100, 0)  # 차량 초기 위치 설정 (X축으로 간격 두고 배치)
 
         # 상태 기록 초기화
         self._state_history.clear()
