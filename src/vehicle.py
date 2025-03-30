@@ -120,20 +120,20 @@ class Vehicle:
         self._update_collision_body()
         self.clear_goal()
 
-    def step(self, action, dt, time_elapsed, obstacle_manager, goal_manager):
+    def step(self, action, dt, time_elapsed, obstacle_manager, goal_manager, vehicles=None):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
         PhysicsEngine.update(self.state, action, dt, self.sim_config, self.config)
 
-        # 차량 센서 업데이트
-        self.sensor_manager.update(dt, time_elapsed, obstacle_manager)
-
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
 
+        # 차량 센서 업데이트
+        self.sensor_manager.update(dt, time_elapsed, obstacle_manager, vehicles)
+
         # 충돌 검사
-        collision = self._check_collision(obstacle_manager)
+        collision = self._check_collision(obstacle_manager, vehicles)
 
         # 목표 도달 여부 확인
         goal = goal_manager.get_vehicle_goal(self.id)
@@ -143,7 +143,7 @@ class Vehicle:
 
         return self.state, collision, reached
 
-    def _check_collision(self, obstacle_manager):
+    def _check_collision(self, obstacle_manager, vehicles):
         """
         장애물과의 충돌 검사 (3단계 검사)
 
@@ -157,11 +157,19 @@ class Vehicle:
         self._update_collision_body()
 
         # 장애물이 없으면 충돌 없음
-        if obstacle_manager.get_obstacle_count() == 0:
+        if obstacle_manager.get_obstacle_count() == 0 and len(vehicles) == 1:
             return False
 
         # 광역 검사 (빠른 제외)
         obstacle_outer_circles = obstacle_manager.get_all_outer_circles()
+        # 다른 차량의 경계 원 추가
+        if vehicles:
+            for vehicle in vehicles:
+                # 자기 자신은 제외
+                if vehicle.id != self.id:
+                    vehicle_circles = vehicle._get_outer_circles_world()
+                    obstacle_outer_circles.extend(vehicle_circles)
+
         vehicle_outer_circles = self._get_outer_circles_world()
         if not self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
             return False
@@ -285,13 +293,13 @@ class Vehicle:
         self.state.distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
 
-    def draw(self, screen, world_to_screen_func, camera_zoom=1.0):
+    def draw(self, screen, world_to_screen_func, camera_zoom=1.0, is_active=False):
         """차량 및 타이어 렌더링"""
         # 스케일 계산
         self._update_scale(camera_zoom)
 
-        # 디버그 모드
-        if self.sim_config.ENABLE_DEBUG_INFO:
+        # 디버그 모드 - 활성 차량인 경우에만 디버그 정보 표시
+        if self.sim_config.ENABLE_DEBUG_INFO and is_active:
             # 차량 센서 그리기
             self.sensor_manager.draw(screen, world_to_screen_func, self.sim_config.ENABLE_DEBUG_INFO)
 

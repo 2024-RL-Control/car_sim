@@ -165,7 +165,7 @@ class LidarSensor(BaseSensor):
         self.ray_angles = np.linspace(self.angle_start, self.angle_end, self.num_samples)
         self.ray_directions = np.array([(np.cos(angle), np.sin(angle)) for angle in self.ray_angles])
 
-    def update(self, dt, time_elapsed=0, obstacle_manager=None):
+    def update(self, dt, time_elapsed=0, obstacle_manager=None, vehicles=None):
         """
         라이다 센서 업데이트 및 스캔 수행
 
@@ -181,7 +181,7 @@ class LidarSensor(BaseSensor):
         if time_elapsed - self.last_scan_time >= self.scan_interval:
             if obstacle_manager:
                 # 스캔 수행
-                self.current_data = self._perform_scan(time_elapsed, obstacle_manager)
+                self.current_data = self._perform_scan(time_elapsed, obstacle_manager, vehicles)
 
                 # 스캔 결과 히스토리 저장
                 if self.scan_history is not None:
@@ -192,7 +192,7 @@ class LidarSensor(BaseSensor):
 
         return False
 
-    def _perform_scan(self, timestamp, obstacle_manager):
+    def _perform_scan(self, timestamp, obstacle_manager, vehicles):
         """
         라이다 스캔 수행
 
@@ -211,6 +211,14 @@ class LidarSensor(BaseSensor):
 
         # 장애물 목록 가져오기
         obstacles = obstacle_manager.get_all_outer_circles()
+
+        # 다른 차량의 경계 원 추가
+        if vehicles:
+            for vehicle in vehicles:
+                # 자기 자신은 제외
+                if vehicle.id != self.vehicle.id:
+                    vehicle_circles = vehicle._get_outer_circles_world()
+                    obstacles.extend(vehicle_circles)
 
         # 각 레이에 대해 가장 가까운 충돌 지점 찾기
         for i, (local_angle, ray_dir) in enumerate(zip(self.ray_angles, self.ray_directions)):
@@ -479,7 +487,7 @@ class SensorManager:
         """
         return self.sensors.get(sensor_id)
 
-    def update(self, dt, obstacle_manager=None, time_elapsed=0):
+    def update(self, dt, time_elapsed=0, obstacle_manager=None, other_vehicles=None):
         """
         모든 센서 업데이트
 
@@ -489,7 +497,7 @@ class SensorManager:
             time_elapsed: 시뮬레이션 누적 시간 [s]
         """
         for sensor in self.sensors.values():
-            sensor.update(dt, obstacle_manager, time_elapsed)
+            sensor.update(dt, time_elapsed, obstacle_manager, other_vehicles)
 
     def draw(self, screen, world_to_screen_func, debug=False):
         """

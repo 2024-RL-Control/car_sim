@@ -653,14 +653,14 @@ class CarSimulatorEnv(gym.Env):
             # 다중 차량 모드 - action은 차량별 액션 리스트
             for i, vehicle in enumerate(self.vehicles):
                 vehicle_action = action[i] if i < len(action) else np.zeros(2)
-                _, collision, reached = vehicle.step(vehicle_action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager)
+                _, collision, reached = vehicle.step(vehicle_action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager, self.vehicles)
 
                 collisions[vehicle.id] = collision
                 reached_targets[vehicle.id] = reached
         else:
             # 단일 차량 모드 - action은 단일 차량 액션
             # 현재 차량만 업데이트
-            _, collision, reached = self.vehicle.step(action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager)
+            _, collision, reached = self.vehicle.step(action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager, self.vehicles)
 
             # 충돌 감지
             collisions[self.vehicle.id] = collision
@@ -736,7 +736,8 @@ class CarSimulatorEnv(gym.Env):
 
         # 모든 차량 그리기
         for vehicle in self.vehicles:
-            vehicle.draw(self.screen, self._world_to_screen, self._camera_zoom)
+            is_active = (vehicle.id == self.vehicles[self.active_vehicle_idx].id)
+            vehicle.draw(self.screen, self._world_to_screen, self._camera_zoom, is_active)
 
         # HUD 표시
         self._draw_hud()
