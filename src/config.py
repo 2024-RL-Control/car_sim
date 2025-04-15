@@ -1,6 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
-from typing import Dict
+from typing import Dict, Tuple
 from math import radians, degrees
 import json
 import os
@@ -40,7 +40,7 @@ class VehicleConfig:
     def from_json(cls, json_path: str) -> 'VehicleConfig':
         """JSON 파일에서 차량 설정 로드"""
         if not os.path.exists(json_path):
-            print(f"설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
+            print(f"차량 설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
             return cls()
 
         try:
@@ -105,7 +105,6 @@ class SimConfig:
     PHYSICS_SUBSTEPS: int = 4      # 물리 시뮬레이션 세부 단계
 
     # 시뮬레이션 환경 설정
-    ENABLE_TRACK_MARKS: bool = True  # 타이어 자국 시각화
     ENABLE_DEBUG_INFO: bool = True   # 디버그 정보 표시
     CAMERA_FOLLOW: bool = True       # 카메라가 차량 추적
 
@@ -128,7 +127,7 @@ class SimConfig:
     def from_json(cls, json_path: str) -> 'SimConfig':
         """JSON 파일에서 시뮬레이션 설정 로드"""
         if not os.path.exists(json_path):
-            print(f"설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
+            print(f"시뮬레이션 설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
             return cls()
 
         try:
@@ -170,6 +169,141 @@ class SimConfig:
         """지형 유형에 따른 마찰 계수 반환"""
         return self.TERRAIN_FRICTION.get(terrain_type, 1.0)  # 기본값은 아스팔트
 
+# ======================
+# 센서 설정
+# ======================
+@dataclass
+class SensorConfig:
+    """센서 기본 설정 클래스"""
+    # 센서 식별 및 위치 설정
+    SENSOR_TYPE: str = "BASE"               # 센서 유형
+    RELATIVE_POS: Tuple[float, float] = (0.0, 0.0)  # 차량 중심 기준 상대 위치 [m]
+    RELATIVE_ANGLE: float = 0.0             # 차량 방향 기준 상대 각도 [rad]
+
+@dataclass
+class LidarConfig(SensorConfig):
+    """라이다 센서 설정 클래스"""
+    SENSOR_TYPE: str = "LIDAR"
+    NUM_SAMPLES: int = 360               # 샘플(레이) 수
+    ANGLE_START: float = -radians(180)  # 시작 각도 [rad] (기본: -180도)
+    ANGLE_END: float = radians(180)     # 종료 각도 [rad] (기본: 180도)
+    MAX_RANGE: float = 50.0             # 최대 감지 거리 [m]
+    MIN_RANGE: float = 0.1              # 최소 감지 거리 [m]
+    SCAN_RATE: int = 10                 # 스캔 주기 [Hz]
+    DRAW_RAYS: bool = True              # 레이 시각화 여부
+    SCAN_HISTORY: int = 10              # 스캔 히스토리 개수
+
+    # 노이즈 파라미터
+    NOISE_GAUSSIAN_SIGMA: float = 0.05  # 가우시안 노이즈 표준편차 [m]
+    NOISE_DISTANCE_FACTOR: float = 0.01 # 거리에 따른 노이즈 증가 계수 [m/m]
+
+    def get_noise_params(self) -> Dict[str, float]:
+        """노이즈 파라미터 딕셔너리 반환"""
+        return {
+            'gaussian_sigma': self.NOISE_GAUSSIAN_SIGMA,
+            'distance_factor': self.NOISE_DISTANCE_FACTOR
+        }
+
+# ======================
+# 센서 설정 관리
+# ======================
+class SensorsConfigManager:
+    """센서 설정을 저장하고 불러오는 클래스"""
+
+    @staticmethod
+    def load_from_json(json_path: str) -> Dict[str, SensorConfig]:
+        """JSON 파일에서 센서 설정 불러오기"""
+        if not os.path.exists(json_path):
+            print(f"센서 설정 파일이 없습니다: {json_path}. 기본 설정을 사용합니다.")
+            return SensorsConfigManager.create_default_configs()
+
+        try:
+            with open(json_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # 센서 설정 딕셔너리 생성
+            configs = {}
+
+            for sensor_id, sensor_data in data.items():
+                sensor_type = sensor_data.get('SENSOR_TYPE', '').lower()
+
+                # 라디안 변환이 필요한 필드
+                for field in ['RELATIVE_ANGLE', 'ANGLE_START', 'ANGLE_END']:
+                    if field in sensor_data and isinstance(sensor_data[field], (int, float)):
+                        sensor_data[field] = radians(sensor_data[field])
+
+                # 튜플 변환이 필요한 필드
+                for field in ['RELATIVE_POS']:
+                    if field in sensor_data and isinstance(sensor_data[field], list):
+                        sensor_data[field] = tuple(sensor_data[field])
+
+                # 센서 타입에 따라 적절한 설정 객체 생성
+                if sensor_type == 'lidar':
+                    # LidarConfig에 허용된 필드 목록
+                    lidar_fields = [
+                        'SENSOR_TYPE', 'RELATIVE_POS', 'RELATIVE_ANGLE',
+                        'NUM_SAMPLES', 'ANGLE_START', 'ANGLE_END',
+                        'MAX_RANGE', 'MIN_RANGE', 'SCAN_RATE',
+                        'DRAW_RAYS', 'SCAN_HISTORY',
+                        'NOISE_GAUSSIAN_SIGMA', 'NOISE_DISTANCE_FACTOR'
+                    ]
+                    # 허용된 필드만 필터링
+                    filtered_data = {k: v for k, v in sensor_data.items() if k in lidar_fields}
+                    configs[sensor_id] = LidarConfig(**filtered_data)
+                else:
+                    # SensorConfig에 허용된 필드 목록
+                    sensor_fields = ['SENSOR_TYPE', 'RELATIVE_POS', 'RELATIVE_ANGLE']
+                    # 허용된 필드만 필터링
+                    filtered_data = {k: v for k, v in sensor_data.items() if k in sensor_fields}
+                    configs[sensor_id] = SensorConfig(**filtered_data)
+
+            return configs
+
+        except Exception as e:
+            print(f"센서 설정 파일 로드 오류: {e}. 기본 설정을 사용합니다.")
+            return SensorsConfigManager.create_default_configs()
+
+    @staticmethod
+    def save_to_json(configs: Dict[str, SensorConfig], json_path: str) -> bool:
+        """센서 설정을 JSON 파일로 저장"""
+        try:
+            data = {}
+
+            for sensor_id, config in configs.items():
+                config_data = {}
+
+                for key, value in config.__dict__.items():
+                    # 튜플을 리스트로 변환
+                    if isinstance(value, tuple):
+                        config_data[key] = list(value)
+                    # 라디안을 도로 변환
+                    elif key in ['RELATIVE_ANGLE', 'ANGLE_START', 'ANGLE_END'] and isinstance(value, (int, float)):
+                        config_data[key] = degrees(value)
+                    else:
+                        config_data[key] = value
+
+                data[sensor_id] = config_data
+
+            os.makedirs(os.path.dirname(json_path), exist_ok=True)
+            with open(json_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=4)
+
+            return True
+
+        except Exception as e:
+            print(f"센서 설정 파일 저장 오류: {e}")
+            return False
+
+    @staticmethod
+    def create_default_configs() -> Dict[str, SensorConfig]:
+        """기본 센서 설정 생성"""
+        configs = {}
+
+        # 기본 라이다
+        lidar_config = LidarConfig()
+        configs['0'] = lidar_config
+
+        return configs
 
 if __name__ == "__main__":
     # 차량 설정 저장
@@ -179,3 +313,7 @@ if __name__ == "__main__":
     # 시뮬레이션 설정 저장
     sim_config = SimConfig()
     sim_config.to_json("config/simulation_config.json")
+
+    # 센서 설정 저장
+    sensor_config = SensorsConfigManager.create_default_configs()
+    SensorsConfigManager.save_to_json(sensor_config, "config/sensor_config.json")

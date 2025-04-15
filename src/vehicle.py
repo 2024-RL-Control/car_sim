@@ -5,8 +5,9 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
-from .physics import DynamicModel
+from .physics import PhysicsEngine
 from .object import RectangleObstacle
+from .sensor import SensorManager, LidarSensor
 
 # ======================
 # State Management
@@ -18,17 +19,14 @@ class VehicleState:
     x: float = 0.0                 # 글로벌 X 좌표 [m]
     y: float = 0.0                 # 글로벌 Y 좌표 [m]
     yaw: float = pi/2              # 요각 [rad]
-    vel: float = 0.0               # 종방향 속도 [m/s]
-    vel_lateral: float = 0.0       # 횡방향 속도 [m/s] (신규)
+    yaw_rate: float = 0.0          # 요 회전 속도 [rad/s]
+    vel_long: float = 0.0          # 종방향 속도 [m/s]
+    acc_long: float = 0.0          # 종방향 가속도 [m/s²]
+    vel_lat: float = 0.0           # 횡방향 속도 [m/s]
+    acc_lat: float = 0.0           # 횡방향 가속도 [m/s²]
+    throttle: float = 0.0          # 스로틀 [-1, 1]
     steer: float = 0.0             # 조향각 [rad]
-    accel: float = 0.0             # 종방향 가속도 [m/s²]
-    slip_angle: float = 0.0        # 차체 슬립각 [rad]
-    drift_angle: float = 0.0       # 드리프트 각도 [rad]
     g_forces: List[float] = field(default_factory=lambda: [0.0, 0.0])  # [종방향, 횡방향] G-포스
-    trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
-
-    # 환경 속성
-    terrain_type: str = "asphalt"  # 현재 지형 유형
 
     # 목적지 관련 속성
     target_x: float = 0.0         # 목표 X 좌표
@@ -36,6 +34,12 @@ class VehicleState:
     target_yaw: float = 0.0       # 목표 요각
     distance_to_target: float = 0.0  # 목표까지의 거리
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
+
+    # 환경 속성
+    terrain_type: str = "asphalt"  # 현재 지형 유형
+
+    # 차량 궤적
+    trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
@@ -49,16 +53,24 @@ class VehicleState:
         """현재 위치를 궤적에 추가"""
         self.trajectory.append((self.x, self.y))
 
+    def set_position(self, x, y, yaw=None):
+        """차량 위치 및 방향 설정"""
+        self.x = x
+        self.y = y
+        if yaw is not None:
+            self.yaw = self.normalize_angle(yaw)
+
 # ======================
 # Vehicle Model
 # ======================
 class Vehicle:
     """차량 모델링, 제어 및 시각화를 담당하는 클래스"""
 
-    def __init__(self, vehicle_id=None, vehicle_config=None, sim_config=None):
+    def __init__(self, vehicle_id=None, vehicle_config=None, sensors_config=None, sim_config=None):
         """차량 객체 초기화"""
         self.id = vehicle_id if vehicle_id is not None else id(self)
         self.config = vehicle_config
+        self.sensors_config = sensors_config
         self.sim_config = sim_config
         self.state = VehicleState()
         self.collision_body = RectangleObstacle(
@@ -69,26 +81,29 @@ class Vehicle:
             color=self.sim_config.VEHICLE_COLOR
         )
         self.goal_id = None
-        self._track_marks = deque(maxlen=2000)  # 타이어 자국 [(x,y,width), ...]
+
+        self.sensor_manager = SensorManager(self)
+        self._init_sensors()
 
         # 그래픽 리소스 초기화
         self._load_graphics()
+
+    def get_state(self):
+        """차량 상태 반환"""
+        return self.state
+
+    def get_sensor_manager(self):
+        """센서 관리자 반환"""
+        return self.sensor_manager
 
     def get_id(self):
         """차량 ID 반환"""
         return self.id
 
-    def set_track_marks(self, track_marks):
-        """타이어 자국 데이터 설정"""
-        self._track_marks = track_marks
-
-    def get_track_marks(self):
-        """타이어 자국 데이터 반환"""
-        return self._track_marks
-
-    def clear_track_marks(self):
-        """모든 타이어 자국 삭제"""
-        self._track_marks.clear()
+    def set_position(self, x, y, yaw = None):
+        """차량 위치 및 방향 설정"""
+        self.state.set_position(x, y, yaw)
+        self._update_collision_body()
 
     def set_goal(self, goal_id, goal_manager=None):
         """목적지 ID 설정 및 목적지 정보 업데이트"""
@@ -111,26 +126,36 @@ class Vehicle:
     def reset(self):
         """차량 상태 초기화"""
         self.state = VehicleState()
+        self.sensor_manager = SensorManager(self)
+        self._init_sensors()
         self._load_graphics()
         self._update_collision_body()
         self.clear_goal()
-        self.clear_track_marks()
 
-    def step(self, action, dt):
+    def step(self, action, dt, time_elapsed, obstacle_manager, goal_manager, vehicles=None):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
-        DynamicModel.apply_forces(self.state, action, dt, self.sim_config, self.config)
+        PhysicsEngine.update(self.state, action, dt, self.sim_config, self.config)
 
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
 
-        # 타이어 자국 업데이트
-        self._update_tire_marks()
+        # 차량 센서 업데이트
+        self.sensor_manager.update(dt, time_elapsed, obstacle_manager, vehicles)
 
-        return self.state
+        # 충돌 검사
+        collision = self._check_collision(obstacle_manager, vehicles)
 
-    def check_collision(self, obstacle_manager):
+        # 목표 도달 여부 확인
+        goal = goal_manager.get_vehicle_goal(self.id)
+        reached = False
+        if goal:
+            reached = self._check_target_reached()
+
+        return self.state, collision, reached
+
+    def _check_collision(self, obstacle_manager, vehicles):
         """
         장애물과의 충돌 검사 (3단계 검사)
 
@@ -143,21 +168,31 @@ class Vehicle:
         # 위치 및 방향 업데이트 (만약 step 이외에서 호출될 경우 대비)
         self._update_collision_body()
 
+        # 다른 차량과의 충돌 검사 (외접원만)
+        vehicle_outer_circles = self._get_outer_circles_world()
+        if vehicles:
+            for vehicle in vehicles:
+                # 자기 자신은 제외
+                if vehicle.id != self.id:
+                    other_vehicle_circles = vehicle._get_outer_circles_world()
+                    # 외접원끼리 충돌 시 바로 True 반환
+                    if self._circles_collision(vehicle_outer_circles, other_vehicle_circles):
+                        return True
+
         # 장애물이 없으면 충돌 없음
         if obstacle_manager.get_obstacle_count() == 0:
             return False
 
         # 광역 검사 (빠른 제외)
         obstacle_outer_circles = obstacle_manager.get_all_outer_circles()
-        vehicle_outer_circles = self._get_outer_circles_world()
-        if not self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
-            return False
+        if self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
+            return True
 
         # 중간 수준 검사
         obstacle_middle_circles = obstacle_manager.get_all_middle_circles()
         vehicle_middle_circles = self._get_middle_circles_world()
-        if not self._circles_collision(vehicle_middle_circles, obstacle_middle_circles):
-            return False
+        if self._circles_collision(vehicle_middle_circles, obstacle_middle_circles):
+            return True
 
         # 정밀 검사
         obstacle_inner_circles = obstacle_manager.get_all_inner_circles()
@@ -233,7 +268,7 @@ class Vehicle:
         self.state.target_yaw = yaw
         self._update_target_info()
 
-    def check_target_reached(self, position_tolerance=None, yaw_tolerance=None):
+    def _check_target_reached(self, position_tolerance=None, yaw_tolerance=None):
         """
         목표 위치 도달 여부 확인
 
@@ -272,13 +307,19 @@ class Vehicle:
         self.state.distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
 
-    def draw(self, screen, world_to_screen_func, camera_zoom=1.0):
+    def draw(self, screen, world_to_screen_func, camera_zoom=1.0, is_active=False):
         """차량 및 타이어 렌더링"""
         # 스케일 계산
         self._update_scale(camera_zoom)
 
-        # 타이어 자국 그리기
-        self._draw_tire_marks(screen, world_to_screen_func)
+        # 디버그 모드 - 활성 차량인 경우에만 센서 시각화
+        if self.sim_config.ENABLE_DEBUG_INFO:
+            if is_active:
+                # 차량 센서 그리기
+                self.sensor_manager.draw(screen, world_to_screen_func, self.sim_config.ENABLE_DEBUG_INFO)
+
+            # 충돌 바디의 경계 원 그리기 메서드 활용
+            self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
         # 궤적 그리기
         self._draw_trajectory(screen, world_to_screen_func)
@@ -289,10 +330,11 @@ class Vehicle:
         # 차체 그리기
         self._draw_body(screen, world_to_screen_func)
 
-        # 디버그 모드: 경계 원 표시
-        if self.sim_config.ENABLE_DEBUG_INFO:
-            # 충돌 바디의 경계 원 그리기 메서드 활용
-            self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
+    def _init_sensors(self):
+        """기본 센서 초기화 (라이다 등)"""
+        for sensor_id, config in self.sensors_config.items():
+            if config.SENSOR_TYPE == "LIDAR":
+                self.sensor_manager.add_sensor(LidarSensor, config)
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
@@ -391,106 +433,85 @@ class Vehicle:
             tire_rect = rotated_tire.get_rect(center=world_to_screen_func(world_x, world_y))
             screen.blit(rotated_tire, tire_rect.topleft)
 
-    def _draw_tire_marks(self, screen, world_to_screen_func):
-        """타이어 자국 그리기 (스케일 적용)"""
-        if not self.sim_config.ENABLE_TRACK_MARKS:
-            return
-
-        # 타이어 자국 렌더링 (모든 자국)
-        for x, y, base_width in self._track_marks:
-            pos = world_to_screen_func(x, y)
-            # 줌 레벨에 맞게 자국 너비 조정
-            adjusted_width = max(1, base_width * self._camera_zoom)
-            pygame.draw.circle(screen, self.sim_config.MARK_COLOR, pos, adjusted_width)
-
     def _draw_body(self, screen, world_to_screen_func):
         """차체 렌더링"""
         rotated_surf = pygame.transform.rotate(self.car_surf, degrees(self.state.yaw))
         rect = rotated_surf.get_rect(center=world_to_screen_func(self.state.x, self.state.y))
         screen.blit(rotated_surf, rect.topleft)
 
-    def _update_tire_marks(self):
-        """타이어 자국 업데이트 - 드리프트 중일 때만 추가"""
-        if not self.sim_config.ENABLE_TRACK_MARKS:
-            return
-
-        # 드리프트 중일 때만 타이어 자국 추가
-        if abs(self.state.drift_angle) > radians(5) and abs(self.state.vel) > 5.0:
-            # 각 타이어 위치 계산
-            tire_positions = self._calculate_tire_positions()
-
-            # 마크 너비는 드리프트 각도에 비례
-            mark_width = max(1, min(5, abs(self.state.drift_angle) * 10))
-
-            # 각 타이어 위치에 자국 추가
-            for world_x, world_y, _ in tire_positions:
-                self._track_marks.append((world_x, world_y, mark_width))
-
     def _calculate_tire_positions(self):
         """각 타이어의 위치 및 각도 계산"""
-        # 캐시 사용 가능한지 확인
-        if (self._tire_positions is not None and
-            self._last_yaw == self.state.yaw and
-            self._last_steer == self.state.steer):
-            return self._tire_positions
+        # 상대 위치 및 각도 캐싱 - yaw와 steer가 변하지 않으면 재사용
+        recalculate_angles = (self._tire_positions is None or
+                              self._last_yaw != self.state.yaw or
+                              self._last_steer != self.state.steer)
 
-        wheelbase = self.config.WHEELBASE
-        track = self.config.TRACK
-        steer = self.state.steer
+        if recalculate_angles:
+            # yaw 또는 steer가 변경되었을 때만 상대 위치 및 각도 재계산
+            wheelbase = self.config.WHEELBASE
+            track = self.config.TRACK
+            steer = self.state.steer
 
-        # 타이어 상대 위치 계산 (차량 좌표계 기준)
-        tire_positions = [
-            ( wheelbase/2,  track/2),  # Front Right
-            ( wheelbase/2, -track/2),  # Front Left
-            (-wheelbase/2,  track/2),  # Rear Right
-            (-wheelbase/2, -track/2)   # Rear Left
-        ]
-
-        # pygame 시각화를 위한 아커만 조향각 계산 (좌/우 앞바퀴 각도 차이 계산)
-        if abs(steer) > 0.001:  # 조향 중일 때만 아커만 계산
-            # 회전 반경 계산 (자전거 모델 기준)
-            R = wheelbase / np.tan(abs(steer))
-
-            # 좌/우 조향각 계산 (아커만 공식)
-            if steer < 0:  # 좌회전
-                steer_inner = np.arctan(wheelbase / (R - track/2))  # 왼쪽 바퀴 (안쪽)
-                steer_outer = np.arctan(wheelbase / (R + track/2))  # 오른쪽 바퀴 (바깥쪽)
-            else:  # 우회전
-                steer_inner = -np.arctan(wheelbase / (R - track/2))  # 오른쪽 바퀴 (안쪽)
-                steer_outer = -np.arctan(wheelbase / (R + track/2))  # 왼쪽 바퀴 (바깥쪽)
-
-            # 조향각 배열 [FR, FL, RR, RL]
-            steer_angles = [
-                steer_outer if steer > 0 else steer_inner,  # 우회전시 바깥쪽, 좌회전시 안쪽
-                steer_inner if steer > 0 else steer_outer,  # 우회전시 안쪽, 좌회전시 바깥쪽
-                0.0,  # 뒷바퀴는 조향 없음
-                0.0   # 뒷바퀴는 조향 없음
+            # 타이어 상대 위치 계산 (차량 좌표계 기준)
+            tire_positions = [
+                ( wheelbase/2,  track/2),  # Front Right
+                ( wheelbase/2, -track/2),  # Front Left
+                (-wheelbase/2,  track/2),  # Rear Right
+                (-wheelbase/2, -track/2)   # Rear Left
             ]
-        else:
-            # 직진 시 모든 바퀴 조향각 0
-            steer_angles = [0.0, 0.0, 0.0, 0.0]
 
-        # 각 타이어의 위치와 각도 계산
+            # pygame 시각화를 위한 아커만 조향각 계산 (좌/우 앞바퀴 각도 차이 계산)
+            if abs(steer) > 0.001:  # 조향 중일 때만 아커만 계산
+                # 회전 반경 계산 (자전거 모델 기준)
+                R = wheelbase / np.tan(abs(steer))
+
+                # 좌/우 조향각 계산 (아커만 공식)
+                if steer < 0:  # 좌회전
+                    steer_inner = np.arctan(wheelbase / (R - track/2))  # 왼쪽 바퀴 (안쪽)
+                    steer_outer = np.arctan(wheelbase / (R + track/2))  # 오른쪽 바퀴 (바깥쪽)
+                else:  # 우회전
+                    steer_inner = -np.arctan(wheelbase / (R - track/2))  # 오른쪽 바퀴 (안쪽)
+                    steer_outer = -np.arctan(wheelbase / (R + track/2))  # 왼쪽 바퀴 (바깥쪽)
+
+                # 조향각 배열 [FR, FL, RR, RL]
+                steer_angles = [
+                    steer_outer if steer > 0 else steer_inner,  # 우회전시 바깥쪽, 좌회전시 안쪽
+                    steer_inner if steer > 0 else steer_outer,  # 우회전시 안쪽, 좌회전시 바깥쪽
+                    0.0,  # 뒷바퀴는 조향 없음
+                    0.0   # 뒷바퀴는 조향 없음
+                ]
+            else:
+                # 직진 시 모든 바퀴 조향각 0
+                steer_angles = [0.0, 0.0, 0.0, 0.0]
+
+            # 회전 및 각도 정보 캐싱
+            self._cached_tire_data = []
+            for i, (dx, dy) in enumerate(tire_positions):
+                # 차량 회전 변환 (상대 좌표)
+                rotated_x = dx * cos(self.state.yaw) - dy * sin(self.state.yaw)
+                rotated_y = dx * sin(self.state.yaw) + dy * cos(self.state.yaw)
+
+                # 타이어 각도 계산 (앞바퀴는 아커만 스티어링 적용)
+                tire_angle = steer_angles[i]
+                total_angle = self.state.yaw + tire_angle
+
+                # 상대 위치와 각도 저장
+                self._cached_tire_data.append((rotated_x, rotated_y, total_angle))
+
+            # 캐싱 상태 업데이트
+            self._last_yaw = self.state.yaw
+            self._last_steer = self.state.steer
+
+        # 월드 좌표 계산 (매 프레임 업데이트)
         result = []
-        for i, (dx, dy) in enumerate(tire_positions):
-            # 차량 회전 변환
-            rotated_x = dx * cos(self.state.yaw) - dy * sin(self.state.yaw)
-            rotated_y = dx * sin(self.state.yaw) + dy * cos(self.state.yaw)
-
-            # 월드 좌표 계산
+        for rotated_x, rotated_y, total_angle in self._cached_tire_data:
+            # 현재 차량 위치에 상대 좌표 더하기
             world_x = self.state.x + rotated_x
             world_y = self.state.y + rotated_y
-
-            # 타이어 각도 계산 (앞바퀴는 아커만 스티어링 적용)
-            tire_angle = steer_angles[i]
-            total_angle = self.state.yaw + tire_angle
-
             result.append((world_x, world_y, total_angle))
 
-        # 계산 결과 캐싱
+        # 최종 결과 저장 (월드 좌표)
         self._tire_positions = result
-        self._last_yaw = self.state.yaw
-        self._last_steer = self.state.steer
 
         return result
 

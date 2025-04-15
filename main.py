@@ -9,7 +9,7 @@ from src.env import CarSimulatorEnv
 def manual_control():
     """키보드로 차량 직접 제어하는 함수"""
     # 환경 초기화
-    env = CarSimulatorEnv()
+    env = CarSimulatorEnv(config_path="./config/")
     env.reset()
 
     # 안내 메시지 출력
@@ -17,10 +17,8 @@ def manual_control():
     print("Controls:")
     print("  Arrow Keys / WASD: Drive the vehicle")
     print("  Space: Handbrake")
-    print("  T: Toggle tire marks")
     print("  C: Toggle camera follow")
     print("  H: Toggle debug info")
-    print("  F: Clear all tire marks")
     print("  R: Reset camera view")
     print("  +/-: Zoom in/out")
     print("  I/J/K/L: Pan camera")
@@ -73,10 +71,8 @@ def multi_vehicle_test():
     print("  Arrow Keys / WASD: Drive the active vehicle")
     print("  Tab: Switch between vehicles")
     print("  Space: Handbrake")
-    print("  T: Toggle tire marks")
     print("  C: Toggle camera follow")
     print("  H: Toggle debug info")
-    print("  F: Clear all tire marks")
     print("  R: Reset camera view")
     print("  +/-: Zoom in/out")
     print("  I/J/K/L: Pan camera")
@@ -195,10 +191,8 @@ def waypoint_navigation_test():
     print("  Arrow Keys / WASD: Drive the vehicle")
     print("  Space: Handbrake")
     print("  N: Generate new waypoint sequence")
-    print("  T: Toggle tire marks")
     print("  C: Toggle camera follow")
     print("  H: Toggle debug info")
-    print("  F: Clear all tire marks")
     print("  R: Reset camera view")
     print("  +/-: Zoom in/out")
     print("  I/J/K/L: Pan camera")
@@ -439,10 +433,8 @@ def manual_control_with_obstacles():
     print("Controls:")
     print("  Arrow Keys / WASD: Drive the vehicle")
     print("  Space: Handbrake")
-    print("  T: Toggle tire marks")
     print("  C: Toggle camera follow")
     print("  H: Toggle debug info")
-    print("  F: Clear all tire marks")
     print("  R: Reset camera view")
     print("  +/-: Zoom in/out")
     print("  I/J/K/L: Pan camera")
