@@ -28,6 +28,10 @@ class VehicleState:
     steer: float = 0.0             # 조향각 [rad]
     g_forces: List[float] = field(default_factory=lambda: [0.0, 0.0])  # [종방향, 횡방향] G-포스
 
+    rear_axle_x: float = 0.0       # 뒷바퀴 축 X 좌표 [m]
+    rear_axle_y: float = 0.0       # 뒷바퀴 축 Y 좌표 [m]
+    half_wheelbase: float = None    # 차량 축간거리의 절반 [m]
+
     # 목적지 관련 속성
     target_x: float = 0.0         # 목표 X 좌표
     target_y: float = 0.0         # 목표 Y 좌표
@@ -54,6 +58,10 @@ class VehicleState:
         self.throttle = 0.0
         self.steer = 0.0
         self.g_forces = [0.0, 0.0]
+
+        self.rear_axle_x = 0.0
+        self.rear_axle_y = 0.0
+        self.update_rear_axle_position()
 
         self.target_x = 0.0
         self.target_y = 0.0
@@ -83,6 +91,21 @@ class VehicleState:
         self.y = y
         if yaw is not None:
             self.yaw = self.normalize_angle(yaw)
+        # 뒷바퀴 축 위치 업데이트
+        self.update_rear_axle_position()
+
+    def update_rear_axle_position(self, half_wheelbase=None):
+        """뒷바퀴 축 위치 업데이트"""
+        if (half_wheelbase is not None) and (self.half_wheelbase != half_wheelbase):
+            self.half_wheelbase = half_wheelbase
+
+        self.rear_axle_x = self.x - self.half_wheelbase * cos(self.yaw)
+        self.rear_axle_y = self.y - self.half_wheelbase * sin(self.yaw)
+
+    def update_position_from_rear_axle(self, cos_yaw, sin_yaw):
+        """뒷바퀴 축 위치에서 heading 방향으로 이동, 차량 중심점 위치 업데이트"""
+        self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
+        self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
 
 # ======================
 # Vehicle Model
@@ -97,6 +120,8 @@ class Vehicle:
         self.physics_config = physics_config
         self.visual_config = visual_config
         self.state = VehicleState()
+        self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
+
         self.collision_body = RectangleObstacle(
             x=self.state.x, y=self.state.y,
             width=self.vehicle_config['length'], height=self.vehicle_config['width'],

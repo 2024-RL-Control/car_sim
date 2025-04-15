@@ -222,22 +222,27 @@ class StateUpdater:
         # 요각 업데이트, -π ~ π 범위로 정규화
         yaw_new = state.normalize_angle(state.yaw + yaw_rate * dt)
 
-        # 위치 업데이트 (속도가 충분한 경우)
+        # 위치 업데이트 (속도가 충분한 경우) - 뒷바퀴 축 기준 자전거 모델
         if abs(vel_long_new) > physics_config['min_speed_threshold']:
-            # 차량 헤딩 방향으로 속도 벡터 계산
-            vel_x = vel_long_new * cos(yaw_new)
-            vel_y = vel_long_new * sin(yaw_new)
+            # 뒷바퀴 축은 차량 헤딩 방향으로만 이동 (자전거 모델)
+            cos_yaw = cos(yaw_new)
+            sin_yaw = sin(yaw_new)
+            rear_vel_x = vel_long_new * cos_yaw
+            rear_vel_y = vel_long_new * sin_yaw
+
+            # 뒷바퀴 축 위치 업데이트
+            new_rear_x = state.rear_axle_x + rear_vel_x * dt
+            new_rear_y = state.rear_axle_y + rear_vel_y * dt
+
+            # 뒷바퀴 축 위치 저장
+            state.rear_axle_x = new_rear_x
+            state.rear_axle_y = new_rear_y
+
+            # 차량 중심점 위치 업데이트 (뒷바퀴 축 기준)
+            state.update_position_from_rear_axle(cos_yaw, sin_yaw)
 
             # 횡방향 속도 계산 (차량 좌표계 기준)
             vel_lat = vel_long_new * tan(state.steer) / 2
-
-            # 위치 업데이트
-            x_new = state.x + vel_x * dt
-            y_new = state.y + vel_y * dt
-
-            # 상태 업데이트
-            state.x = x_new
-            state.y = y_new
             state.vel_lat = vel_lat
         else:
             # 정지 상태 또는 매우 저속일 경우 횡방향 속도를 0으로 설정
