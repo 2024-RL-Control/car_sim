@@ -35,8 +35,11 @@ class BoundingCircle:
 # ======================
 class BaseObstacle:
     """모든 장애물의 기본 클래스"""
-    def __init__(self, x: float, y: float, yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
-                 obs_type: str = "base", color: Tuple[int, int, int] = (255, 0, 0)):
+    def __init__(self, obstacle_id: int = None, x: float = 0.0, y: float = 0.0, yaw: float = 0.0,
+                 yaw_rate: float = 0.0, vel: float = 0.0, obs_type: str = "base",
+                 color: Tuple[int, int, int] = (255, 0, 0),
+                 bounding_circle_colors: List[Tuple[int, int, int]] = None):
+        self.id = obstacle_id if obstacle_id is not None else id(self)  # 각 장애물의 고유 ID
         self.x = x                  # 중심 X 좌표
         self.y = y                  # 중심 Y 좌표
         self.yaw = yaw              # 방향 각도 [rad]
@@ -44,6 +47,9 @@ class BaseObstacle:
         self.vel = vel              # 이동 속도 [m/s]
         self.type = obs_type        # 장애물 유형
         self.color = color          # 색상 (RGB)
+
+        # 경계 원 색상 설정
+        self.bounding_circle_colors = bounding_circle_colors or [(255, 50, 50), (50, 255, 50), (50, 50, 255)]
 
         # 경계 원 리스트
         self.outer_circles: List[BoundingCircle] = []  # 외접원 리스트
@@ -75,7 +81,7 @@ class BaseObstacle:
 
     def _draw_bounding_circles(self, screen, world_to_screen_func):
         """디버그용: 경계 원 시각화"""
-        # 외접원 (빨간색)
+        # 외접원 (색상: bounding_circle_colors[0])
         for circle in self.outer_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
             circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
@@ -84,9 +90,9 @@ class BaseObstacle:
             x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
-            pygame.draw.circle(screen, (255, 50, 50), circle_pos, screen_radius, 1)
+            pygame.draw.circle(screen, self.bounding_circle_colors[0], circle_pos, screen_radius, 1)
 
-        # 중간원 (녹색)
+        # 중간원 (색상: bounding_circle_colors[1])
         for circle in self.middle_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
             circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
@@ -95,9 +101,9 @@ class BaseObstacle:
             x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
-            pygame.draw.circle(screen, (50, 255, 50), circle_pos, screen_radius, 1)
+            pygame.draw.circle(screen, self.bounding_circle_colors[1], circle_pos, screen_radius, 1)
 
-        # 내접원 (파란색)
+        # 내접원 (색상: bounding_circle_colors[2])
         for circle in self.inner_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
             circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
@@ -106,7 +112,7 @@ class BaseObstacle:
             x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
-            pygame.draw.circle(screen, (50, 50, 255), circle_pos, screen_radius, 1)
+            pygame.draw.circle(screen, self.bounding_circle_colors[2], circle_pos, screen_radius, 1)
 
     def get_outer_circles_world(self) -> List[Tuple[float, float, float]]:
         """외접원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""
@@ -132,15 +138,20 @@ class BaseObstacle:
             circles.append((world_pos[0], world_pos[1], circle.radius))
         return circles
 
+    def get_id(self) -> int:
+        """장애물 ID 반환"""
+        return self.id
+
 # ======================
 # Circle Obstacle
 # ======================
 class CircleObstacle(BaseObstacle):
     """원형 장애물 클래스"""
-    def __init__(self, x: float, y: float, yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
-                 obs_type: str = "circle",color: Tuple[int, int, int] = (255, 0, 0),
-                 radius: float = 1.0):
-        super().__init__(x, y, yaw, yaw_rate, vel, obs_type, color)
+    def __init__(self, obstacle_id: int = None, x: float = 0.0, y: float = 0.0, yaw: float = 0.0,
+                 yaw_rate: float = 0.0, vel: float = 0.0, obs_type: str = "circle",
+                 radius: float = 1.0, color: Tuple[int, int, int] = (255, 0, 0),
+                 bounding_circle_colors: List[Tuple[int, int, int]] = None):
+        super().__init__(obstacle_id, x, y, yaw, yaw_rate, vel, obs_type, color, bounding_circle_colors)
         self.radius = radius
 
         # 원형 객체는 외접원, 중간원, 내접원이 모두 동일
@@ -179,10 +190,11 @@ class CircleObstacle(BaseObstacle):
 # ======================
 class SquareObstacle(BaseObstacle):
     """정사각형 장애물 클래스"""
-    def __init__(self, x: float, y: float, yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
-                 obs_type: str = "square", color: Tuple[int, int, int] = (255, 0, 0),
-                 length: float = 1.0):
-        super().__init__(x, y, yaw, yaw_rate, vel, obs_type, color)
+    def __init__(self, obstacle_id: int = None, x: float = 0.0, y: float = 0.0, yaw: float = 0.0,
+                 yaw_rate: float = 0.0, vel: float = 0.0, obs_type: str = "square",
+                 length: float = 1.0, color: Tuple[int, int, int] = (255, 0, 0),
+                 bounding_circle_colors: List[Tuple[int, int, int]] = None):
+        super().__init__(obstacle_id, x, y, yaw, yaw_rate, vel, obs_type, color, bounding_circle_colors)
         self.length = length  # 한 변의 길이
 
         # 경계 원 초기화
@@ -241,10 +253,11 @@ class SquareObstacle(BaseObstacle):
 # ======================
 class RectangleObstacle(BaseObstacle):
     """직사각형 장애물 클래스"""
-    def __init__(self, x: float, y: float, yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
-                 obs_type: str = "rectangle", color: Tuple[int, int, int] = (255, 0, 0),
-                 width: float = 2.0, height: float = 1.0):
-        super().__init__(x, y, yaw, yaw_rate, vel, obs_type, color)
+    def __init__(self, obstacle_id: int = None, x: float = 0.0, y: float = 0.0, yaw: float = 0.0,
+                 yaw_rate: float = 0.0, vel: float = 0.0, obs_type: str = "rectangle",
+                 width: float = 2.0, height: float = 1.0, color: Tuple[int, int, int] = (255, 0, 0),
+                 bounding_circle_colors: List[Tuple[int, int, int]] = None):
+        super().__init__(obstacle_id, x, y, yaw, yaw_rate, vel, obs_type, color, bounding_circle_colors)
         self.width = width    # 너비 (X축 방향)
         self.height = height  # 높이 (Y축 방향)
 
@@ -340,11 +353,11 @@ class RectangleObstacle(BaseObstacle):
 # ======================
 class Goal(BaseObstacle):
     """목적지 클래스"""
-    def __init__(self, x: float, y: float, yaw: float = 0.0,
-                 color: Tuple[int, int, int] = (0, 255, 0),
-                 radius: float = 1.0):
+    def __init__(self, goal_id: int = None, x: float = 0.0, y: float = 0.0, yaw: float = 0.0,
+                 radius: float = 1.0, color: Tuple[int, int, int] = (0, 255, 0),
+                 bounding_circle_colors: List[Tuple[int, int, int]] = None):
         # 기본적으로 정적 목적지
-        super().__init__(x, y, yaw, 0, 0, "goal", color)
+        super().__init__(goal_id, x, y, yaw, 0, 0, "goal", color, bounding_circle_colors)
         self.radius = radius
 
         # 목적지는 원형으로 표시
@@ -417,53 +430,78 @@ class Goal(BaseObstacle):
 # ======================
 class ObstacleManager:
     """장애물 관리 클래스"""
-    def __init__(self):
-        self.obstacles: List[BaseObstacle] = []
+    def __init__(self, bounding_circle_colors: List[Tuple[int, int, int]] = None):
+        self.obstacles: Dict[int, BaseObstacle] = {}  # {obstacle_id: BaseObstacle 객체}
+        self.next_obstacle_id = 0  # 자동 ID 생성용
+        self.bounding_circle_colors = bounding_circle_colors or [(255, 50, 50), (50, 255, 50), (50, 50, 255)]
 
-    def add_obstacle(self, obstacle: BaseObstacle):
-        """장애물 추가"""
-        self.obstacles.append(obstacle)
-        return len(self.obstacles) - 1  # 인덱스 반환
+    def _add_obstacle(self, obstacle: BaseObstacle):
+        """
+        장애물 추가
 
-    def remove_obstacle(self, index: int):
-        """인덱스로 장애물 제거"""
-        if 0 <= index < len(self.obstacles):
-            del self.obstacles[index]
+        Args:
+            obstacle: 추가할 장애물 객체
+
+        Returns:
+            obstacle_id: 추가된 장애물의 ID
+        """
+        obstacle_id = obstacle.get_id()
+        self.obstacles[obstacle_id] = obstacle
+
+        # 다음 자동 ID 업데이트
+        if isinstance(obstacle_id, int) and self.next_obstacle_id <= obstacle_id:
+            self.next_obstacle_id = obstacle_id + 1
+
+        return obstacle_id
+
+    def remove_obstacle(self, obstacle_id: int):
+        """
+        ID로 장애물 제거
+
+        Args:
+            obstacle_id: 제거할 장애물 ID
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        if obstacle_id in self.obstacles:
+            del self.obstacles[obstacle_id]
             return True
         return False
 
     def clear_obstacles(self):
         """모든 장애물 제거"""
-        self.obstacles = []
+        self.obstacles.clear()
+        self.next_obstacle_id = 0
 
     def update(self, dt: float):
         """모든 장애물 상태 업데이트"""
-        for obstacle in self.obstacles:
+        for obstacle in self.obstacles.values():
             obstacle.update(dt)
 
     def draw(self, screen, world_to_screen_func, debug: bool = False):
         """모든 장애물 렌더링"""
-        for obstacle in self.obstacles:
+        for obstacle in self.obstacles.values():
             obstacle.draw(screen, world_to_screen_func, debug)
 
     def get_all_outer_circles(self) -> List[Tuple[float, float, float]]:
         """모든 장애물의 외접원 반환 [(x, y, radius), ...]"""
         circles = []
-        for obstacle in self.obstacles:
+        for obstacle in self.obstacles.values():
             circles.extend(obstacle.get_outer_circles_world())
         return circles
 
     def get_all_middle_circles(self) -> List[Tuple[float, float, float]]:
         """모든 장애물의 중간원 반환 [(x, y, radius), ...]"""
         circles = []
-        for obstacle in self.obstacles:
+        for obstacle in self.obstacles.values():
             circles.extend(obstacle.get_middle_circles_world())
         return circles
 
     def get_all_inner_circles(self) -> List[Tuple[float, float, float]]:
         """모든 장애물의 내접원 반환 [(x, y, radius), ...]"""
         circles = []
-        for obstacle in self.obstacles:
+        for obstacle in self.obstacles.values():
             circles.extend(obstacle.get_inner_circles_world())
         return circles
 
@@ -471,79 +509,221 @@ class ObstacleManager:
         """장애물 수 반환"""
         return len(self.obstacles)
 
-    def add_circle_obstacle(self, x: float, y: float, radius: float,
-                            yaw: float = 0.0, yaw_rate: float = 0.0,
-                            vel: float = 0.0, color: Tuple[int, int, int] = (255, 0, 0)):
+    def get_obstacle(self, obstacle_id: int) -> Optional[BaseObstacle]:
+        """
+        ID로 장애물 객체 반환
+
+        Args:
+            obstacle_id: 장애물 ID
+
+        Returns:
+            BaseObstacle 객체 또는 None
+        """
+        return self.obstacles.get(obstacle_id)
+
+    def get_obstacles(self) -> List[BaseObstacle]:
+        """
+        모든 장애물 객체 목록 반환
+
+        Returns:
+            장애물 객체 리스트
+        """
+        return list(self.obstacles.values())
+
+    def add_circle_obstacle(self, obstacle_id: int = None, x: float = 0.0, y: float = 0.0,
+                            yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
+                            radius: float = 1.0, color: Tuple[int, int, int] = (255, 0, 0)):
         """
         원형 장애물 추가
 
         Args:
+            obstacle_id: 장애물 ID (None이면 자동 생성)
             x: 장애물 중심 X 좌표
             y: 장애물 중심 Y 좌표
-            radius: 원 반지름
             yaw: 초기 방향각 [rad]
             yaw_rate: 각속도 [rad/s]
             vel: 이동 속도 [m/s]
+            radius: 원 반지름
             color: RGB 색상
 
         Returns:
-            장애물 인덱스
+            장애물 ID
         """
-        obstacle = CircleObstacle(x, y, yaw, yaw_rate, vel, "circle", color, radius)
-        return self.add_obstacle(obstacle)
+        if obstacle_id is None:
+            obstacle_id = self.next_obstacle_id
+            self.next_obstacle_id += 1
 
-    def add_square_obstacle(self, x: float, y: float, length: float,
-                            yaw: float = 0.0, yaw_rate: float = 0.0,
-                            vel: float = 0.0, color: Tuple[int, int, int] = (255, 0, 0)):
+        obstacle = CircleObstacle(obstacle_id, x, y, yaw, yaw_rate, vel, "circle", radius, color, self.bounding_circle_colors)
+        return self._add_obstacle(obstacle)
+
+    def add_square_obstacle(self, obstacle_id: int = None, x: float = 0.0, y: float = 0.0,
+                            yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
+                            length: float = 1.0, color: Tuple[int, int, int] = (255, 0, 0)):
         """
         정사각형 장애물 추가
 
         Args:
+            obstacle_id: 장애물 ID (None이면 자동 생성)
             x: 장애물 중심 X 좌표
             y: 장애물 중심 Y 좌표
-            length: 한 변의 길이
             yaw: 초기 방향각 [rad]
             yaw_rate: 각속도 [rad/s]
             vel: 이동 속도 [m/s]
+            length: 한 변의 길이
             color: RGB 색상
 
         Returns:
-            장애물 인덱스
+            장애물 ID
         """
-        obstacle = SquareObstacle(x, y, yaw, yaw_rate, vel, "square", color, length)
-        return self.add_obstacle(obstacle)
+        if obstacle_id is None:
+            obstacle_id = self.next_obstacle_id
+            self.next_obstacle_id += 1
 
-    def add_rectangle_obstacle(self, x: float, y: float, width: float, height: float,
-                                yaw: float = 0.0, yaw_rate: float = 0.0,
-                                vel: float = 0.0, color: Tuple[int, int, int] = (255, 0, 0)):
+        obstacle = SquareObstacle(obstacle_id, x, y, yaw, yaw_rate, vel, "square", length, color, self.bounding_circle_colors)
+        return self._add_obstacle(obstacle)
+
+    def add_rectangle_obstacle(self, obstacle_id: int = None, x: float = 0.0, y: float = 0.0,
+                                yaw: float = 0.0, yaw_rate: float = 0.0, vel: float = 0.0,
+                                width: float = 2.0, height: float = 1.0, color: Tuple[int, int, int] = (255, 0, 0)):
         """
         직사각형 장애물 추가
 
         Args:
+            obstacle_id: 장애물 ID (None이면 자동 생성)
             x: 장애물 중심 X 좌표
             y: 장애물 중심 Y 좌표
-            width: 너비
-            height: 높이
             yaw: 초기 방향각 [rad]
             yaw_rate: 각속도 [rad/s]
             vel: 이동 속도 [m/s]
+            width: 너비
+            height: 높이
             color: RGB 색상
 
         Returns:
-            장애물 인덱스
+            장애물 ID
         """
-        obstacle = RectangleObstacle(x, y, yaw, yaw_rate, vel, "rectangle", color, width, height)
-        return self.add_obstacle(obstacle)
+        if obstacle_id is None:
+            obstacle_id = self.next_obstacle_id
+            self.next_obstacle_id += 1
+
+        obstacle = RectangleObstacle(obstacle_id, x, y, yaw, yaw_rate, vel, "rectangle", width, height, color, self.bounding_circle_colors)
+        return self._add_obstacle(obstacle)
+
+    def get_serializable_obstacles(self):
+        """
+        장애물 정보를 직렬화 가능한 형태로 반환 (저장용)
+
+        Returns:
+            직렬화 가능한 장애물 정보 딕셔너리
+        """
+        serialized_data = {
+            'obstacles': {},
+            'next_obstacle_id': self.next_obstacle_id
+        }
+
+        for obstacle_id, obstacle in self.obstacles.items():
+            obstacle_data = {
+                'id': obstacle_id,
+                'type': obstacle.type,
+                'x': obstacle.x,
+                'y': obstacle.y,
+                'yaw': obstacle.yaw,
+                'yaw_rate': obstacle.yaw_rate,
+                'vel': obstacle.vel,
+                'color': obstacle.color,
+                'bounding_circle_colors': obstacle.bounding_circle_colors
+            }
+
+            # 장애물 유형별 추가 속성
+            if obstacle.type == "circle":
+                obstacle_data['radius'] = obstacle.radius
+            elif obstacle.type == "square":
+                obstacle_data['length'] = obstacle.length
+            elif obstacle.type == "rectangle":
+                obstacle_data['width'] = obstacle.width
+                obstacle_data['height'] = obstacle.height
+
+            serialized_data['obstacles'][str(obstacle_id)] = obstacle_data
+
+        return serialized_data
+
+    def load_obstacles_from_serialized(self, serialized_data):
+        """
+        직렬화된 장애물 정보로부터 장애물 복원 (로드용)
+
+        Args:
+            serialized_data: 직렬화된 장애물 정보 딕셔너리
+        """
+        # 기존 장애물 제거
+        self.clear_obstacles()
+
+        # 이전 형식과의 호환성 유지
+        if isinstance(serialized_data, list):
+            # 이전 형식: 리스트 형태의 장애물 데이터
+            for obstacle_data in serialized_data:
+                obs_type = obstacle_data.get('type', 'base')
+                x = obstacle_data.get('x', 0.0)
+                y = obstacle_data.get('y', 0.0)
+                yaw = obstacle_data.get('yaw', 0.0)
+                yaw_rate = obstacle_data.get('yaw_rate', 0.0)
+                vel = obstacle_data.get('vel', 0.0)
+                color = obstacle_data.get('color', (255, 0, 0))
+
+                if obs_type == "circle":
+                    radius = obstacle_data.get('radius', 1.0)
+                    self.add_circle_obstacle(None, x, y, yaw, yaw_rate, vel, radius, color)
+                elif obs_type == "square":
+                    length = obstacle_data.get('length', 1.0)
+                    self.add_square_obstacle(None, x, y, yaw, yaw_rate, vel, length, color)
+                elif obs_type == "rectangle":
+                    width = obstacle_data.get('width', 2.0)
+                    height = obstacle_data.get('height', 1.0)
+                    self.add_rectangle_obstacle(None, x, y, yaw, yaw_rate, vel, width, height, color)
+            return
+
+        # 새 형식: 딕셔너리 형태의 구조화된 장애물 데이터
+        obstacles_data = serialized_data.get('obstacles', {})
+        for obstacle_id_str, obstacle_data in obstacles_data.items():
+            # 문자열 ID를 정수로 변환
+            obstacle_id = int(obstacle_id_str) if isinstance(obstacle_id_str, str) else obstacle_id_str
+
+            obs_type = obstacle_data.get('type', 'base')
+            x = obstacle_data.get('x', 0.0)
+            y = obstacle_data.get('y', 0.0)
+            yaw = obstacle_data.get('yaw', 0.0)
+            yaw_rate = obstacle_data.get('yaw_rate', 0.0)
+            vel = obstacle_data.get('vel', 0.0)
+            color = obstacle_data.get('color', (255, 0, 0))
+
+            if obs_type == "circle":
+                radius = obstacle_data.get('radius', 1.0)
+                self.add_circle_obstacle(obstacle_id, x, y, yaw, yaw_rate, vel, radius, color)
+            elif obs_type == "square":
+                length = obstacle_data.get('length', 1.0)
+                self.add_square_obstacle(obstacle_id, x, y, yaw, yaw_rate, vel, length, color)
+            elif obs_type == "rectangle":
+                width = obstacle_data.get('width', 2.0)
+                height = obstacle_data.get('height', 1.0)
+                self.add_rectangle_obstacle(obstacle_id, x, y, yaw, yaw_rate, vel, width, height, color)
+
+        # 다음 ID 설정
+        if 'next_obstacle_id' in serialized_data:
+            self.next_obstacle_id = serialized_data.get('next_obstacle_id')
+
+        # 현재 설정된 bounding_circle_colors를 유지하기 위해 모든 장애물에 적용
+        for obstacle in self.obstacles.values():
+            obstacle.bounding_circle_colors = self.bounding_circle_colors
 
 # ======================
 # Goal Manager
 # ======================
 class GoalManager:
     """목적지들을 관리하고 차량에 할당하는 클래스"""
-    def __init__(self):
+    def __init__(self, bounding_circle_colors: List[Tuple[int, int, int]] = None):
         self.goals = {}  # {goal_id: Goal 객체}
         self.vehicle_goals = {}  # {vehicle_id: goal_id}
         self.next_goal_id = 0  # 목적지 ID 자동 생성용
+        self.bounding_circle_colors = bounding_circle_colors or [(255, 50, 50), (50, 255, 50), (50, 50, 255)]
 
     def add_goal(self, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
         """
@@ -562,7 +742,7 @@ class GoalManager:
         goal_id = self.next_goal_id
         self.next_goal_id += 1
 
-        goal = Goal(x, y, yaw, color=color, radius=radius)
+        goal = Goal(goal_id, x, y, yaw, radius, color, self.bounding_circle_colors)
         self.goals[goal_id] = goal
 
         return goal_id
@@ -582,7 +762,7 @@ class GoalManager:
         Returns:
             goal_id: 동일한 입력 목적지 ID
         """
-        goal = Goal(x, y, yaw, color=color, radius=radius)
+        goal = Goal(goal_id, x, y, yaw, radius, color, self.bounding_circle_colors)
         self.goals[goal_id] = goal
 
         # 다음 ID가 현재 ID보다 작으면 업데이트
@@ -691,3 +871,68 @@ class GoalManager:
         """모든 목적지 제거"""
         self.goals.clear()
         self.vehicle_goals.clear()
+        self.next_goal_id = 0
+
+    def get_serializable_goals(self):
+        """
+        목적지 정보를 직렬화 가능한 형태로 반환 (저장용)
+
+        Returns:
+            직렬화 가능한 목적지 정보 딕셔너리
+        """
+        serialized_data = {
+            'goals': {},
+            'vehicle_goals': self.vehicle_goals.copy(),
+            'next_goal_id': self.next_goal_id
+        }
+
+        # 목적지 정보 직렬화
+        for goal_id, goal in self.goals.items():
+            serialized_data['goals'][goal_id] = {
+                'id': goal.id,
+                'x': goal.x,
+                'y': goal.y,
+                'yaw': goal.yaw,
+                'radius': goal.radius,
+                'color': goal.color,
+                'bounding_circle_colors': goal.bounding_circle_colors
+            }
+
+        return serialized_data
+
+    def load_from_serialized(self, serialized_data):
+        """
+        직렬화된 목적지 정보로부터 목적지 복원 (로드용)
+
+        Args:
+            serialized_data: 직렬화된 목적지 정보 딕셔너리
+        """
+        # 기존 데이터 초기화
+        self.clear_goals()
+
+        # 목적지 객체 복원
+        saved_goals = serialized_data.get('goals', {})
+        for goal_id_str, goal_data in saved_goals.items():
+            # 문자열 키를 정수로 변환 (필요한 경우)
+            goal_id = int(goal_id_str) if isinstance(goal_id_str, str) else goal_id_str
+
+            # add_goal_with_id 메소드로 원래 ID 유지하며 목적지 추가
+            self.add_goal_with_id(
+                goal_id=goal_id,
+                x=goal_data.get('x', 0),
+                y=goal_data.get('y', 0),
+                yaw=goal_data.get('yaw', 0),
+                radius=goal_data.get('radius', 1.0),
+                color=goal_data.get('color', (0, 255, 0))
+            )
+
+        # 차량-목적지 매핑 복원
+        self.vehicle_goals = serialized_data.get('vehicle_goals', {}).copy()
+
+        # 다음 목적지 ID 설정
+        if 'next_goal_id' in serialized_data:
+            self.next_goal_id = serialized_data.get('next_goal_id')
+
+        # 현재 설정된 bounding_circle_colors를 유지하기 위해 모든 목적지에 적용
+        for goal in self.goals.values():
+            goal.bounding_circle_colors = self.bounding_circle_colors

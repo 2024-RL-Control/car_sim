@@ -7,7 +7,7 @@ import pygame
 import numpy as np
 from .physics import PhysicsEngine
 from .object import RectangleObstacle
-from .sensor import SensorManager, LidarSensor
+from .sensor import SensorManager
 
 # ======================
 # State Management
@@ -41,6 +41,30 @@ class VehicleState:
     # 차량 궤적
     trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
+    def reset(self):
+        """차량 상태 초기화"""
+        self.x = 0.0
+        self.y = 0.0
+        self.yaw = pi/2
+        self.yaw_rate = 0.0
+        self.vel_long = 0.0
+        self.acc_long = 0.0
+        self.vel_lat = 0.0
+        self.acc_lat = 0.0
+        self.throttle = 0.0
+        self.steer = 0.0
+        self.g_forces = [0.0, 0.0]
+
+        self.target_x = 0.0
+        self.target_y = 0.0
+        self.target_yaw = 0.0
+        self.distance_to_target = 0.0
+        self.yaw_diff_to_target = 0.0
+
+        self.terrain_type = "asphalt"
+
+        self.trajectory.clear()
+
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
         return (angle + pi) % (2 * pi) - pi
@@ -66,24 +90,24 @@ class VehicleState:
 class Vehicle:
     """차량 모델링, 제어 및 시각화를 담당하는 클래스"""
 
-    def __init__(self, vehicle_id=None, vehicle_config=None, sensors_config=None, sim_config=None):
+    def __init__(self, vehicle_id=None, vehicle_config=None, physics_config=None, visual_config=None):
         """차량 객체 초기화"""
         self.id = vehicle_id if vehicle_id is not None else id(self)
-        self.config = vehicle_config
-        self.sensors_config = sensors_config
-        self.sim_config = sim_config
+        self.vehicle_config = vehicle_config
+        self.physics_config = physics_config
+        self.visual_config = visual_config
         self.state = VehicleState()
         self.collision_body = RectangleObstacle(
             x=self.state.x, y=self.state.y,
-            width=self.config.LENGTH, height=self.config.WIDTH,
+            width=self.vehicle_config['length'], height=self.vehicle_config['width'],
             yaw=self.state.yaw,
             obs_type="vehicle",
-            color=self.sim_config.VEHICLE_COLOR
+            color=self.visual_config['vehicle_colors'],
+            bounding_circle_colors=self.visual_config['bounding_circle_color']
         )
         self.goal_id = None
 
-        self.sensor_manager = SensorManager(self)
-        self._init_sensors()
+        self.sensor_manager = SensorManager(self, self.vehicle_config['sensors'], self.visual_config)
 
         # 그래픽 리소스 초기화
         self._load_graphics()
@@ -125,9 +149,8 @@ class Vehicle:
 
     def reset(self):
         """차량 상태 초기화"""
-        self.state = VehicleState()
-        self.sensor_manager = SensorManager(self)
-        self._init_sensors()
+        self.state.reset()
+        self.sensor_manager.reset()
         self._load_graphics()
         self._update_collision_body()
         self.clear_goal()
@@ -136,7 +159,7 @@ class Vehicle:
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
-        PhysicsEngine.update(self.state, action, dt, self.sim_config, self.config)
+        PhysicsEngine.update(self.state, action, dt, self.physics_config, self.vehicle_config)
 
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
@@ -280,7 +303,7 @@ class Vehicle:
             도달 여부 (Boolean)
         """
         if position_tolerance is None:
-            position_tolerance = self.config.LENGTH / 2
+            position_tolerance = self.vehicle_config['length'] / 2
 
         if yaw_tolerance is None:
             yaw_tolerance = np.pi/6  # 30도
@@ -307,22 +330,22 @@ class Vehicle:
         self.state.distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
 
-    def draw(self, screen, world_to_screen_func, camera_zoom=1.0, is_active=False):
+    def draw(self, screen, world_to_screen_func, is_active=False, debug=False):
         """차량 및 타이어 렌더링"""
         # 스케일 계산
-        self._update_scale(camera_zoom)
+        self._update_scale(self.visual_config['camera_zoom'])
 
         # 디버그 모드 - 활성 차량인 경우에만 센서 시각화
-        if self.sim_config.ENABLE_DEBUG_INFO:
+        if debug:
             if is_active:
                 # 차량 센서 그리기
-                self.sensor_manager.draw(screen, world_to_screen_func, self.sim_config.ENABLE_DEBUG_INFO)
+                self.sensor_manager.draw(screen, world_to_screen_func, debug)
 
             # 충돌 바디의 경계 원 그리기 메서드 활용
             self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
-        # 궤적 그리기
-        self._draw_trajectory(screen, world_to_screen_func)
+            # 궤적 그리기
+            self._draw_trajectory(screen, world_to_screen_func)
 
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)
@@ -330,15 +353,9 @@ class Vehicle:
         # 차체 그리기
         self._draw_body(screen, world_to_screen_func)
 
-    def _init_sensors(self):
-        """기본 센서 초기화 (라이다 등)"""
-        for sensor_id, config in self.sensors_config.items():
-            if config.SENSOR_TYPE == "LIDAR":
-                self.sensor_manager.add_sensor(LidarSensor, config)
-
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
-        self._camera_zoom = 1.0
+        self._camera_zoom = self.visual_config['camera_zoom']
 
         # 성능 최적화를 위한 그리기 관련 캐시
         self._car_cache = {}
@@ -348,28 +365,28 @@ class Vehicle:
         self._last_steer = None
 
         # 차체
-        car_length = self.config.LENGTH * self.sim_config.SCALE
-        car_width = self.config.WIDTH * self.sim_config.SCALE
+        car_length = self.vehicle_config['length'] * self.visual_config['scale_factor']
+        car_width = self.vehicle_config['width'] * self.visual_config['scale_factor']
         self.car_surf = pygame.Surface((car_length, car_width), pygame.SRCALPHA)
-        pygame.draw.rect(self.car_surf, self.sim_config.VEHICLE_COLOR,
+        pygame.draw.rect(self.car_surf, self.visual_config['vehicle_colors'],
                          (0, 0, car_length, car_width), 2, border_radius=int(car_width * 0.2))
 
         # 타이어
-        tire_w = self.config.TIRE_WIDTH * self.sim_config.SCALE
-        tire_h = self.config.TIRE_HEIGHT * self.sim_config.SCALE
+        tire_w = self.vehicle_config['tire_width'] * self.visual_config['scale_factor']
+        tire_h = self.vehicle_config['tire_height'] * self.visual_config['scale_factor']
         self.tire_surf = pygame.Surface((tire_h, tire_w), pygame.SRCALPHA)
-        pygame.draw.rect(self.tire_surf, self.sim_config.TIRE_COLOR,
+        pygame.draw.rect(self.tire_surf, self.visual_config['tire_color'],
                          (0, 0, tire_h, tire_w), 2)
 
         # 실제 렌더링에 사용될 스케일된 Surface 초기화
-        self._update_scaled_surfaces(self.sim_config.SCALE)
+        self._update_scaled_surfaces(self.visual_config['scale_factor'] * self._camera_zoom)
 
     def _update_scale(self, camera_zoom):
         """카메라 줌 변경 시 스케일 및 Surface 업데이트"""
         if camera_zoom != self._camera_zoom:
             self._camera_zoom = camera_zoom
             # 현재 시뮬레이션 스케일과 카메라 줌을 곱한 유효 스케일 계산
-            effective_scale = self.sim_config.SCALE * camera_zoom
+            effective_scale = self.visual_config['scale_factor'] * camera_zoom
             # 스케일된 Surface 업데이트
             self._update_scaled_surfaces(effective_scale)
 
@@ -380,12 +397,12 @@ class Vehicle:
             self.car_surf = self._car_cache[effective_scale]
         else:
             # 새 크기 계산
-            new_length = self.config.LENGTH * effective_scale
-            new_width = self.config.WIDTH * effective_scale
+            new_length = self.vehicle_config['length'] * effective_scale
+            new_width = self.vehicle_config['width'] * effective_scale
 
             # 차체 Surface 재생성
             self.car_surf = pygame.Surface((new_length, new_width), pygame.SRCALPHA)
-            pygame.draw.rect(self.car_surf, self.sim_config.VEHICLE_COLOR,
+            pygame.draw.rect(self.car_surf, self.visual_config['vehicle_colors'],
                             (0, 0, new_length, new_width), 2, border_radius=int(new_width * 0.2))
 
             # 캐시에 저장
@@ -401,12 +418,12 @@ class Vehicle:
         self._tire_angle_cache.clear()
 
         # 새 크기 계산
-        new_tire_h = self.config.TIRE_HEIGHT * effective_scale
-        new_tire_w = self.config.TIRE_WIDTH * effective_scale
+        new_tire_h = self.vehicle_config['tire_height'] * effective_scale
+        new_tire_w = self.vehicle_config['tire_width'] * effective_scale
 
         # 타이어 Surface 재생성
         self.tire_surf = pygame.Surface((new_tire_h, new_tire_w), pygame.SRCALPHA)
-        pygame.draw.rect(self.tire_surf, self.sim_config.TIRE_COLOR,
+        pygame.draw.rect(self.tire_surf, self.visual_config['tire_color'],
                          (0, 0, new_tire_h, new_tire_w), 2)
 
     def _draw_tires(self, screen, world_to_screen_func):
@@ -448,8 +465,8 @@ class Vehicle:
 
         if recalculate_angles:
             # yaw 또는 steer가 변경되었을 때만 상대 위치 및 각도 재계산
-            wheelbase = self.config.WHEELBASE
-            track = self.config.TRACK
+            wheelbase = self.vehicle_config['wheelbase']
+            track = self.vehicle_config['track']
             steer = self.state.steer
 
             # 타이어 상대 위치 계산 (차량 좌표계 기준)
@@ -524,7 +541,7 @@ class Vehicle:
         trajectory_points = [world_to_screen_func(x, y) for x, y in self.state.trajectory]
 
         # 줌 레벨에 맞게 선 너비 조정
-        width = max(1, int(2 * self._camera_zoom))
+        width = max(1, int(2 * self.visual_config['camera_zoom']))
 
         # 부드러운 곡선 대신 선분으로 그림 (성능)
         if len(trajectory_points) > 1:
