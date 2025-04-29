@@ -81,15 +81,15 @@ class BaseSensor(ABC):
         return self._cached_pos
 
     @abstractmethod
-    def update(self, dt, time_elapsed=0, obstacle_manager=None, other_vehicles=None):
+    def update(self, dt, time_elapsed=0, obstacles=None, vehicles=None):
         """
         센서 상태 업데이트 (반드시 구현 필요)
 
         Args:
             dt: 시간 간격 [s]
             time_elapsed: 시뮬레이션 누적 시간 [s]
-            obstacle_manager: 장애물 관리 객체
-            other_vehicles: 다른 차량 리스트
+            obstacles: 장애물 외접원
+            vehicles: 차량 리스트
 
         Returns:
             측정이 수행되었는지 여부 (Boolean)
@@ -239,24 +239,23 @@ class LidarSensor(BaseSensor):
         self.ray_angles = np.linspace(self.angle_start, self.angle_end, self.num_samples)
         self.ray_directions = np.array([(np.cos(angle), np.sin(angle)) for angle in self.ray_angles])
 
-    def update(self, dt, time_elapsed=0, obstacle_manager=None, other_vehicles=None):
+    def update(self, dt, time_elapsed=0, objects=None):
         """
         라이다 센서 업데이트 및 스캔 수행
 
         Args:
             dt: 시간 간격 [s]
             time_elapsed: 시뮬레이션 누적 시간 [s]
-            obstacle_manager: 장애물 관리 객체
-            other_vehicles: 다른 차량 리스트
+            objects: 객체 외접원
 
         Returns:
             측정이 수행되었는지 여부 (Boolean)
         """
         # 스캔 주기에 따른 업데이트 수행
         if time_elapsed - self.last_scan_time >= self.scan_interval:
-            if obstacle_manager:
+            if len(objects) > 0:
                 # 스캔 수행
-                self.current_data = self._perform_scan(time_elapsed, obstacle_manager, other_vehicles)
+                self.current_data = self._perform_scan(time_elapsed, objects)
 
                 # 스캔 결과 히스토리 저장
                 if self.scan_history is not None:
@@ -267,30 +266,18 @@ class LidarSensor(BaseSensor):
 
         return False
 
-    def _perform_scan(self, timestamp, obstacle_manager, other_vehicles):
+    def _perform_scan(self, timestamp, objects):
         """
         라이다 스캔 수행 - 벡터화된 연산으로 구현
 
         Args:
             timestamp: 현재 시간 [s]
-            obstacle_manager: 장애물 관리 객체
-            other_vehicles: 다른 차량 리스트
+            objects: 객체 외접원
         Returns:
             LidarData: 라이다 스캔 결과
         """
         # 센서의 현재 위치 및 방향 얻기
         sensor_x, sensor_y, sensor_yaw = self.get_pose()
-
-        # 장애물 목록 가져오기
-        obstacles = obstacle_manager.get_all_outer_circles()
-
-        # 다른 차량의 경계 원 추가
-        if other_vehicles:
-            for vehicle in other_vehicles:
-                # 자기 자신은 제외
-                if vehicle.id != self.vehicle.id:
-                    vehicle_circles = vehicle._get_outer_circles_world()
-                    obstacles.extend(vehicle_circles)
 
         # 모든 레이에 대한 글로벌 각도 벡터화 계산
         global_angles = sensor_yaw + self.ray_angles
@@ -302,7 +289,7 @@ class LidarSensor(BaseSensor):
             sensor_x, sensor_y,
             global_dirs_x, global_dirs_y,
             global_angles,
-            obstacles
+            objects
         )
 
         # 라이다 데이터 생성
@@ -312,7 +299,7 @@ class LidarSensor(BaseSensor):
             ranges=closest_hits
         )
 
-    def _raycast_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, global_angles, obstacles):
+    def _raycast_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, global_angles, objects):
         """
         벡터화된 레이캐스팅 수행
 
@@ -320,7 +307,7 @@ class LidarSensor(BaseSensor):
             origin_x, origin_y: 레이 시작점 [m]
             dirs_x, dirs_y: 레이 방향 벡터 배열 (정규화됨)
             global_angles: 레이의 글로벌 각도 배열
-            obstacles: 장애물 객체 리스트
+            objects: 객체 외접원 리스트
 
         Returns:
             List[LidarMeasurement]: 모든 레이에 대한 측정 결과
@@ -330,7 +317,7 @@ class LidarSensor(BaseSensor):
         min_distances = np.ones(num_rays) * self.max_range
 
         # 장애물이 없는 경우
-        if not obstacles:
+        if len(objects) == 0:
             # 기본 최대 거리 배열 반환
             return self._create_measurements(
                 min_distances, global_angles, origin_x, origin_y,
@@ -338,11 +325,11 @@ class LidarSensor(BaseSensor):
             )
 
         # 장애물 데이터를 NumPy 배열로 변환
-        obstacle_array = np.array(obstacles)
+        object_array = np.array(objects)
 
         # 각 레이와 모든 장애물에 대해 한 번에 계산
-        for i in range(len(obstacle_array)):
-            circle_x, circle_y, circle_radius = obstacle_array[i]
+        for i in range(len(object_array)):
+            circle_x, circle_y, circle_radius = object_array[i]
 
             # 원의 중심에서 레이 시작점까지의 벡터 (모든 레이에 대해 동일)
             to_circle_x = circle_x - origin_x
@@ -555,15 +542,14 @@ class LidarSensor(BaseSensor):
         # 단일 값 반환
         return noisy_distance_array[0]
 
-    def _raycast(self, origin_x, origin_y, direction, obstacle):
+    def _raycast(self, origin_x, origin_y, direction, objects):
         """
         단일 레이에 대한 레이캐스팅 수행 (라인-원 교차 검출)
-        호환성을 위해 유지됨
 
         Args:
             origin_x, origin_y: 레이 시작점 [m]
             direction: 레이 방향 벡터 (dx, dy)
-            obstacle: 장애물물 객체
+            objects: 객체 외접원 리스트
 
         Returns:
             LidarMeasurement: 측정 결과
@@ -583,7 +569,7 @@ class LidarSensor(BaseSensor):
 
         # 벡터화된 레이캐스팅 호출
         measurements = self._raycast_vectorized(
-            origin_x, origin_y, dirs_x, dirs_y, global_angles, obstacle
+            origin_x, origin_y, dirs_x, dirs_y, global_angles, objects
         )
 
         # 첫 번째 (유일한) 측정값 반환
@@ -705,18 +691,17 @@ class SensorManager:
         """
         return self.sensors
 
-    def update(self, dt, time_elapsed=0, obstacle_manager=None, other_vehicles=None):
+    def update(self, dt, time_elapsed=0, objects=[]):
         """
         모든 센서 업데이트
 
         Args:
             dt: 시간 간격 [s]
-            obstacle_manager: 장애물 관리 객체
             time_elapsed: 시뮬레이션 누적 시간 [s]
-            other_vehicles: 다른 차량 목록
+            objects: 객체 외접원 리스트
         """
         for sensor in self.sensors.values():
-            sensor.update(dt, time_elapsed, obstacle_manager, other_vehicles)
+            sensor.update(dt, time_elapsed, objects)
 
     def draw(self, screen, world_to_screen_func, debug=False):
         """

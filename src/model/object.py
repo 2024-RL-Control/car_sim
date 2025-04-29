@@ -475,9 +475,11 @@ class ObstacleManager:
         self.next_obstacle_id = 0
 
     def update(self, dt: float):
-        """모든 장애물 상태 업데이트"""
+        """모든 장애물 상태 업데이트 후 외접원 반환"""
         for obstacle in self.obstacles.values():
             obstacle.update(dt)
+
+        return self.get_all_outer_circles()
 
     def draw(self, screen, world_to_screen_func, debug: bool = False):
         """모든 장애물 렌더링"""

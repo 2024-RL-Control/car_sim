@@ -154,15 +154,13 @@ class Vehicle:
         self.state.set_position(x, y, yaw)
         self._update_collision_body()
 
-    def set_goal(self, goal_id, goal_manager=None):
+    def set_goal(self, goal_id, goal=None):
         """목적지 ID 설정 및 목적지 정보 업데이트"""
         self.goal_id = goal_id
 
-        # 목적지 관리자가 제공되면 목적지 정보 업데이트
-        if goal_manager and goal_id is not None:
-            goal = goal_manager.get_goal(goal_id)
-            if goal:
-                self.update_target(goal.x, goal.y, goal.yaw)
+        # 목적지 정보 업데이트
+        if goal:
+            self.update_target(goal.x, goal.y, goal.yaw)
 
     def get_goal(self):
         """차량의 할당된 목적지 ID 반환"""
@@ -180,7 +178,7 @@ class Vehicle:
         self._update_collision_body()
         self.clear_goal()
 
-    def step(self, action, dt, time_elapsed, obstacle_manager, goal_manager, vehicles=None):
+    def step(self, action, dt, time_elapsed, obstacles=[], vehicles=[], goal=None):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
@@ -189,26 +187,34 @@ class Vehicle:
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
 
+        # 객체 목록 생성
+        objects = []
+        if obstacles:
+            objects.extend(obstacles)
+        if vehicles:
+            for vehicle in vehicles:
+                if vehicle.id != self.id:  # 자기 자신이 아닌 차량만 추가
+                    objects.extend(vehicle._get_outer_circles_world())
+
         # 차량 센서 업데이트
-        self.sensor_manager.update(dt, time_elapsed, obstacle_manager, vehicles)
+        self.sensor_manager.update(dt, time_elapsed, objects)
 
         # 충돌 검사
-        collision = self._check_collision(obstacle_manager, vehicles)
+        collision = self._check_collision(objects)
 
         # 목표 도달 여부 확인
-        goal = goal_manager.get_vehicle_goal(self.id)
         reached = False
         if goal:
             reached = self._check_target_reached()
 
         return self.state, collision, reached
 
-    def _check_collision(self, obstacle_manager, vehicles):
+    def _check_collision(self, objects):
         """
-        장애물과의 충돌 검사 (3단계 검사)
+        장애물과의 충돌 검사 (1단계 검사)
 
         Args:
-            obstacle_manager: ObstacleManager 객체
+            objects: 객체 외접원
 
         Returns:
             충돌 여부 (Boolean)
@@ -216,36 +222,11 @@ class Vehicle:
         # 위치 및 방향 업데이트 (만약 step 이외에서 호출될 경우 대비)
         self._update_collision_body()
 
-        # 다른 차량과의 충돌 검사 (외접원만)
-        vehicle_outer_circles = self._get_outer_circles_world()
-        if vehicles:
-            for vehicle in vehicles:
-                # 자기 자신은 제외
-                if vehicle.id != self.id:
-                    other_vehicle_circles = vehicle._get_outer_circles_world()
-                    # 외접원끼리 충돌 시 바로 True 반환
-                    if self._circles_collision(vehicle_outer_circles, other_vehicle_circles):
-                        return True
-
-        # 장애물이 없으면 충돌 없음
-        if obstacle_manager.get_obstacle_count() == 0:
+        if len(objects) == 0:
             return False
 
-        # 광역 검사 (빠른 제외)
-        obstacle_outer_circles = obstacle_manager.get_all_outer_circles()
-        if self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
-            return True
-
-        # 중간 수준 검사
-        obstacle_middle_circles = obstacle_manager.get_all_middle_circles()
-        vehicle_middle_circles = self._get_middle_circles_world()
-        if self._circles_collision(vehicle_middle_circles, obstacle_middle_circles):
-            return True
-
-        # 정밀 검사
-        obstacle_inner_circles = obstacle_manager.get_all_inner_circles()
-        vehicle_inner_circles = self._get_inner_circles_world()
-        return self._circles_collision(vehicle_inner_circles, obstacle_inner_circles)
+        # 다른 객체들과의 외접원 수준의 충돌 검사
+        return self._circles_collision(self._get_outer_circles_world(), objects)
 
     def _get_outer_circles_world(self):
         """차량 외접원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""

@@ -281,8 +281,8 @@ class CarSimulatorEnv(gym.Env):
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()
 
-        # 장애물 업데이트
-        self.obstacle_manager.update(dt)
+        # 장애물 업데이트 후 외접원 반환
+        obstacles = self.obstacle_manager.update(dt)
 
         # 차량 업데이트 및 충돌 감지
         collisions = {}
@@ -294,14 +294,16 @@ class CarSimulatorEnv(gym.Env):
             # 다중 차량 모드 - action은 차량별 액션 리스트
             for i, vehicle in enumerate(self.vehicles):
                 vehicle_action = action[i] if i < len(action) else np.zeros(2)
-                _, collision, reached = vehicle.step(vehicle_action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager, self.vehicles)
+                goal = self.goal_manager.get_vehicle_goal(vehicle.id)
+                _, collision, reached = vehicle.step(vehicle_action, dt, self._time_elapsed, obstacles, self.vehicles, goal)
 
                 collisions[vehicle.id] = collision
                 reached_targets[vehicle.id] = reached
         else:
             # 단일 차량 모드 - action은 단일 차량 액션
             # 현재 차량만 업데이트
-            _, collision, reached = self.vehicle.step(action, dt, self._time_elapsed, self.obstacle_manager, self.goal_manager, self.vehicles)
+            goal = self.goal_manager.get_vehicle_goal(self.vehicle.id)
+            _, collision, reached = self.vehicle.step(action, dt, self._time_elapsed, obstacles, self.vehicles, goal)
 
             # 충돌 감지
             collisions[self.vehicle.id] = collision
@@ -389,6 +391,7 @@ class CarSimulatorEnv(gym.Env):
         """
         # 목적지 추가
         goal_id = self.goal_manager.add_goal(x, y, yaw, radius, color)
+        goal = self.goal_manager.get_goal(goal_id)
 
         # 목적지 관리 정보 추가
         self.goal_manager.assign_goal_to_vehicle(vehicle_id, goal_id)
@@ -396,7 +399,7 @@ class CarSimulatorEnv(gym.Env):
         # 차량에 목적지 추가
         if 0 <= vehicle_id < len(self.vehicles):
             vehicle = self.vehicles[vehicle_id]
-            vehicle.set_goal(goal_id, self.goal_manager)
+            vehicle.set_goal(goal_id, goal)
 
         return goal_id
 
