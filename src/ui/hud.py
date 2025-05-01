@@ -177,6 +177,12 @@ class HUD:
             world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
             goal_manager: 목적지 관리자
         """
+        if not vehicles:
+            return
+
+        # 활성 차량 ID 가져오기
+        active_vehicle_id = vehicles[active_vehicle_idx].id if active_vehicle_idx < len(vehicles) else None
+
         for vehicle in vehicles:
             goal = goal_manager.get_vehicle_goal(vehicle.id)
             if goal:
@@ -186,7 +192,7 @@ class HUD:
 
                 # 화살표 그리기 (차량에서 목표로)
                 # 화살표 색상은 활성 차량이면 밝은 노란색, 아니면 어두운 노란색
-                arrow_color = (255, 255, 0) if vehicle.id == vehicles[active_vehicle_idx].id else (180, 180, 0)
+                arrow_color = (255, 255, 0) if vehicle.id == active_vehicle_id else (180, 180, 0)
                 pygame.draw.line(screen, arrow_color, vehicle_pos, target_pos, 2)
 
                 # 화살표 머리 그리기

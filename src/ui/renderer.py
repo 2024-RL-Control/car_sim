@@ -162,34 +162,41 @@ class Renderer:
         # 배경 지우기
         self.screen.fill(self.config['visualization']['background_color'])
 
+        # 현재 활성화된 차량 가져오기
+        active_vehicle = env.vehicle_manager.get_active_vehicle()
+        if active_vehicle is None:
+            # 활성화된 차량이 없으면 렌더링 중지
+            pygame.display.flip()
+            return
+
         # 월드 좌표를 화면 좌표로 변환하는 함수를 생성
-        world_to_screen = lambda x, y: camera.world_to_screen(x, y, vehicle=env.vehicle)
+        world_to_screen = lambda x, y: camera.world_to_screen(x, y, vehicle=active_vehicle)
 
         # 전체 렌더링 설정이 켜져 있을 때만 렌더링을 수행
         if self.config['visualization']['visualize']:
             # 고정 그리드 그리기
-            self.draw_grid(camera, env.vehicle)
+            self.draw_grid(camera, active_vehicle)
 
             # 목적지 그리기
-            env.goal_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
+            env.vehicle_manager.goal_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
 
             # 장애물 그리기
             env.obstacle_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
 
             # 모든 차량 그리기
-            for vehicle in env.vehicles:
-                is_active = (vehicle.id == env.vehicles[env.active_vehicle_idx].id)
-                vehicle.draw(self.screen, world_to_screen, is_active, self.config['visualization']['debug_mode'])
+            env.vehicle_manager.draw_vehicles(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
 
         # HUD 표시 (visualize_hud 설정 체크)
         if self.config['visualization']['visualize_hud']:
-            hud.draw_hud(self.screen, env.vehicle, env.active_vehicle_idx, env.num_vehicles,
-                        self._performance_metrics, env.goal_manager)
+            active_vehicle_idx = env.vehicle_manager.get_active_vehicle_index()
+            vehicle_count = env.vehicle_manager.get_vehicle_count()
+
+            hud.draw_hud(self.screen, active_vehicle, active_vehicle_idx, vehicle_count,
+                        self._performance_metrics, env.vehicle_manager.goal_manager)
 
             # 차량 목표 방향 화살표 그리기
-            hud.draw_target_direction_arrows(self.screen, env.vehicles, env.active_vehicle_idx,
-                                    world_to_screen, env.goal_manager)
-
+            hud.draw_target_direction_arrows(self.screen, env.vehicle_manager.get_all_vehicles(), active_vehicle_idx,
+                                    world_to_screen, env.vehicle_manager.goal_manager)
 
         # 렌더링 시간 측정
         self._performance_metrics['render_time'] = time.time() - render_start
