@@ -220,9 +220,13 @@ class CarSimulatorEnv(gym.Env):
         self._time_elapsed += dt
 
         # 차량 업데이트 및 충돌 감지
-        obs, reward, collisions, reached_targets = self.vehicle_manager.step(
+        collisions, reached_targets = self.vehicle_manager.step(
             action, dt, self._time_elapsed, obstacles
         )
+
+        # 관측값 및 보상 계산
+        obs = self._get_obs()
+        reward = self._calculate_rewards(collisions, reached_targets)
 
         # 물리 시뮬레이션 시간 측정
         physics_time = time.time() - physics_start
@@ -303,6 +307,120 @@ class CarSimulatorEnv(gym.Env):
 
     def _get_obs(self):
         """
-        관측 정보 반환
+        모든 차량의 관측값 반환
+
+        Returns:
+            관측값 리스트 (단일 차량이면 단일 관측값)
         """
-        return self.vehicle_manager._get_observations()
+        if not self.multi_vehicle:
+            # 단일 차량 모드
+            if len(self.vehicle_manager.get_all_vehicles()) > 0:
+                return self._get_vehicle_observation(self.vehicle_manager.get_all_vehicles()[0])
+            return np.zeros(self.observation_space.shape)
+        else:
+            # 다중 차량 모드
+            return [self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()]
+
+    def _get_vehicle_observation(self, vehicle):
+        """
+        단일 차량 관측값 계산
+
+        Args:
+            vehicle: 차량 객체
+
+        Returns:
+            관측값 (numpy 배열)
+        """
+        state = vehicle.get_state()
+        cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
+
+        # 기본 차량 상태
+        obs = np.array([
+            state.x,
+            state.y,
+            cos_yaw,
+            sin_yaw,
+            state.vel_long,
+            state.vel_lat,
+            state.g_forces[0],
+            state.g_forces[1],
+            state.distance_to_target,
+            state.yaw_diff_to_target
+        ], dtype=np.float32)
+
+        return obs
+
+    def _calculate_rewards(self, collisions, reached_targets):
+        """
+        모든 차량의 보상 계산
+
+        Args:
+            collisions: 차량별 충돌 여부 {vehicle_id: bool}
+            reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
+
+        Returns:
+            보상 리스트 (단일 차량이면 단일 보상)
+        """
+        if not self.multi_vehicle:
+            # 단일 차량 모드
+            if len(self.vehicle_manager.get_all_vehicles()) > 0:
+                vehicle = self.vehicle_manager.get_all_vehicles()[0]
+                return self._calculate_vehicle_reward(
+                    vehicle,
+                    collisions.get(vehicle.id, False),
+                    reached_targets.get(vehicle.id, False)
+                )
+            return 0.0
+        else:
+            # 다중 차량 모드
+            return [
+                self._calculate_vehicle_reward(
+                    vehicle,
+                    collisions.get(vehicle.id, False),
+                    reached_targets.get(vehicle.id, False)
+                )
+                for vehicle in self.vehicle_manager.get_all_vehicles()
+            ]
+
+    def _calculate_vehicle_reward(self, vehicle, collision, reached_target):
+        """
+        단일 차량 보상 계산
+
+        Args:
+            vehicle: 차량 객체
+            collision: 충돌 여부
+            reached_target: 목표 도달 여부
+
+        Returns:
+            계산된 보상값
+        """
+        state = vehicle.get_state()
+
+        # 속도 보상 (최대 속도에 가까울수록 높은 보상)
+        speed_reward = state.vel_long / self.config['vehicle']['max_speed'] * 0.2
+
+        # 목표 관련 보상
+        goal_reward = 0
+        goal_manager = self.vehicle_manager.get_goal_manager()
+        if goal_manager.get_vehicle_goal(vehicle.id):
+            # 목표 거리에 따른 보상 (가까울수록 높은 보상)
+            if state.distance_to_target > 0:
+                proximity_reward = 1.0 / (1.0 + state.distance_to_target) * 0.1
+                goal_reward += proximity_reward
+
+            # 방향 일치 보상 (차량이 목표를 바라볼수록 높은 보상)
+            direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * 0.2
+            goal_reward += direction_reward
+
+            # 목표 도달 보상
+            if reached_target:
+                goal_reward += 1.0
+
+        # 종합 보상
+        reward = speed_reward + goal_reward
+
+        # 충돌 패널티
+        if collision:
+            reward -= 2.0
+
+        return reward
