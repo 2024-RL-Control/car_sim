@@ -57,9 +57,8 @@ class KeyboardHandler:
         # 차량 전환 (다중 차량 모드일 때만)
         if env.multi_vehicle and pressed[pygame.K_TAB] and not self._keys_state[pygame.K_TAB]:
             # 다음 차량으로 전환
-            env.active_vehicle_idx = (env.active_vehicle_idx + 1) % env.num_vehicles
-            env.vehicle = env.vehicles[env.active_vehicle_idx]
-            print(f"현재 차량: {env.active_vehicle_idx + 1}/{env.num_vehicles}")
+            env.vehicle_manager.cycle_active_vehicle()
+            print(f"현재 차량: {env.vehicle_manager.get_active_vehicle_index() + 1}/{env.vehicle_manager.get_vehicle_count()}")
         self._keys_state[pygame.K_TAB] = pressed[pygame.K_TAB]
 
         # 카메라 컨트롤 처리
@@ -100,28 +99,31 @@ class KeyboardHandler:
         self._keys_state[pygame.K_F9] = pressed[pygame.K_F9]
 
         # 입력에서 액션 결정
-        action = np.zeros(2)
+        action = np.zeros(3)  # [가속, 조향, 브레이크]
 
-        # 가속/제동 입력
-        if self._keys_pressed['up']:
-            action[0] = 1.0  # 가속
-        if self._keys_pressed['down']:
-            action[0] = -5.0  # 제동
+        # 학습 모드 아닐 때, 차량 제어 (조작 모드)
+        if not env.config['visualization']['training_mode']:
+            # 가속/제동 입력
+            if self._keys_pressed['up']:
+                action[0] = 1.0  # 가속
+            if self._keys_pressed['down']:
+                action[1] = 0.7  # 제동
 
-        # 브레이크 키가 눌려있으면 최대 제동
-        if self._keys_pressed['brake']:
-            action[0] = -1.0
+            # 브레이크 키가 눌려있으면 최대 제동
+            if self._keys_pressed['brake']:
+                action[1] = 1.0
 
-        # 조향 입력
-        if self._keys_pressed['left']:
-            action[1] = -1.0  # 좌회전
-        if self._keys_pressed['right']:
-            action[1] = 1.0  # 우회전
+            # 조향 입력
+            if self._keys_pressed['left']:
+                action[2] = -1.0  # 좌회전
+            if self._keys_pressed['right']:
+                action[2] = 1.0  # 우회전
 
         # 다중 차량 모드에서는 활성 차량만 입력으로 제어
         if env.multi_vehicle:
-            actions = [np.zeros(2) for _ in range(env.num_vehicles)]
-            actions[env.active_vehicle_idx] = action
+            actions = [np.zeros(3) for _ in range(env.vehicle_manager.get_vehicle_count())]
+            active_idx = env.vehicle_manager.get_active_vehicle_index()
+            actions[active_idx] = action
             return actions
         else:
             return action

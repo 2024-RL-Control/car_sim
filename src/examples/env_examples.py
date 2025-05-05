@@ -122,17 +122,12 @@ def create_random_goal(env, vehicle_id, min_distance=15.0, max_distance=30.0):
         min_distance: 현재 위치로부터 최소 거리 (m)
         max_distance: 현재 위치로부터 최대 거리 (m)
     """
-    vehicle = env.vehicles[vehicle_id]
-    goal_manager = env.get_goal_manager()
+    vehicle = env.vehicle_manager.get_vehicle_by_id(vehicle_id)
+    vehicle.clear_goals()
 
     # 현재 차량 위치
     current_x = vehicle.state.x
     current_y = vehicle.state.y
-
-    # 현재 목적지 정보 (있는 경우)
-    current_goal_id = goal_manager.get_vehicle_goal_id(vehicle_id)
-    if current_goal_id is not None:
-        goal_manager.remove_goal(current_goal_id)
 
     # 적절한 거리에 새 목적지 생성
     while True:
@@ -149,19 +144,16 @@ def create_random_goal(env, vehicle_id, min_distance=15.0, max_distance=30.0):
         target_yaw = np.random.random() * 2 * np.pi
 
         # 다른 차량의 목적지와 일정 거리 이상 떨어지게 (충돌 방지)
-        valid_position = True
-        for other_id in range(env.num_vehicles):
-            if other_id == vehicle_id:
+        valid = True
+        for other in env.vehicle_manager.get_all_vehicles():
+            if other.id == vehicle_id:
                 continue
+            g = other.get_current_goal()
+            if g and np.hypot(new_x - g.x, new_y - g.y) < 10.0:
+                valid = False
+                break
 
-            other_goal = goal_manager.get_vehicle_goal(other_id)
-            if other_goal:
-                dist_to_other_goal = np.sqrt((new_x - other_goal.x)**2 + (new_y - other_goal.y)**2)
-                if dist_to_other_goal < 10.0:  # 최소 10m 떨어지게
-                    valid_position = False
-                    break
-
-        if valid_position:
+        if valid:
             # 적절한 위치를 찾았으면 목적지 생성
             # 차량별 다른 색상 사용
             colors = [(0, 255, 0), (255, 255, 0), (0, 255, 255), (255, 0, 255), (0, 0, 255)]
@@ -183,88 +175,63 @@ def waypoint_navigation_test():
     print("  N: Generate new waypoints")
     print("  Tab: Switch between vehicles")
 
-    # 웨이포인트 시퀀스 상태 변수들
+    # 차량별 웨이포인트 시퀀스와 상태 초기화
     vehicle_waypoints = {}
-    vehicle_current_index = {}
-
-    # 모든 차량에 대한 초기 웨이포인트 시퀀스 생성
-    for vehicle_id in range(env.num_vehicles):
-        vehicle_waypoints[vehicle_id] = create_waypoint_sequence(env, vehicle_id)
-        vehicle_current_index[vehicle_id] = 0
-        set_next_waypoint(env, vehicle_waypoints[vehicle_id], vehicle_current_index[vehicle_id], vehicle_id)
+    for vid in range(env.num_vehicles):
+        # 기존 목표 제거 후 새 시퀀스 생성
+        vehicle = env.vehicle_manager.get_vehicle_by_id(vid)
+        vehicle_waypoints[vid] = create_waypoint_sequence(env, vid)
 
     running = True
-    generate_new_waypoints = False
-    target_vehicle_id = None
+    generate_new = False
+    target_vid = None
 
     while running:
-        # 키보드 입력 처리 및 액션 생성
+        # 입력 처리
         action = env.handle_keyboard_input()
-
-        # 이벤트 처리
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
                 running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-                elif event.key == pygame.K_n:
-                    # 새 웨이포인트 시퀀스 생성
-                    generate_new_waypoints = True
-                    target_vehicle_id = env.active_vehicle_idx
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_n:
+                # 특정 차량에 대해 즉시 새 웨이포인트 시퀀스 생성 요청
+                active = env.vehicle_manager.get_active_vehicle()
+                if active:
+                    target_vid = active.id
+                    generate_new = True
 
         # 환경 스텝
         _, _, done, info = env.step(action)
 
-        # 모든 차량에 대해 목적지 도달 확인
-        for vehicle_id in range(env.num_vehicles):
-            if info['reached_targets'].get(vehicle_id, False):
-                # 해당 차량의 웨이포인트 인덱스 증가
-                if vehicle_id in vehicle_current_index:
-                    vehicle_current_index[vehicle_id] += 1
+        # 도달한 차량에 대해 next_goal 호출
+        for vid, reached in info['reached_targets'].items():
+            if reached:
+                vehicle = env.vehicle_manager.get_vehicle_by_id(vid)
+                # 다음 목표가 있으면 인덱스 자동 증가
+                if not vehicle.next_goal():
+                    # 모든 목표 소진 시 새 시퀀스 생성
+                    vehicle_waypoints[vid] = create_waypoint_sequence(env, vid)
 
-                    # 모든 웨이포인트 완료 시 새 시퀀스 생성
-                    if vehicle_current_index[vehicle_id] >= len(vehicle_waypoints[vehicle_id]):
-                        # 해당 차량에 대한 새 웨이포인트 시퀀스 생성
-                        vehicle_waypoints[vehicle_id] = create_waypoint_sequence(env, vehicle_id)
-                        vehicle_current_index[vehicle_id] = 0
-                        set_next_waypoint(env, vehicle_waypoints[vehicle_id], vehicle_current_index[vehicle_id], vehicle_id)
-                    else:
-                        # 다음 웨이포인트로 이동
-                        set_next_waypoint(env, vehicle_waypoints[vehicle_id], vehicle_current_index[vehicle_id], vehicle_id)
-
-        # 특정 차량에 대한 새 웨이포인트 시퀀스 생성이 필요한 경우
-        if generate_new_waypoints and target_vehicle_id is not None:
-            # 해당 차량의 현재 목적지 제거
-            goal_manager = env.get_goal_manager()
-            current_goal_id = goal_manager.get_vehicle_goal_id(target_vehicle_id)
-            if current_goal_id is not None:
-                goal_manager.remove_goal(current_goal_id)
-
-            # 해당 차량에 대한 새 웨이포인트 시퀀스 생성
-            vehicle_waypoints[target_vehicle_id] = create_waypoint_sequence(env, target_vehicle_id)
-            vehicle_current_index[target_vehicle_id] = 0
-            set_next_waypoint(env, vehicle_waypoints[target_vehicle_id], vehicle_current_index[target_vehicle_id], target_vehicle_id)
-
-            generate_new_waypoints = False
-            target_vehicle_id = None
+        # 'N' 키를 눌러 새 시퀀스 요청한 경우
+        if generate_new and target_vid is not None:
+            veh = env.vehicle_manager.get_vehicle_by_id(target_vid)
+            veh.clear_goals()
+            vehicle_waypoints[target_vid] = create_waypoint_sequence(env, target_vid)
+            generate_new = False
+            target_vid = None
 
         # 렌더링
         env.render()
 
-        # 충돌로 인한 종료 시 잠시 대기 후 재시작
-        if done:
-            if info.get('collision', False):
-                pygame.time.wait(1000)  # 1초 대기
-                env.reset()
+        # 충돌 시 재시작
+        if done and info.get('collision', False):
+            pygame.time.wait(1000)
+            env.reset()
+            # 모든 차량에 새 시퀀스 생성
+            for vid in range(env.num_vehicles):
+                v = env.vehicle_manager.get_vehicle_by_id(vid)
+                v.clear_goals()
+                vehicle_waypoints[vid] = create_waypoint_sequence(env, vid)
 
-                # 모든 차량에 대한 새 웨이포인트 시퀀스 생성
-                for vehicle_id in range(env.num_vehicles):
-                    vehicle_waypoints[vehicle_id] = create_waypoint_sequence(env, vehicle_id)
-                    vehicle_current_index[vehicle_id] = 0
-                    set_next_waypoint(env, vehicle_waypoints[vehicle_id], vehicle_current_index[vehicle_id], vehicle_id)
-
-    # 환경 종료
     env.close()
 
 def create_waypoint_sequence(env, vehicle_id=0, num_waypoints=5, min_distance=10.0, max_distance=25.0):
@@ -281,7 +248,8 @@ def create_waypoint_sequence(env, vehicle_id=0, num_waypoints=5, min_distance=10
     Returns:
         웨이포인트 리스트: [(x, y, yaw), ...]
     """
-    vehicle = env.vehicles[vehicle_id]
+    vehicle = env.vehicle_manager.get_vehicle_by_id(vehicle_id)
+    vehicle.clear_goals()
     waypoints = []
 
     # 시작점 (현재 차량 위치)
@@ -320,51 +288,14 @@ def create_waypoint_sequence(env, vehicle_id=0, num_waypoints=5, min_distance=10
         # 현재 위치 업데이트
         current_x, current_y = new_x, new_y
 
-    # 모든 웨이포인트를 미리 생성하여 표시 (현재 활성 목표만 활성 색상)
-    goal_manager = env.get_goal_manager()
-
-    # 차량별 색상 설정
+    radius = 1.5  # 기본 반경
     colors = [(0, 255, 0), (255, 255, 0), (0, 255, 255), (255, 0, 255), (0, 0, 255)]
     base_color = colors[vehicle_id % len(colors)]
 
-    # 비활성 웨이포인트는 더 투명하게 표시
-    inactive_color = (base_color[0]//3, base_color[1]//3, base_color[2]//3)
-
     for i, (x, y, yaw) in enumerate(waypoints):
-        # 웨이포인트 색상: 비활성 웨이포인트는 옅은 색으로 표시
-        if i > 0:  # 첫 번째 웨이포인트는 set_next_waypoint에서 추가
-            radius = 1.5  # 기본 반경
-            goal_id = goal_manager.add_goal(x, y, yaw, radius, inactive_color)
+        goal_id = vehicle.add_goal(x, y, yaw, radius, base_color)
 
     return waypoints
-
-def set_next_waypoint(env, waypoints, index, vehicle_id=0):
-    """
-    다음 웨이포인트를 활성 목표로 설정
-
-    Args:
-        env: CarSimulatorEnv 객체
-        waypoints: 웨이포인트 리스트
-        index: 활성화할 웨이포인트 인덱스
-        vehicle_id: 차량 ID
-    """
-    if index >= len(waypoints):
-        return
-
-    goal_manager = env.get_goal_manager()
-
-    # 기존 목표가 있으면 제거
-    current_goal_id = goal_manager.get_vehicle_goal_id(vehicle_id)
-    if current_goal_id is not None:
-        goal_manager.remove_goal(current_goal_id)
-
-    # 차량별 색상 설정
-    colors = [(0, 255, 0), (255, 255, 0), (0, 255, 255), (255, 0, 255), (0, 0, 255)]
-    goal_color = colors[vehicle_id % len(colors)]
-
-    # 새 목표 생성 및 활성화
-    x, y, yaw = waypoints[index]
-    new_goal_id = env.add_goal_for_vehicle(vehicle_id, x, y, yaw, 2.0, goal_color)
 
 # ==============
 # Course Builder Helper Functions

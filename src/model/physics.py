@@ -19,23 +19,19 @@ class InputProcessor:
 
         Args:
             state: 차량 상태 객체
-            action: 제어 입력 배열 [throttle, steering] (-1 ~ 1 범위)
+            action: 제어 입력 배열 [throttle_engine, throttle_brake, steering] ([0, 1], [0, 1], [-1, 1]) 범위
             dt: 시간 간격 [s]
             config: 차량 설정
             physics_config: 물리 설정
         """
         # 액션 배열에서 입력값 추출
-        throttle_input = np.clip(action[0], -1.0, 1.0)  # 가속 입력 (-1: 최대 제동, 1: 최대 가속)
-        steer_input = np.clip(action[1], -1.0, 1.0)     # 조향 입력 (-1: 좌회전, 1: 우회전)
+        engine_input = np.clip(action[0], 0.0, 1.0)     # 엔진 입력 (0: 정지, 1: 최대 가속)
+        brake_input = np.clip(action[1], 0.0, 1.0)      # 브레이크 입력 (0: 정지, 1: 최대 제동)
+        steer_input = np.clip(action[2], -1.0, 1.0)     # 조향 입력 (-1: 좌회전, 1: 우회전)
 
-        # 목표 스로틀 계산 (입력 * 최대 가속도/최대 제동)
-        target_throttle = 0.0
-        if throttle_input >= 0:
-            # 가속 요청
-            target_throttle = throttle_input * config['max_accel']
-        else:
-            # 제동 요청
-            target_throttle = throttle_input * config['max_brake']
+        # 엔진/브레이크 요청의 정도
+        target_throttle_engine = engine_input
+        target_throttle_brake  = brake_input
 
         # 목표 조향각 계산 (입력 * 최대 조향각)
         target_steer = steer_input * np.radians(config['max_steer'])
@@ -45,7 +41,8 @@ class InputProcessor:
 
         # 스로틀 응답 지연 (점진적 변화)
         throttle_response_rate = physics_config['throttle_response_rate']
-        state.throttle += (target_throttle - state.throttle) * throttle_response_rate * dt
+        state.throttle_engine += (target_throttle_engine - state.throttle_engine) * throttle_response_rate * dt
+        state.throttle_brake  += (target_throttle_brake  - state.throttle_brake ) * throttle_response_rate * dt
 
         # 조향 응답 지연 (점진적 변화, 속도에 따라 조정)
         steering_response_rate = physics_config['steering_response_rate'] * steer_speed_factor
@@ -109,10 +106,12 @@ class ForceCalculator:
         friction_coeff = physics_config['terrain_friction'][state.terrain_type]
 
         # 가속도 계산 (스로틀 기반)
-        acc_long = state.throttle * friction_coeff
+        acc_engine = state.throttle_engine  * vehicle_config['max_accel'] * friction_coeff
+        acc_brake = state.throttle_brake * vehicle_config['max_brake'] * friction_coeff
+        acc_long = acc_engine - acc_brake
 
         # 저항력 계산
-        rolling_acc = cls._calculate_rolling_resistance(vel_long, state.throttle, vehicle_config, physics_config, dt)
+        rolling_acc = cls._calculate_rolling_resistance(vel_long, state.throttle_engine, vehicle_config, physics_config, dt)
         drag_acc = cls._calculate_drag(vel_long, vehicle_config, physics_config)
 
         # 최종 종방향 가속도
@@ -124,7 +123,7 @@ class ForceCalculator:
         return acc_long, acc_lat, yaw_rate
 
     @classmethod
-    def _calculate_rolling_resistance(cls, vel_long, throttle, vehicle_config, physics_config, dt):
+    def _calculate_rolling_resistance(cls, vel_long, throttle_engine, vehicle_config, physics_config, dt):
         """구름 저항 계산"""
         # 구름 저항 (Cr * m * g)
         rolling_resistance = physics_config['roll_resist'] * vehicle_config['mass'] * physics_config['gravity']
@@ -134,7 +133,7 @@ class ForceCalculator:
             rolling_acc = (rolling_resistance / vehicle_config['mass']) * (-1 if vel_long > 0 else 1)
         else:
             # 정지 상태에 가까우면 속도를 0으로 설정
-            if abs(throttle) < rolling_resistance / vehicle_config['mass']:
+            if throttle_engine < rolling_resistance / vehicle_config['mass']:
                 rolling_acc = -vel_long / dt  # 완전히 정지하도록
             else:
                 rolling_acc = 0
@@ -192,7 +191,7 @@ class StateUpdater:
     """
 
     @classmethod
-    def update_vehicle_state(cls, state, acc_long, acc_lat, yaw_rate, dt, physics_config):
+    def update_vehicle_state(cls, state, acc_long, acc_lat, yaw_rate, dt, vehicle_config, physics_config):
         """
         차량 상태 업데이트
 
@@ -202,22 +201,11 @@ class StateUpdater:
             acc_lat: 횡방향 가속도 [m/s²]
             yaw_rate: 각속도 [rad/s]
             dt: 시간 간격 [s]
+            vehicle_config: 차량 설정
             physics_config: 물리 설정
         """
         # 속도 업데이트
-        vel_long_new = state.vel_long + acc_long * dt
-
-        # G-force 계산 (가속도를 g 단위로 변환)
-        g_long = -acc_long / physics_config['gravity']
-        g_lat = -acc_lat / physics_config['gravity']
-
-        # NaN 체크
-        if not np.isfinite(g_long):
-            g_long = 0.0
-        if not np.isfinite(g_lat):
-            g_lat = 0.0
-
-        g_forces = [g_long, g_lat]
+        vel_long_new = np.clip(state.vel_long + acc_long * dt, vehicle_config['min_speed'], vehicle_config['max_speed'])
 
         # 요각 업데이트, -π ~ π 범위로 정규화
         yaw_new = state.normalize_angle(state.yaw + yaw_rate * dt)
@@ -254,7 +242,6 @@ class StateUpdater:
         state.acc_long = acc_long
         state.acc_lat = acc_lat
         state.yaw_rate = yaw_rate
-        state.g_forces = g_forces
 
 
 # ======================
@@ -275,7 +262,7 @@ class PhysicsEngine:
 
         Args:
             state: 차량 상태 객체 (VehicleState)
-            action: 제어 입력 배열 [throttle, steering] (-1 ~ 1 범위)
+            action: 제어 입력 배열 [throttle_engine, throttle_brake, steering] ([0, 1], [0, 1], [-1, 1]) 범위
             dt: 시간 간격 [s]
             physics_config: 물리 설정
             vehicle_config: 차량 설정
@@ -295,7 +282,7 @@ class PhysicsEngine:
 
             # 상태 업데이트
             StateUpdater.update_vehicle_state(
-                state, acc_long, acc_lat, yaw_rate, substep_dt, physics_config
+                state, acc_long, acc_lat, yaw_rate, substep_dt, vehicle_config, physics_config
             )
 
         # 궤적 업데이트

@@ -6,7 +6,7 @@ from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
 from .physics import PhysicsEngine
-from .object import RectangleObstacle
+from .object import RectangleObstacle, GoalManager
 from .sensor import SensorManager
 
 # ======================
@@ -24,9 +24,9 @@ class VehicleState:
     acc_long: float = 0.0          # 종방향 가속도 [m/s²]
     vel_lat: float = 0.0           # 횡방향 속도 [m/s]
     acc_lat: float = 0.0           # 횡방향 가속도 [m/s²]
-    throttle: float = 0.0          # 스로틀 [-1, 1]
+    throttle_engine: float = 0.0   # 파워 엔진의 요청 정도 [0,1]
+    throttle_brake:  float = 0.0   # 브레이크 요청 정도[0,1]
     steer: float = 0.0             # 조향각 [rad]
-    g_forces: List[float] = field(default_factory=lambda: [0.0, 0.0])  # [종방향, 횡방향] G-포스
 
     rear_axle_x: float = 0.0       # 뒷바퀴 축 X 좌표 [m]
     rear_axle_y: float = 0.0       # 뒷바퀴 축 Y 좌표 [m]
@@ -55,9 +55,9 @@ class VehicleState:
         self.acc_long = 0.0
         self.vel_lat = 0.0
         self.acc_lat = 0.0
-        self.throttle = 0.0
+        self.throttle_engine = 0.0
+        self.throttle_brake = 0.0
         self.steer = 0.0
-        self.g_forces = [0.0, 0.0]
 
         self.rear_axle_x = 0.0
         self.rear_axle_y = 0.0
@@ -130,8 +130,8 @@ class Vehicle:
             color=self.visual_config['vehicle_colors'],
             bounding_circle_colors=self.visual_config['bounding_circle_color']
         )
-        self.goal_id = None
 
+        self.goal_manager = GoalManager(bounding_circle_colors=self.visual_config['bounding_circle_color'])
         self.sensor_manager = SensorManager(self, self.vehicle_config['sensors'], self.visual_config)
 
         # 그래픽 리소스 초기화
@@ -140,10 +140,6 @@ class Vehicle:
     def get_state(self):
         """차량 상태 반환"""
         return self.state
-
-    def get_sensor_manager(self):
-        """센서 관리자 반환"""
-        return self.sensor_manager
 
     def get_id(self):
         """차량 ID 반환"""
@@ -154,33 +150,84 @@ class Vehicle:
         self.state.set_position(x, y, yaw)
         self._update_collision_body()
 
-    def set_goal(self, goal_id, goal_manager=None):
-        """목적지 ID 설정 및 목적지 정보 업데이트"""
-        self.goal_id = goal_id
+    def get_current_goal(self):
+        """현재 목표 반환"""
+        return self.goal_manager.get_current_goal()
 
-        # 목적지 관리자가 제공되면 목적지 정보 업데이트
-        if goal_manager and goal_id is not None:
-            goal = goal_manager.get_goal(goal_id)
+    def add_goal(self, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
+        """
+        목적지 추가 및 목표 정보 업데이트
+
+        Args:
+            x: 목적지 X 좌표
+            y: 목적지 Y 좌표
+            yaw: 목적지 방향각 [rad]
+            radius: 목적지 반경
+            color: 목적지 색상 (RGB)
+
+        Returns:
+            goal_id: 생성된 목적지 ID
+        """
+        goal_id = self.goal_manager.add_goal(x, y, yaw, radius, color)
+        goal = self.goal_manager.get_current_goal()
+        self.update_target(goal.x, goal.y, goal.yaw)
+        return goal_id
+
+    def remove_goal(self, index=None):
+        """
+        목적지 제거
+
+        Args:
+            index: 제거할 목적지 인덱스 (None이면 현재 목적지)
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        if index is None:
+            bool = self.goal_manager.remove_current_goal(index)
+            next_goal = self.goal_manager.get_current_goal()
+            if next_goal:
+                self.update_target(next_goal.x, next_goal.y, next_goal.yaw)
+            return bool
+        else:
+            # 인덱스가 유효한지 확인
+            if index < 0 or index >= len(self.goal_manager.goals):
+                return False
+            else:
+                bool = self.goal_manager.remove_current_goal(index)
+                next_goal = self.goal_manager.get_current_goal()
+                if next_goal:
+                    self.update_target(next_goal.x, next_goal.y, next_goal.yaw)
+                return bool
+
+    def clear_goals(self):
+        """모든 목적지 제거"""
+        self.goal_manager.clear_goals()
+
+    def next_goal(self):
+        """
+        다음 목적지로 전환
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        result = self.goal_manager.next_goal()
+        if result:
+            # 현재 목표 업데이트
+            goal = self.goal_manager.get_current_goal()
             if goal:
                 self.update_target(goal.x, goal.y, goal.yaw)
-
-    def get_goal(self):
-        """차량의 할당된 목적지 ID 반환"""
-        return self.goal_id
-
-    def clear_goal(self):
-        """차량의 목적지 정보 삭제"""
-        self.goal_id = None
+        return result
 
     def reset(self):
         """차량 상태 초기화"""
         self.state.reset()
+        self.goal_manager.clear_goals()
         self.sensor_manager.reset()
         self._load_graphics()
         self._update_collision_body()
-        self.clear_goal()
 
-    def step(self, action, dt, time_elapsed, obstacle_manager, goal_manager, vehicles=None):
+    def step(self, action, dt, time_elapsed, obstacles=[], vehicles=[]):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
@@ -189,26 +236,34 @@ class Vehicle:
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
 
+        # 객체 목록 생성
+        objects = []
+        if obstacles:
+            objects.extend(obstacles)
+        if vehicles:
+            for vehicle in vehicles:
+                if vehicle.id != self.id:  # 자기 자신이 아닌 차량만 추가
+                    objects.extend(vehicle._get_outer_circles_world())
+
         # 차량 센서 업데이트
-        self.sensor_manager.update(dt, time_elapsed, obstacle_manager, vehicles)
+        self.sensor_manager.update(dt, time_elapsed, objects)
 
         # 충돌 검사
-        collision = self._check_collision(obstacle_manager, vehicles)
+        collision = self._check_collision(objects)
 
         # 목표 도달 여부 확인
-        goal = goal_manager.get_vehicle_goal(self.id)
         reached = False
-        if goal:
+        if self.goal_manager.has_goals():
             reached = self._check_target_reached()
 
         return self.state, collision, reached
 
-    def _check_collision(self, obstacle_manager, vehicles):
+    def _check_collision(self, objects):
         """
-        장애물과의 충돌 검사 (3단계 검사)
+        장애물과의 충돌 검사 (1단계 검사)
 
         Args:
-            obstacle_manager: ObstacleManager 객체
+            objects: 객체 외접원
 
         Returns:
             충돌 여부 (Boolean)
@@ -216,36 +271,11 @@ class Vehicle:
         # 위치 및 방향 업데이트 (만약 step 이외에서 호출될 경우 대비)
         self._update_collision_body()
 
-        # 다른 차량과의 충돌 검사 (외접원만)
-        vehicle_outer_circles = self._get_outer_circles_world()
-        if vehicles:
-            for vehicle in vehicles:
-                # 자기 자신은 제외
-                if vehicle.id != self.id:
-                    other_vehicle_circles = vehicle._get_outer_circles_world()
-                    # 외접원끼리 충돌 시 바로 True 반환
-                    if self._circles_collision(vehicle_outer_circles, other_vehicle_circles):
-                        return True
-
-        # 장애물이 없으면 충돌 없음
-        if obstacle_manager.get_obstacle_count() == 0:
+        if len(objects) == 0:
             return False
 
-        # 광역 검사 (빠른 제외)
-        obstacle_outer_circles = obstacle_manager.get_all_outer_circles()
-        if self._circles_collision(vehicle_outer_circles, obstacle_outer_circles):
-            return True
-
-        # 중간 수준 검사
-        obstacle_middle_circles = obstacle_manager.get_all_middle_circles()
-        vehicle_middle_circles = self._get_middle_circles_world()
-        if self._circles_collision(vehicle_middle_circles, obstacle_middle_circles):
-            return True
-
-        # 정밀 검사
-        obstacle_inner_circles = obstacle_manager.get_all_inner_circles()
-        vehicle_inner_circles = self._get_inner_circles_world()
-        return self._circles_collision(vehicle_inner_circles, obstacle_inner_circles)
+        # 다른 객체들과의 외접원 수준의 충돌 검사
+        return self._circles_collision(self._get_outer_circles_world(), objects)
 
     def _get_outer_circles_world(self):
         """차량 외접원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""
@@ -359,6 +389,8 @@ class Vehicle:
         """차량 및 타이어 렌더링"""
         # 스케일 계산
         self._update_scale(self.visual_config['camera_zoom'])
+
+        self.goal_manager.draw(screen, world_to_screen_func, debug)
 
         # 디버그 모드 - 활성 차량인 경우에만 센서 시각화
         if debug:
@@ -572,3 +604,436 @@ class Vehicle:
         if len(trajectory_points) > 1:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
             pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
+
+    def get_serializable_state(self):
+        """
+        직렬화 가능한 상태 정보 반환
+
+        Returns:
+            직렬화 가능한 상태 정보 딕셔너리
+        """
+        state_dict = self.state.__dict__.copy()
+
+        # 직렬화할 수 없는 trajectory 필드 처리
+        state_dict['trajectory'] = list(self.state.trajectory)
+
+        return {
+            'id': self.id,
+            'state': state_dict,
+            'goals': self.goal_manager.get_serializable_goals()
+        }
+
+    def load_from_serialized(self, serialized_data):
+        """
+        직렬화된 데이터에서 상태 복원
+
+        Args:
+            serialized_data: 직렬화된 상태 정보
+        """
+        # 상태 복원
+        if 'state' in serialized_data:
+            state_dict = serialized_data['state']
+            for key, value in state_dict.items():
+                if hasattr(self.state, key):
+                    if key == 'trajectory':
+                        self.state.trajectory = deque(value, maxlen=3000)
+                    else:
+                        setattr(self.state, key, value)
+
+        # 목적지 정보 복원
+        if 'goals' in serialized_data:
+            self.goal_manager.load_from_serialized(serialized_data['goals'])
+
+            # 현재 목표 위치로 target 정보 업데이트
+            current_goal = self.goal_manager.get_current_goal()
+            if current_goal:
+                self.update_target(current_goal.x, current_goal.y, current_goal.yaw)
+
+# ======================
+# Vehicle Manager
+# ======================
+class VehicleManager:
+    """차량들을 관리하는 클래스"""
+
+    def __init__(self, vehicle_config=None, physics_config=None, visual_config=None):
+        """
+        차량 관리자 초기화
+
+        Args:
+            vehicle_config: 차량 설정
+            physics_config: 물리 설정
+            visual_config: 시각화 설정
+        """
+        self.vehicles = []  # 차량 목록
+        self.vehicle_map = {}  # {vehicle_id: vehicle} 매핑
+        self.active_vehicle_idx = 0  # 현재 활성화된 차량 인덱스
+        self.next_vehicle_id = 0  # 다음 차량 ID (자동 생성용)
+
+        # 설정 저장
+        self.vehicle_config = vehicle_config
+        self.physics_config = physics_config
+        self.visual_config = visual_config
+
+    def create_vehicle(self, x=0.0, y=0.0, yaw=None, vehicle_id=None, vehicle_config=None,physics_config=None, visual_config=None):
+        """
+        새 차량 생성 및 추가
+
+        Args:
+            x: 초기 X 좌표
+            y: 초기 Y 좌표
+            yaw: 초기 방향각
+            vehicle_id: 차량 ID (None이면 자동 생성)
+            vehicle_config: 차량 설정 (None이면 기본값 사용)
+            physics_config: 물리 설정 (None이면 기본값 사용)
+            visual_config: 시각화 설정 (None이면 기본값 사용)
+
+        Returns:
+            생성된 차량 객체
+        """
+        # ID 할당 (지정되지 않은 경우 자동 생성)
+        if vehicle_id is None:
+            self.next_vehicle_id = len(self.vehicles)
+            vehicle_id = self.next_vehicle_id
+            self.next_vehicle_id += 1
+
+        # 설정 사용 (지정되지 않은 경우 기본값 사용)
+        v_config = vehicle_config or self.vehicle_config
+        p_config = physics_config or self.physics_config
+        vis_config = visual_config or self.visual_config
+
+        # 차량 생성
+        vehicle = Vehicle(
+            vehicle_id=vehicle_id,
+            vehicle_config=v_config,
+            physics_config=p_config,
+            visual_config=vis_config
+        )
+
+        # 위치 설정
+        vehicle.set_position(x, y, yaw)
+
+        # 차량 목록과 맵에 추가
+        self.vehicles.append(vehicle)
+        self.vehicle_map[vehicle_id] = vehicle
+
+        # 첫 번째 차량이면 활성화
+        if len(self.vehicles) == 1:
+            self.active_vehicle_idx = 0
+
+        return vehicle
+
+    def remove_vehicle(self, vehicle_id):
+        """
+        특정 ID의 차량 제거
+
+        Args:
+            vehicle_id: 제거할 차량 ID
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        # 차량이 존재하는지 확인
+        if vehicle_id not in self.vehicle_map:
+            return False
+
+        vehicle = self.vehicle_map[vehicle_id]
+
+        # 차량 목록과 맵에서 제거
+        self.vehicles.remove(vehicle)
+        del self.vehicle_map[vehicle_id]
+
+        # 활성 차량 인덱스 조정
+        if len(self.vehicles) > 0:
+            self.active_vehicle_idx = min(self.active_vehicle_idx, len(self.vehicles) - 1)
+        else:
+            self.active_vehicle_idx = 0
+
+        return True
+
+    def reset_vehicle(self, vehicle_id=None):
+        """
+        특정 ID 또는 모든 차량 초기화
+
+        Args:
+            vehicle_id: 초기화할 차량 ID (None이면 모든 차량 초기화)
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        if vehicle_id is not None:
+            # 특정 차량만 초기화
+            if vehicle_id in self.vehicle_map:
+                self.vehicle_map[vehicle_id].reset()
+                return True
+            return False
+        else:
+            # 모든 차량 초기화
+            for vehicle in self.vehicles:
+                vehicle.reset()
+            return True
+
+    def get_vehicle_by_id(self, vehicle_id):
+        """
+        ID로 차량 찾기
+
+        Args:
+            vehicle_id: 찾을 차량 ID
+
+        Returns:
+            차량 객체 또는 None
+        """
+        return self.vehicle_map.get(vehicle_id)
+
+    def get_vehicle_by_index(self, index):
+        """
+        인덱스로 차량 찾기
+
+        Args:
+            index: 찾을 차량 인덱스
+
+        Returns:
+            차량 객체 또는 None
+        """
+        if 0 <= index < len(self.vehicles):
+            return self.vehicles[index]
+        return None
+
+    def get_all_vehicles(self):
+        """
+        모든 차량 목록 반환
+
+        Returns:
+            차량 객체 리스트
+        """
+        return self.vehicles
+
+    def get_vehicle_count(self):
+        """
+        등록된 차량 수 반환
+
+        Returns:
+            차량 수
+        """
+        return len(self.vehicles)
+
+    def set_active_vehicle_by_id(self, vehicle_id):
+        """
+        ID로 활성 차량 설정
+
+        Args:
+            vehicle_id: 활성화할 차량 ID
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        if vehicle_id not in self.vehicle_map:
+            return False
+
+        # ID에 해당하는 차량의 인덱스 찾기
+        for i, vehicle in enumerate(self.vehicles):
+            if vehicle.id == vehicle_id:
+                self.active_vehicle_idx = i
+                return True
+
+        return False
+
+    def set_active_vehicle_by_index(self, index):
+        """
+        인덱스로 활성 차량 설정
+
+        Args:
+            index: 활성화할 차량 인덱스
+
+        Returns:
+            성공 여부 (Boolean)
+        """
+        if 0 <= index < len(self.vehicles):
+            self.active_vehicle_idx = index
+            return True
+        return False
+
+    def cycle_active_vehicle(self):
+        """
+        다음 차량으로 활성 차량 전환
+
+        Returns:
+            새로운 활성 차량 인덱스
+        """
+        if len(self.vehicles) == 0:
+            return 0
+
+        self.active_vehicle_idx = (self.active_vehicle_idx + 1) % len(self.vehicles)
+        return self.active_vehicle_idx
+
+    def get_active_vehicle(self):
+        """
+        현재 활성화된 차량 반환
+
+        Returns:
+            활성 차량 객체 또는 None
+        """
+        if len(self.vehicles) == 0:
+            return None
+        return self.vehicles[self.active_vehicle_idx]
+
+    def get_active_vehicle_index(self):
+        """
+        현재 활성화된 차량 인덱스 반환
+
+        Returns:
+            활성 차량 인덱스
+        """
+        return self.active_vehicle_idx
+
+    def draw_vehicles(self, screen, world_to_screen_func, debug=False):
+        """
+        모든 차량 렌더링
+
+        Args:
+            screen: pygame 화면 객체
+            world_to_screen_func: 월드 좌표를 스크린 좌표로 변환하는 함수
+            debug: 디버그 모드 여부
+        """
+        # 활성 차량 판별
+        active_vehicle = self.get_active_vehicle()
+
+        # 모든 차량 그리기 (활성 차량은 표시)
+        for vehicle in self.vehicles:
+            is_active = (vehicle == active_vehicle)
+            vehicle.draw(screen, world_to_screen_func, is_active, debug)
+
+    def step(self, actions, dt, time_elapsed, obstacles=None):
+        """
+        모든 차량 상태 업데이트
+
+        Args:
+            actions: 차량별 액션 (단일 차량이면 단일 액션, 다중 차량이면 액션 리스트)
+            dt: 시간 간격
+            time_elapsed: 총 경과 시간
+            obstacles: 장애물 목록
+
+        Returns:
+            collisions: 차량별 충돌 여부 {vehicle_id: bool}
+            reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
+        """
+        # 빈 장애물 리스트 초기화
+        if obstacles is None:
+            obstacles = []
+
+        collisions = {}
+        reached_targets = {}
+
+        # 단일 액션인 경우 (단일 차량 모드)
+        if not isinstance(actions, list):
+            if len(self.vehicles) > 0:
+                vehicle = self.vehicles[0]
+                _, collision, reached = vehicle.step(actions, dt, time_elapsed, obstacles, self.vehicles)
+                collisions[vehicle.id] = collision
+                reached_targets[vehicle.id] = reached
+        else:
+            # 다중 차량 모드
+            for i, vehicle in enumerate(self.vehicles):
+                if i < len(actions):
+                    vehicle_action = actions[i]
+                    _, collision, reached = vehicle.step(vehicle_action, dt, time_elapsed, obstacles, self.vehicles)
+                    collisions[vehicle.id] = collision
+                    reached_targets[vehicle.id] = reached
+
+        return collisions, reached_targets
+
+    def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
+        """
+        차량에 목적지 추가
+
+        Args:
+            vehicle_id: 차량 ID
+            x: 목적지 X 좌표
+            y: 목적지 Y 좌표
+            yaw: 목적지 방향
+            radius: 목적지 반경
+            color: 목적지 색상 (RGB)
+
+        Returns:
+            추가된 목적지 ID 또는 None
+        """
+        # 차량이 존재하는지 확인
+        vehicle = self.get_vehicle_by_id(vehicle_id)
+        if not vehicle:
+            return None
+
+        # 차량의 목적지 관리자에 목적지 추가
+        goal_id = vehicle.add_goal(x, y, yaw, radius, color)
+        return goal_id
+
+    def get_serializable_state(self):
+        """
+        직렬화 가능한 상태 정보 반환
+
+        Returns:
+            직렬화 가능한 상태 정보
+        """
+        # 차량 상태 및 설정 저장
+        vehicles_data = []
+        for vehicle in self.vehicles:
+            # 차량 ID와 상태 저장
+            vehicle_data = vehicle.get_serializable_state()
+            vehicle_data.update({
+                'vehicle_config': vehicle.vehicle_config,
+                'physics_config': vehicle.physics_config,
+                'visual_config': vehicle.visual_config
+            })
+            vehicles_data.append(vehicle_data)
+
+        # 직렬화 가능한 데이터
+        serialized_data = {
+            'vehicles': vehicles_data,
+            'active_vehicle_idx': self.active_vehicle_idx,
+            'next_vehicle_id': self.next_vehicle_id
+        }
+
+        return serialized_data
+
+    def load_from_serialized(self, serialized_data):
+        """
+        직렬화된 데이터에서 상태 복원
+
+        Args:
+            serialized_data: 직렬화된 상태 정보
+        """
+        # 기존 차량 초기화
+        self.vehicles = []
+        self.vehicle_map = {}
+
+        # 차량 정보 복원
+        if 'vehicles' in serialized_data:
+            for vehicle_data in serialized_data['vehicles']:
+                vehicle_id = vehicle_data.get('id')
+                vehicle_config = vehicle_data.get('vehicle_config', self.vehicle_config)
+                physics_config = vehicle_data.get('physics_config', self.physics_config)
+                visual_config = vehicle_data.get('visual_config', self.visual_config)
+
+                # 차량 생성
+                vehicle = Vehicle(
+                    vehicle_id=vehicle_id,
+                    vehicle_config=vehicle_config,
+                    physics_config=physics_config,
+                    visual_config=visual_config
+                )
+
+                # 상태 복원 및 목적지 정보 복원
+                vehicle.load_from_serialized(vehicle_data)
+
+                # 차량 목록 및 맵에 추가
+                self.vehicles.append(vehicle)
+                self.vehicle_map[vehicle_id] = vehicle
+
+        # 활성 차량 인덱스 복원
+        if 'active_vehicle_idx' in serialized_data:
+            self.active_vehicle_idx = serialized_data['active_vehicle_idx']
+            # 유효 범위 확인
+            if len(self.vehicles) > 0:
+                self.active_vehicle_idx = min(self.active_vehicle_idx, len(self.vehicles) - 1)
+
+        # 다음 차량 ID 복원
+        if 'next_vehicle_id' in serialized_data:
+            self.next_vehicle_id = serialized_data['next_vehicle_id']
