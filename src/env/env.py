@@ -80,8 +80,8 @@ class CarSimulatorEnv(gym.Env):
 
             # 관측 공간: [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
             self.observation_space = spaces.Box(
-                low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, 0, -np.pi]),
-                high=np.array([np.inf, np.inf, 1, 1, 60, 10, np.inf, np.pi]),
+                low=np.array([-np.inf, -np.inf, -1, -1, -20, -25, 0, -np.pi]),
+                high=np.array([np.inf, np.inf, 1, 1, 65, 25, np.inf, np.pi]),
                 dtype=np.float32
             )
         else:
@@ -97,8 +97,8 @@ class CarSimulatorEnv(gym.Env):
             # 다중 차량 관측 공간 - 각 차량마다 별도 관측
             self.observation_space = spaces.Tuple([
                 spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -1, -1, -20, -10, -5, -5, 0, -np.pi]),
-                    high=np.array([np.inf, np.inf, 1, 1, 60, 10, 5, 5, np.inf, np.pi]),
+                    low=np.array([-np.inf, -np.inf, -1, -1, -20, -25, 0, -np.pi]),
+                    high=np.array([np.inf, np.inf, 1, 1, 65, 25, np.inf, np.pi]),
                     dtype=np.float32
                 ) for _ in range(self.num_vehicles)
             ])

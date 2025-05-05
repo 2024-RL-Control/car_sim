@@ -198,7 +198,7 @@ class StateUpdater:
     """
 
     @classmethod
-    def update_vehicle_state(cls, state, acc_long, acc_lat, yaw_rate, dt, physics_config):
+    def update_vehicle_state(cls, state, acc_long, acc_lat, yaw_rate, dt, vehicle_config, physics_config):
         """
         차량 상태 업데이트
 
@@ -208,10 +208,11 @@ class StateUpdater:
             acc_lat: 횡방향 가속도 [m/s²]
             yaw_rate: 각속도 [rad/s]
             dt: 시간 간격 [s]
+            vehicle_config: 차량 설정
             physics_config: 물리 설정
         """
         # 속도 업데이트
-        vel_long_new = state.vel_long + acc_long * dt
+        vel_long_new = np.clip(state.vel_long + acc_long * dt, vehicle_config['min_speed'], vehicle_config['max_speed'])
 
         # 요각 업데이트, -π ~ π 범위로 정규화
         yaw_new = state.normalize_angle(state.yaw + yaw_rate * dt)
@@ -288,7 +289,7 @@ class PhysicsEngine:
 
             # 상태 업데이트
             StateUpdater.update_vehicle_state(
-                state, acc_long, acc_lat, yaw_rate, substep_dt, physics_config
+                state, acc_long, acc_lat, yaw_rate, substep_dt, vehicle_config, physics_config
             )
 
         # 궤적 업데이트
