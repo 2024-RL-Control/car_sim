@@ -72,17 +72,16 @@ class HUD:
         # 디버그 정보 추가
         if self.config['visualization']['debug_mode']:
             hud.extend([
-                f"Throttling: {state.throttle:.2f} m/s²",
+                f"Throttling: {state.throttle:.2f}",
                 f"Longitude Accel: {state.acc_long:.2f} m/s²",
                 f"Steering: {np.degrees(state.steer):.1f}°",
                 f"Left wheel: {np.degrees(left_steer):.1f}°, Right wheel: {np.degrees(right_steer):.1f}°",
                 f"Lateral Vel: {state.vel_lat:.2f} m/s",
-                f"Lateral Accel: {state.acc_lat:.2f} m/s²",
-                f"G-Forces: Long {state.g_forces[0]:.2f}g, Lat {state.g_forces[1]:.2f}g"
+                f"Lateral Accel: {state.acc_lat:.2f} m/s²"
             ])
 
         # HUD 배경
-        hud_width = 280
+        hud_width = 300
         hud_height = len(hud) * 25 + 10
         hud_surf = pygame.Surface((hud_width, hud_height), pygame.SRCALPHA)
         hud_surf.fill(self.config['visualization']['hud_bg_color'])
@@ -95,9 +94,6 @@ class HUD:
             screen.blit(text, (20, y_pos))
             y_pos += 25
 
-        # G-force 미터
-        self._draw_g_force_meter(screen, vehicle, self.config['visualization']['window_width'] - 90, 20)
-
         # 큰 속도계
         speed_kmh = state.vel_long * 3.6
         speed_text = self.large_font.render(f"{speed_kmh:.0f}", True, (255, 255, 255))
@@ -109,61 +105,6 @@ class HUD:
 
         screen.blit(speed_text, speed_rect)
         screen.blit(kmh_text, kmh_rect)
-
-    def _draw_g_force_meter(self, screen, vehicle, x, y):
-        """
-        G-force 미터 그리기
-
-        Args:
-            screen: pygame 화면 객체
-            vehicle: 차량 객체
-            x, y: 미터 위치 좌표
-        """
-        meter_size = 80
-        center = (x + meter_size // 2, y + meter_size // 2)
-        radius = meter_size // 2 - 5
-
-        # 배경
-        bg_surf = pygame.Surface((meter_size, meter_size), pygame.SRCALPHA)
-        pygame.draw.circle(bg_surf, (50, 50, 50, 150), (meter_size//2, meter_size//2), radius)
-
-        # 눈금 그리기
-        pygame.draw.circle(bg_surf, (100, 100, 100), (meter_size//2, meter_size//2), radius, 1)
-        pygame.draw.circle(bg_surf, (100, 100, 100), (meter_size//2, meter_size//2), radius//2, 1)
-
-        # 십자선
-        pygame.draw.line(bg_surf, (100, 100, 100), (meter_size//2, 0), (meter_size//2, meter_size), 1)
-        pygame.draw.line(bg_surf, (100, 100, 100), (0, meter_size//2), (meter_size, meter_size//2), 1)
-
-        screen.blit(bg_surf, (x, y))
-
-        # G-force 포인터 그리기
-        g_lateral = vehicle.state.g_forces[1]
-        g_longitudinal = vehicle.state.g_forces[0]
-
-        # G-force를 픽셀로 변환 (1G = 반경의 1/3)
-        scale_factor = radius / 3
-        pointer_x = center[0] + g_lateral * scale_factor
-        pointer_y = center[1] - g_longitudinal * scale_factor  # Y축 반전
-
-        # G-force 범위 제한
-        max_distance = radius - 2
-        dx = pointer_x - center[0]
-        dy = pointer_y - center[1]
-        distance = (dx**2 + dy**2)**0.5
-
-        if distance > max_distance:
-            scale = max_distance / distance
-            pointer_x = center[0] + dx * scale
-            pointer_y = center[1] + dy * scale
-
-        # 포인터 그리기
-        pygame.draw.circle(screen, (255, 50, 50), (int(pointer_x), int(pointer_y)), 5)
-        pygame.draw.line(screen, (200, 200, 200), center, (int(pointer_x), int(pointer_y)), 2)
-
-        # G-force 값 표시
-        g_text = self.font.render(f"{(g_longitudinal**2 + g_lateral**2)**0.5:.1f}G", True, (255, 255, 0))
-        screen.blit(g_text, (x + 28, y + meter_size + 5))
 
     def draw_target_direction_arrows(self, screen, vehicles, active_vehicle_idx, world_to_screen):
         """

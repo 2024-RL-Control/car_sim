@@ -24,9 +24,8 @@ class VehicleState:
     acc_long: float = 0.0          # 종방향 가속도 [m/s²]
     vel_lat: float = 0.0           # 횡방향 속도 [m/s]
     acc_lat: float = 0.0           # 횡방향 가속도 [m/s²]
-    throttle: float = 0.0          # 스로틀 [-1, 1]
+    throttle: float = 0.0          # 스로틀 [-1, 1], 엔진 파워/브레이크 요청의 정도
     steer: float = 0.0             # 조향각 [rad]
-    g_forces: List[float] = field(default_factory=lambda: [0.0, 0.0])  # [종방향, 횡방향] G-포스
 
     rear_axle_x: float = 0.0       # 뒷바퀴 축 X 좌표 [m]
     rear_axle_y: float = 0.0       # 뒷바퀴 축 Y 좌표 [m]
@@ -57,7 +56,6 @@ class VehicleState:
         self.acc_lat = 0.0
         self.throttle = 0.0
         self.steer = 0.0
-        self.g_forces = [0.0, 0.0]
 
         self.rear_axle_x = 0.0
         self.rear_axle_y = 0.0

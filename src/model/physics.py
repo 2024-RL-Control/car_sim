@@ -28,14 +28,14 @@ class InputProcessor:
         throttle_input = np.clip(action[0], -1.0, 1.0)  # 가속 입력 (-1: 최대 제동, 1: 최대 가속)
         steer_input = np.clip(action[1], -1.0, 1.0)     # 조향 입력 (-1: 좌회전, 1: 우회전)
 
-        # 목표 스로틀 계산 (입력 * 최대 가속도/최대 제동)
+        # throttle: 엔진 파워/브레이크 요청의 정도
         target_throttle = 0.0
         if throttle_input >= 0:
             # 가속 요청
-            target_throttle = throttle_input * config['max_accel']
+            target_throttle = throttle_input
         else:
             # 제동 요청
-            target_throttle = throttle_input * config['max_brake']
+            target_throttle = throttle_input
 
         # 목표 조향각 계산 (입력 * 최대 조향각)
         target_steer = steer_input * np.radians(config['max_steer'])
@@ -109,7 +109,13 @@ class ForceCalculator:
         friction_coeff = physics_config['terrain_friction'][state.terrain_type]
 
         # 가속도 계산 (스로틀 기반)
-        acc_long = state.throttle * friction_coeff
+        if state.throttle >= 0:
+            # 가속 - 엔진 파워에 비례하는 가속도
+            acc_long = state.throttle * vehicle_config['max_accel'] * friction_coeff
+        else:
+            # 제동 - 브레이크 파워에 비례하는 감속도
+            acc_long = state.throttle * vehicle_config['max_brake'] * friction_coeff
+
 
         # 저항력 계산
         rolling_acc = cls._calculate_rolling_resistance(vel_long, state.throttle, vehicle_config, physics_config, dt)
@@ -207,18 +213,6 @@ class StateUpdater:
         # 속도 업데이트
         vel_long_new = state.vel_long + acc_long * dt
 
-        # G-force 계산 (가속도를 g 단위로 변환)
-        g_long = -acc_long / physics_config['gravity']
-        g_lat = -acc_lat / physics_config['gravity']
-
-        # NaN 체크
-        if not np.isfinite(g_long):
-            g_long = 0.0
-        if not np.isfinite(g_lat):
-            g_lat = 0.0
-
-        g_forces = [g_long, g_lat]
-
         # 요각 업데이트, -π ~ π 범위로 정규화
         yaw_new = state.normalize_angle(state.yaw + yaw_rate * dt)
 
@@ -254,7 +248,6 @@ class StateUpdater:
         state.acc_long = acc_long
         state.acc_lat = acc_lat
         state.yaw_rate = yaw_rate
-        state.g_forces = g_forces
 
 
 # ======================
