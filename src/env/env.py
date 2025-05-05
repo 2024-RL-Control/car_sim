@@ -8,8 +8,8 @@ import pickle
 import os
 from collections import deque
 from math import radians, degrees, pi, cos, sin
-from ..model.vehicle import Vehicle, VehicleManager
-from ..model.object import ObstacleManager, GoalManager
+from ..model.vehicle import VehicleManager
+from ..model.object import ObstacleManager
 from ..utils.config_utils import load_config
 from ..ui.camera import Camera
 from ..ui.keyboard import KeyboardHandler
@@ -122,10 +122,6 @@ class CarSimulatorEnv(gym.Env):
     def get_obstacle_manager(self):
         """장애물 관리자 객체 반환"""
         return self.obstacle_manager
-
-    def get_goal_manager(self):
-        """목적지 관리자 객체 반환"""
-        return self.vehicle_manager.get_goal_manager()
 
     def _save_state(self):
         """현재 시뮬레이션 상태 저장"""
@@ -401,20 +397,18 @@ class CarSimulatorEnv(gym.Env):
 
         # 목표 관련 보상
         goal_reward = 0
-        goal_manager = self.vehicle_manager.get_goal_manager()
-        if goal_manager.get_vehicle_goal(vehicle.id):
-            # 목표 거리에 따른 보상 (가까울수록 높은 보상)
-            if state.distance_to_target > 0:
-                proximity_reward = 1.0 / (1.0 + state.distance_to_target) * 0.1
-                goal_reward += proximity_reward
+        # 목표 거리에 따른 보상 (가까울수록 높은 보상)
+        if state.distance_to_target > 0:
+            proximity_reward = 1.0 / (1.0 + state.distance_to_target) * 0.1
+            goal_reward += proximity_reward
 
-            # 방향 일치 보상 (차량이 목표를 바라볼수록 높은 보상)
-            direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * 0.2
-            goal_reward += direction_reward
+        # 방향 일치 보상 (차량이 목표를 바라볼수록 높은 보상)
+        direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * 0.2
+        goal_reward += direction_reward
 
-            # 목표 도달 보상
-            if reached_target:
-                goal_reward += 1.0
+        # 목표 도달 보상
+        if reached_target:
+            goal_reward += 1.0
 
         # 종합 보상
         reward = speed_reward + goal_reward

@@ -177,9 +177,6 @@ class Renderer:
             # 고정 그리드 그리기
             self.draw_grid(camera, active_vehicle)
 
-            # 목적지 그리기
-            env.vehicle_manager.goal_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
-
             # 장애물 그리기
             env.obstacle_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
 
@@ -191,12 +188,10 @@ class Renderer:
             active_vehicle_idx = env.vehicle_manager.get_active_vehicle_index()
             vehicle_count = env.vehicle_manager.get_vehicle_count()
 
-            hud.draw_hud(self.screen, active_vehicle, active_vehicle_idx, vehicle_count,
-                        self._performance_metrics, env.vehicle_manager.goal_manager)
+            hud.draw_hud(self.screen, active_vehicle, active_vehicle_idx, vehicle_count, self._performance_metrics)
 
             # 차량 목표 방향 화살표 그리기
-            hud.draw_target_direction_arrows(self.screen, env.vehicle_manager.get_all_vehicles(), active_vehicle_idx,
-                                    world_to_screen, env.vehicle_manager.goal_manager)
+            hud.draw_target_direction_arrows(self.screen, env.vehicle_manager.get_all_vehicles(), active_vehicle_idx, world_to_screen)
 
         # 렌더링 시간 측정
         self._performance_metrics['render_time'] = time.time() - render_start

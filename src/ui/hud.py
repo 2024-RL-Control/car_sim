@@ -19,7 +19,7 @@ class HUD:
         # G-force 표시기 초기화
         self.g_force_surf = pygame.Surface((100, 100), pygame.SRCALPHA)
 
-    def draw_hud(self, screen, vehicle, active_vehicle_idx, num_vehicles, performance_metrics, goal_manager):
+    def draw_hud(self, screen, vehicle, active_vehicle_idx, num_vehicles, performance_metrics):
         """
         차량 상태 HUD 표시
 
@@ -29,7 +29,6 @@ class HUD:
             active_vehicle_idx: 활성 차량 인덱스
             num_vehicles: 총 차량 수
             performance_metrics: 성능 측정 정보
-            goal_manager: 목적지 관리자
         """
         state = vehicle.state
         config = vehicle.vehicle_config
@@ -60,7 +59,7 @@ class HUD:
         ]
 
         # 목적지 정보 추가
-        goal = goal_manager.get_vehicle_goal(vehicle.get_id())
+        goal = vehicle.get_current_goal()
         if goal:
             distance = state.distance_to_target
             yaw_diff = np.degrees(state.yaw_diff_to_target)
@@ -166,7 +165,7 @@ class HUD:
         g_text = self.font.render(f"{(g_longitudinal**2 + g_lateral**2)**0.5:.1f}G", True, (255, 255, 0))
         screen.blit(g_text, (x + 28, y + meter_size + 5))
 
-    def draw_target_direction_arrows(self, screen, vehicles, active_vehicle_idx, world_to_screen, goal_manager):
+    def draw_target_direction_arrows(self, screen, vehicles, active_vehicle_idx, world_to_screen):
         """
         각 차량의 목표 방향 화살표 그리기
 
@@ -175,7 +174,6 @@ class HUD:
             vehicles: 차량 리스트
             active_vehicle_idx: 활성 차량 인덱스
             world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
-            goal_manager: 목적지 관리자
         """
         if not vehicles:
             return
@@ -184,7 +182,7 @@ class HUD:
         active_vehicle_id = vehicles[active_vehicle_idx].id if active_vehicle_idx < len(vehicles) else None
 
         for vehicle in vehicles:
-            goal = goal_manager.get_vehicle_goal(vehicle.id)
+            goal = vehicle.get_current_goal()
             if goal:
                 # 차량 위치와 목표 위치를 화면 좌표로 변환
                 vehicle_pos = world_to_screen(vehicle.state.x, vehicle.state.y)
