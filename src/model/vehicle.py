@@ -24,7 +24,8 @@ class VehicleState:
     acc_long: float = 0.0          # 종방향 가속도 [m/s²]
     vel_lat: float = 0.0           # 횡방향 속도 [m/s]
     acc_lat: float = 0.0           # 횡방향 가속도 [m/s²]
-    throttle: float = 0.0          # 스로틀 [-1, 1], 엔진 파워/브레이크 요청의 정도
+    throttle_engine: float = 0.0   # 파워 엔진의 요청 정도 [0,1]
+    throttle_brake:  float = 0.0   # 브레이크 요청 정도[0,1]
     steer: float = 0.0             # 조향각 [rad]
 
     rear_axle_x: float = 0.0       # 뒷바퀴 축 X 좌표 [m]
@@ -54,7 +55,8 @@ class VehicleState:
         self.acc_long = 0.0
         self.vel_lat = 0.0
         self.acc_lat = 0.0
-        self.throttle = 0.0
+        self.throttle_engine = 0.0
+        self.throttle_brake = 0.0
         self.steer = 0.0
 
         self.rear_axle_x = 0.0

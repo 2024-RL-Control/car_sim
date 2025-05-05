@@ -73,8 +73,8 @@ class CarSimulatorEnv(gym.Env):
         if not self.multi_vehicle:
             # 단일 차량 모드
             self.action_space = spaces.Box(
-                low=np.array([-1, -1]),  # [가속, 조향]
-                high=np.array([1, 1]),
+                low=np.array([ 0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
+                high=np.array([1.0, 1.0,  1.0]),
                 dtype=np.float32
             )
 
@@ -88,8 +88,8 @@ class CarSimulatorEnv(gym.Env):
             # 다중 차량 모드 - 각 차량마다 별도 액션
             self.action_space = spaces.Tuple([
                 spaces.Box(
-                    low=np.array([-1, -1]),  # [가속, 조향]
-                    high=np.array([1, 1]),
+                    low=np.array([ 0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
+                    high=np.array([1.0, 1.0,  1.0]),
                     dtype=np.float32
                 ) for _ in range(self.num_vehicles)
             ])

@@ -72,10 +72,11 @@ class HUD:
         # 디버그 정보 추가
         if self.config['visualization']['debug_mode']:
             hud.extend([
-                f"Throttling: {state.throttle:.2f}",
-                f"Longitude Accel: {state.acc_long:.2f} m/s²",
+                f"Throttling Engine: {state.throttle_engine:.2f}",
+                f"Throttling Brake: {state.throttle_brake:.2f}",
                 f"Steering: {np.degrees(state.steer):.1f}°",
                 f"Left wheel: {np.degrees(left_steer):.1f}°, Right wheel: {np.degrees(right_steer):.1f}°",
+                f"Longitude Accel: {state.acc_long:.2f} m/s²",
                 f"Lateral Vel: {state.vel_lat:.2f} m/s",
                 f"Lateral Accel: {state.acc_lat:.2f} m/s²"
             ])
