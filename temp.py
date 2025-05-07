@@ -20,9 +20,9 @@ class Node:
         """
         pygame.draw.circle(screen, color, (int(self.x), int(self.y)), radius)
         if debug:
-            font = pygame.font.SysFont('Arial', 12)
-            text = font.render(f"ID:{self.id}", True, (255, 255, 255))
-            screen.blit(text, (int(self.x) + 10, int(self.y) - 10))
+            font = pygame.font.SysFont(None, 12)
+            text = font.render(f"{self.id}", True, (255, 255, 255))
+            screen.blit(text, (int(self.x)-2, int(self.y)-4))
 
     def distance(self, other):
         """두 노드 사이의 유클리드 거리 계산"""
@@ -165,8 +165,8 @@ class Link:
 
         # 디버그 정보 출력
         if debug:
-            font = pygame.font.SysFont('Arial', 12)
-            text = font.render(f"Link: {self.start.id}->{self.end.id} ({self.mode})", True, (255, 255, 255))
+            font = pygame.font.SysFont(None, 12)
+            text = font.render(f"{self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point = self.path[len(self.path)//2]
             screen.blit(text, (int(mid_point[0]), int(mid_point[1]) - 20))
 
@@ -679,6 +679,24 @@ class RoadNetworkManager:
         self.links = []
         self.closest_point = None
 
+    def add_node(self, point):
+        """노드 추가"""
+        for node in self.nodes:
+            if node.get_point() == point:
+                return node
+
+        new_node = Node(point[0], point[1], point[2])
+        self.nodes.append(new_node)
+        return new_node
+
+    def add_link(self, node1, node2, obstacles=[], mode='plan'):
+        """링크 추가"""
+        # 링크 생성 및 추가
+        new_link = Link(node1, node2, obstacles, mode)
+        self.links.append(new_link)
+
+        return new_link
+
     def connect(self, point1=(0,0,0), point2=(100,100,0), obstacles=[], mode='plan'):
         """
         1. 두 좌표(x,y,yaw)를 Node 클래스로 변환 후 nodes에 추가
@@ -688,29 +706,10 @@ class RoadNetworkManager:
             2. 직진 모드: 직선 경로 생성
             3. 곡선 모드: 베지에 곡선으로 좌회전, 우회전 경로 생성
         """
-        # 좌표를 Node 객체로 변환
-        node1 = None
-        node2 = None
+        node1 = self.add_node(point1)
+        node2 = self.add_node(point2)
 
-        for node in self.nodes:
-            if node.get_point() == point1:
-                node1 = node
-            if node.get_point() == point2:
-                node2 = node
-
-        # 노드가 존재하지 않으면 추가
-        if node1 is None:
-            self.nodes.append(Node(point1[0], point1[1], point1[2]))
-            node1 = self.nodes[-1]  # 방금 추가한 노드
-
-        if node2 is None:
-            self.nodes.append(Node(point2[0], point2[1], point2[2]))
-            node2 = self.nodes[-1]  # 방금 추가한 노드
-
-        # 링크 생성 및 추가
-        new_link = Link(node1, node2, obstacles, mode)
-        self.links.append(new_link)
-
+        new_link = self.add_link(node1, node2, obstacles, mode)
         return new_link
 
     def _get_closest_node(self, x, y):
@@ -839,20 +838,21 @@ class RoadNetworkManager:
         for link in self.links:
             link.draw(screen, debug)
 
-        # 모든 노드 그리기 (링크가 그리지 않은 노드만)
-        drawn_nodes = set()
-        for link in self.links:
-            drawn_nodes.add(link.start)
-            drawn_nodes.add(link.end)
+        if debug:
+            # 모든 노드 그리기 (링크가 그리지 않은 노드만)
+            drawn_nodes = set()
+            for link in self.links:
+                drawn_nodes.add(link.start)
+                drawn_nodes.add(link.end)
 
-        # 링크에 포함되지 않은 노드 그리기
-        for node in self.nodes:
-            if node not in drawn_nodes:
-                node.draw(screen, debug)
+            # 링크에 포함되지 않은 노드 그리기
+            for node in self.nodes:
+                if node not in drawn_nodes:
+                    node.draw(screen, debug)
 
-        if debug and self.closest_point:
-            # 가장 가까운 포인트 시각화
-            pygame.draw.circle(screen, (255, 0, 0), (int(self.closest_point[0]), int(self.closest_point[1])), 2)
+            if self.closest_point:
+                # 가장 가까운 포인트 시각화
+                pygame.draw.circle(screen, (255, 0, 0), (int(self.closest_point[0]), int(self.closest_point[1])), 2)
 
 
 # 메인 테스트 함수
@@ -1066,14 +1066,6 @@ def main():
         # 더미 차량 그리기
         vehicle.draw(screen)
 
-        # 임시 노드 그리기
-        for i, node in enumerate(nodes):
-            pygame.draw.circle(screen, (0, 255, 0), (int(node[0]), int(node[1])), 5)
-            if debug_mode:
-                font = pygame.font.SysFont('Arial', 12)
-                text = font.render(f"Temp Node {i+1}", True, (255, 255, 255))
-                screen.blit(text, (int(node[0]) + 10, int(node[1]) - 10))
-
         # 장애물 그리기
         for obs in obstacles:
             pygame.draw.circle(screen, (255, 0, 0), (int(obs[0]), int(obs[1])), obs[2])
@@ -1081,7 +1073,7 @@ def main():
         # Frenet 좌표계 d 값 출력 (차량과 경로의 거리)
         frenet_d = road_manager.get_distance(vehicle)
         frenet_text = f"Frenet d: {frenet_d:.2f}m"
-        font = pygame.font.SysFont('Arial', 16)
+        font = pygame.font.SysFont(None, 16)
         text = font.render(frenet_text, True, (255, 255, 255))
         screen.blit(text, (10, 10))
 
