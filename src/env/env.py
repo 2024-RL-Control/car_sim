@@ -10,6 +10,7 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 from ..model.vehicle import VehicleManager
 from ..model.object import ObstacleManager
+from ..model.road import RoadNetworkManager
 from ..utils.config_utils import load_config
 from ..ui.camera import Camera
 from ..ui.keyboard import KeyboardHandler
@@ -52,6 +53,9 @@ class CarSimulatorEnv(gym.Env):
 
         # 장애물 매니저 초기화
         self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
+
+        # 도로 시스템 초기화
+        self.road_manager = RoadNetworkManager(self.config['simulation']['path_planning'])
 
         # UI 모듈 초기화
         self.camera = Camera(self.config)
@@ -272,6 +276,9 @@ class CarSimulatorEnv(gym.Env):
 
         # 장애물 관리자 초기화 (모든 장애물 제거)
         self.obstacle_manager.clear_obstacles()
+
+        # 도로 시스템 초기화
+        self.road_manager.reset()
 
         return self._get_obs()
 
