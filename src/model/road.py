@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import pygame
 import numpy as np
 import math
@@ -33,9 +34,6 @@ class Node:
             # 위치가 매우 가까우면 같은 노드로 간주 (부동소수점 오차 고려)
             return abs(self.x - other.x) < 0.01 and abs(self.y - other.y) < 0.01 and abs(self.yaw - other.yaw) < 0.01
         return False
-
-    def __hash__(self):
-        return hash((round(self.x, 2), round(self.y, 2)))
 
     def get_point(self):
         """
