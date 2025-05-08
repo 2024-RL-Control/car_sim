@@ -1,4 +1,4 @@
-# Vehicle Simulator Configuration
+﻿# Vehicle Simulator Configuration
 
 # Simulation parameters
 simulation:
@@ -54,15 +54,6 @@ visualization:
   lidar_ray_failure_color: [150, 150, 150]            # RGB
   lidar_sensor_data_color: [255, 0, 0]                # RGB
   lidar_sensor_history_data_color: [0, 100, 200, 100] # RGBA
-
-  # Road visualization
-  road_color: [80, 80, 80]                # RGB for road surface
-  road_line_color: [150, 150, 150]        # RGB for road lines (e.g., lane markings)
-  road_center_line_color: [255, 255, 0]   # RGB for road center line (debug)
-  frenet_point_color: [0, 255, 255]       # RGB for Frenet D debug visualization
-  node_color: [0, 0, 255]                 # RGB for road nodes
-  link_color: [255, 0, 255]               # RGB for road links
-  path_color: [0, 255, 0]                 # RGB for planned path
 
 vehicle:
   # 기본 차량 설정 (2024 Model 3 Long Range AWD)
