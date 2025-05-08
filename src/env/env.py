@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import pygame
 import gym
 from gym import spaces
@@ -306,7 +306,21 @@ class CarSimulatorEnv(gym.Env):
         Returns:
             추가된 목적지 ID
         """
-        return self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
+        bool = self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
+        if bool:
+            vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
+            objects = []
+            obstacles = self.obstacle_manager.get_all_outer_circles()
+            if obstacles:
+                objects.extend(obstacles)
+            if self.vehicle_manager.get_vehicle_count() > 0:
+                vehicles = self.vehicle_manager.get_all_vehicles()
+                for v in vehicles:
+                    if v.id != vehicle_id:
+                        objects.extend(v.get_outer_circle())
+            self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
+
+        return bool
 
     def _get_obs(self):
         """

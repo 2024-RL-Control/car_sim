@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import pygame
 import numpy as np
 import time
@@ -176,6 +176,9 @@ class Renderer:
         if self.config['visualization']['visualize']:
             # 고정 그리드 그리기
             self.draw_grid(camera, active_vehicle)
+
+            # 도로 네트워크 그리기
+            env.road_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
 
             # 장애물 그리기
             env.obstacle_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])

@@ -1,4 +1,4 @@
-﻿import pygame
+import pygame
 import numpy as np
 import math
 import random
@@ -20,9 +20,9 @@ class Node:
         """
         pygame.draw.circle(screen, color, (int(self.x), int(self.y)), radius)
         if debug:
-            font = pygame.font.SysFont('Arial', 12)
-            text = font.render(f"ID:{self.id}", True, (255, 255, 255))
-            screen.blit(text, (int(self.x) + 10, int(self.y) - 10))
+            font = pygame.font.SysFont(None, 12)
+            text = font.render(f"{self.id}", True, (255, 255, 255))
+            screen.blit(text, (int(self.x)-2, int(self.y)-4))
 
     def distance(self, other):
         """두 노드 사이의 유클리드 거리 계산"""
@@ -45,7 +45,7 @@ class Node:
 
 
 class Link:
-    def __init__(self, start_node, end_node, obstacles=[], mode='plan'):
+    def __init__(self, start_node, end_node, obstacles=[], mode='plan', config=None):
         """
         start_node, end_node: Node 객체 (x, y, yaw 포함)
         mode: 'plan', 'straight', 'curve' 중 하나
@@ -59,9 +59,10 @@ class Link:
             end_node,
             obstacles,
             self.width,
-            mode
+            mode,
+            config
         )
-        self.target_vel = PathPlanner.calculate_target_vel(self.path)
+        self.target_vel = PathPlanner.calculate_target_vel(self.path, config["default_speed"], config["min_speed"], config["max_speed"])
         self._sampled_points = None
         self._sample_step = None
 
@@ -165,8 +166,8 @@ class Link:
 
         # 디버그 정보 출력
         if debug:
-            font = pygame.font.SysFont('Arial', 12)
-            text = font.render(f"Link: {self.start.id}->{self.end.id} ({self.mode})", True, (255, 255, 255))
+            font = pygame.font.SysFont(None, 12)
+            text = font.render(f"{self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point = self.path[len(self.path)//2]
             screen.blit(text, (int(mid_point[0]), int(mid_point[1]) - 20))
 
@@ -180,21 +181,13 @@ class PathPlanner:
     경로 지정(직진, 좌회전, 우회전)시 각각 맞는 함수 사용
     """
 
-    # RRT 관련 상수
-    MAX_ITER = 2000
-    STEP_SIZE = 10.0
-    GOAL_SAMPLE_RATE = 0.1
-
-    # Dubins 관련 상수
-    MIN_RADIUS = 15.0  # 최소 회전 반경 (m)
-
     @classmethod
-    def plan(cls, node1, node2, obstacles, width, mode):
+    def plan(cls, node1, node2, obstacles, width, mode, config):
         """
         경로 계획 메소드
         """
         if mode == 'plan':
-            return cls._rrt_with_dubins(node1, node2, obstacles, width)
+            return cls._rrt_with_dubins(node1, node2, obstacles, width, config)
         elif mode == 'straight':
             return cls._straight(node1, node2)
         elif mode == 'curve':
@@ -203,13 +196,13 @@ class PathPlanner:
             return cls._straight(node1, node2)
 
     @classmethod
-    def calculate_target_vel(cls, path):
+    def calculate_target_vel(cls, path, default_speed=30, min_speed=5, max_speed=50):
         """
         경로 곡률에 따른 목표 속도 계산
         최소 속도 5, 최대 속도 50
         """
         if not path or len(path) < 3:
-            return 30  # 기본 속도
+            return default_speed  # 기본 속도
 
         # 전체 경로의 평균 곡률 계산
         total_curvature = 0
@@ -257,7 +250,7 @@ class PathPlanner:
                 pass
 
         if count == 0:
-            return 30  # 기본 속도
+            return default_speed  # 기본 속도
 
         # 평균 곡률
         avg_curvature = total_curvature / count
@@ -268,12 +261,12 @@ class PathPlanner:
         normalized_curvature = min(avg_curvature / max_curvature, 1.0)
 
         # 속도 범위: 5 ~ 50
-        velocity = 50 - normalized_curvature * 45
+        velocity = max_speed - normalized_curvature * (max_speed - min_speed)
 
-        return max(5, min(50, velocity))
+        return max(min_speed, min(max_speed, velocity))
 
     @classmethod
-    def _rrt_with_dubins(cls, start_node, end_node, obstacles, width):
+    def _rrt_with_dubins(cls, start_node, end_node, obstacles, width, config):
         """
         RRT 알고리즘을 통해 목적지까지의 도로 너비 고려한 장애물 회피 경로 생성
         RRT 알고리즘에 Dubins steer 적용, 비홀로노믹 제약 고려
@@ -320,9 +313,9 @@ class PathPlanner:
         # 장애물 충돌 검사 거리 (도로 너비의 절반 + 여유)
         collision_dist = width / 2 + 2.0
 
-        for i in range(cls.MAX_ITER):
+        for i in range(config["max_iterations"]):
             # 랜덤 위치치 샘플링 (일정 확률로 목표 지점 선택)
-            if random.random() < cls.GOAL_SAMPLE_RATE:
+            if random.random() < config["goal_sampling_rate"]:
                 rand_point = (goal.x, goal.y, None)  # yaw는 경로 생성 후 결정
             else:
                 rand_x = random.uniform(min(start.x, goal.x) - 100, max(start.x, goal.x) + 100)
@@ -334,7 +327,7 @@ class PathPlanner:
             nearest_point = nearest_node.get_tuple()
 
             # 스티어링 (Dubins Curve 적용)
-            new_point = cls._steer(nearest_point, rand_point, cls.STEP_SIZE)
+            new_point = cls._steer(nearest_point, rand_point, config["step_size"], config["min_radius"])
 
             # 장애물과 충돌 확인
             if cls._is_collision_free(nearest_point, new_point, obstacles, collision_dist):
@@ -342,7 +335,7 @@ class PathPlanner:
                 nodes.append(new_node)
 
                 # 목표 지점 근처에 도달했는지 확인
-                if new_node.distance_to(goal) < cls.STEP_SIZE:
+                if new_node.distance_to(goal) < config["step_size"]:
                     # 목표 노드에 연결 시도
                     if cls._is_collision_free(new_node.get_tuple(), goal.get_tuple(), obstacles, collision_dist):
                         # 목표 노드의 부모를 마지막 노드로 설정정
@@ -385,7 +378,7 @@ class PathPlanner:
         return math.sqrt((node1[0] - node2[0])**2 + (node1[1] - node2[1])**2)
 
     @classmethod
-    def _steer(cls, from_node, to_node, step_size):
+    def _steer(cls, from_node, to_node, step_size, min_radius):
         """
         from_node에서 to_node 방향으로 step_size만큼 이동
         Dubins 제약 (최소 회전 반경)을 고려
@@ -413,7 +406,7 @@ class PathPlanner:
         while delta_yaw < -math.pi: delta_yaw += 2 * math.pi
 
         # 최대 각도 변화 제한 (비홀로노믹 제약)
-        max_yaw_change = step_size / cls.MIN_RADIUS  # 회전 반경에 따른 최대 각도 변화
+        max_yaw_change = step_size / min_radius  # 회전 반경에 따른 최대 각도 변화
 
         if abs(delta_yaw) > max_yaw_change:
             # 최대 각도 변화로 제한
@@ -680,6 +673,24 @@ class RoadNetworkManager:
         self.closest_point = None
         self.config = config
 
+    def add_node(self, point):
+        """노드 추가"""
+        for node in self.nodes:
+            if node.get_point() == point:
+                return node
+
+        new_node = Node(point[0], point[1], point[2])
+        self.nodes.append(new_node)
+        return new_node
+
+    def add_link(self, node1, node2, obstacles=[], mode='plan'):
+        """링크 추가"""
+        # 링크 생성 및 추가
+        new_link = Link(node1, node2, obstacles, mode, self.config)
+        self.links.append(new_link)
+
+        return new_link
+
     def connect(self, point1=(0,0,0), point2=(100,100,0), obstacles=[], mode='plan'):
         """
         1. 두 좌표(x,y,yaw)를 Node 클래스로 변환 후 nodes에 추가
@@ -689,29 +700,10 @@ class RoadNetworkManager:
             2. 직진 모드: 직선 경로 생성
             3. 곡선 모드: 베지에 곡선으로 좌회전, 우회전 경로 생성
         """
-        # 좌표를 Node 객체로 변환
-        node1 = None
-        node2 = None
+        node1 = self.add_node(point1)
+        node2 = self.add_node(point2)
 
-        for node in self.nodes:
-            if node.get_point() == point1:
-                node1 = node
-            if node.get_point() == point2:
-                node2 = node
-
-        # 노드가 존재하지 않으면 추가
-        if node1 is None:
-            self.nodes.append(Node(point1[0], point1[1], point1[2]))
-            node1 = self.nodes[-1]  # 방금 추가한 노드
-
-        if node2 is None:
-            self.nodes.append(Node(point2[0], point2[1], point2[2]))
-            node2 = self.nodes[-1]  # 방금 추가한 노드
-
-        # 링크 생성 및 추가
-        new_link = Link(node1, node2, obstacles, mode)
-        self.links.append(new_link)
-
+        new_link = self.add_link(node1, node2, obstacles, mode)
         return new_link
 
     def _get_closest_node(self, x, y):
@@ -840,20 +832,21 @@ class RoadNetworkManager:
         for link in self.links:
             link.draw(screen, debug)
 
-        # 모든 노드 그리기 (링크가 그리지 않은 노드만)
-        drawn_nodes = set()
-        for link in self.links:
-            drawn_nodes.add(link.start)
-            drawn_nodes.add(link.end)
+        if debug:
+            # 모든 노드 그리기 (링크가 그리지 않은 노드만)
+            drawn_nodes = set()
+            for link in self.links:
+                drawn_nodes.add(link.start)
+                drawn_nodes.add(link.end)
 
-        # 링크에 포함되지 않은 노드 그리기
-        for node in self.nodes:
-            if node not in drawn_nodes:
-                node.draw(screen, debug)
+            # 링크에 포함되지 않은 노드 그리기
+            for node in self.nodes:
+                if node not in drawn_nodes:
+                    node.draw(screen, debug)
 
-        if debug and self.closest_point:
-            # 가장 가까운 포인트 시각화
-            pygame.draw.circle(screen, (255, 0, 0), (int(self.closest_point[0]), int(self.closest_point[1])), 2)
+            if self.closest_point:
+                # 가장 가까운 포인트 시각화
+                pygame.draw.circle(screen, (255, 0, 0), (int(self.closest_point[0]), int(self.closest_point[1])), 2)
 
 
 # 메인 테스트 함수
@@ -1067,14 +1060,6 @@ def main():
         # 더미 차량 그리기
         vehicle.draw(screen)
 
-        # 임시 노드 그리기
-        for i, node in enumerate(nodes):
-            pygame.draw.circle(screen, (0, 255, 0), (int(node[0]), int(node[1])), 5)
-            if debug_mode:
-                font = pygame.font.SysFont('Arial', 12)
-                text = font.render(f"Temp Node {i+1}", True, (255, 255, 255))
-                screen.blit(text, (int(node[0]) + 10, int(node[1]) - 10))
-
         # 장애물 그리기
         for obs in obstacles:
             pygame.draw.circle(screen, (255, 0, 0), (int(obs[0]), int(obs[1])), obs[2])
@@ -1082,7 +1067,7 @@ def main():
         # Frenet 좌표계 d 값 출력 (차량과 경로의 거리)
         frenet_d = road_manager.get_distance(vehicle)
         frenet_text = f"Frenet d: {frenet_d:.2f}m"
-        font = pygame.font.SysFont('Arial', 16)
+        font = pygame.font.SysFont(None, 16)
         text = font.render(frenet_text, True, (255, 255, 255))
         screen.blit(text, (10, 10))
 

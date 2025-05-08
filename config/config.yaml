@@ -1,4 +1,4 @@
-# Vehicle Simulator Configuration
+﻿# Vehicle Simulator Configuration
 
 # Simulation parameters
 simulation:
@@ -10,7 +10,10 @@ simulation:
     max_iterations: 2000  # maximum iterations for path planning
     step_size: 0.1       # step size for path planning [m]
     goal_sampling_rate: 0.1  # goal sampling rate for path planning [0, 1]
-    min_radius: 6.0   # minimum turning radius for path planning [m]
+    min_radius: 10.0   # minimum turning radius for path planning [m]
+    default_speed: 30
+    min_speed: 5
+    max_speed: 50
 
 # Visualization parameters
 visualization:

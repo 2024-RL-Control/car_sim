@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
 from typing import List
 from collections import deque
@@ -149,6 +149,10 @@ class Vehicle:
         """차량 위치 및 방향 설정"""
         self.state.set_position(x, y, yaw)
         self._update_collision_body()
+
+    def get_position(self):
+        """차량 위치 반환"""
+        return (self.state.x, self.state.y, self.state.yaw)
 
     def get_current_goal(self):
         """현재 목표 반환"""
