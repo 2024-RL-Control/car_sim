@@ -668,7 +668,6 @@ class RoadNetworkManager:
     def __init__(self, config=None):
         self.nodes = []
         self.links = []
-        self.closest_point = None
         self.config = config
 
     def add_node(self, point):
@@ -755,21 +754,22 @@ class RoadNetworkManager:
 
         return closest_point, min_dist
 
-    def get_frenet_d(self, vehicle):
+    @classmethod
+    def get_frenet_d(cls, vehicle):
         """
         가장 가까운 포인트와의 거리 계산(Frenet d), 차량의 상태로 활용
         """
-        if not self.links:
-            return float('inf')
+        if not cls.links:
+            return None, None, None
 
         # 차량 위치
         x, y, yaw = vehicle.get_position()
 
         # 가장 가까운 노드 찾기
-        closest_node = self._get_closest_node(x, y)
+        closest_node = cls._get_closest_node(x, y)
 
         # 해당 노드와 연결된 링크 찾기
-        links = self._find_link_by_node(closest_node)
+        links = cls._find_link_by_node(closest_node)
 
         # 가장 가까운 링크와 포인트 찾기
         min_dist = float('inf')
@@ -777,27 +777,27 @@ class RoadNetworkManager:
         closest_link = None
 
         for link in links:
-            point, dist = self._get_closest_point(x, y, link)
+            point, dist = cls._get_closest_point(x, y, link)
             if dist < min_dist:
                 min_dist = dist
                 closest_point = point
                 closest_link = link
 
         # 추가적으로 근처의 다른 링크도 확인
-        for link in self.links:
+        for link in cls.links:
             if link in links:
                 continue
 
-            point, dist = self._get_closest_point(x, y, link)
+            point, dist = cls._get_closest_point(x, y, link)
             if dist < min_dist:
                 min_dist = dist
                 closest_point = point
                 closest_link = link
 
         if not closest_point:
-            return float('inf')
+            return None, None, None
 
-        self.closest_point = closest_point  # 가장 가까운 포인트 저장
+        closest_point  # 가장 가까운 포인트 저장
 
         # Frenet 좌표계의 d 계산 (차량이 경로에서 좌/우로 얼마나 떨어져 있는지)
         # 차량과 경로 포인트 사이의 벡터
@@ -815,14 +815,13 @@ class RoadNetworkManager:
         # d 계산 (수직 벡터와의 내적)
         d = dx * perp_dir_x + dy * perp_dir_y
 
-        return d
+        return d, closest_point, cls.config['road_width']
 
     def reset(self):
         """노드와 링크 초기화"""
         self.nodes = []
         self.links = []
         Node._id_iter = 0  # 노드 ID 초기화
-        self.closest_point = None
 
     def draw(self, screen, debug=False):
         """네트워크 시각화"""
@@ -841,257 +840,3 @@ class RoadNetworkManager:
             for node in self.nodes:
                 if node not in drawn_nodes:
                     node.draw(screen, debug)
-
-            if self.closest_point:
-                # 가장 가까운 포인트 시각화
-                pygame.draw.circle(screen, (255, 0, 0), (int(self.closest_point[0]), int(self.closest_point[1])), 2)
-
-
-# 메인 테스트 함수
-def main():
-    class Vehicle:
-        """테스트용 더미 차량 클래스"""
-        def __init__(self, x=0, y=0, yaw=0):
-            self.x = x
-            self.y = y
-            self.yaw = yaw
-            self.speed = 0
-            self.width = 2.0
-            self.length = 4.5
-
-        def move(self, dx, dy):
-            """위치 이동"""
-            self.x += dx
-            self.y += dy
-            # 이동 방향에 따라 yaw 업데이트
-            if abs(dx) > 0.01 or abs(dy) > 0.01:
-                self.yaw = math.atan2(dy, dx)
-
-        def draw(self, screen, color=(0, 150, 255)):
-            """차량 시각화"""
-            # 차량 중심점
-            cx, cy = int(self.x), int(self.y)
-
-            # 차량 모양 (방향에 따라 회전)
-            corners = [
-                (-self.length/2, -self.width/2),
-                (self.length/2, -self.width/2),
-                (self.length/2, self.width/2),
-                (-self.length/2, self.width/2)
-            ]
-
-            # 회전 변환
-            rotated_corners = []
-            for x, y in corners:
-                # 회전 행렬 적용
-                rx = x * math.cos(self.yaw) - y * math.sin(self.yaw)
-                ry = x * math.sin(self.yaw) + y * math.cos(self.yaw)
-                rotated_corners.append((int(cx + rx), int(cy + ry)))
-
-            # 차량 본체 그리기
-            pygame.draw.polygon(screen, color, rotated_corners)
-
-            # 차량 전면 표시 (방향 표시)
-            front_x = cx + math.cos(self.yaw) * self.length/2
-            front_y = cy + math.sin(self.yaw) * self.length/2
-            pygame.draw.circle(screen, (255, 0, 0), (int(front_x), int(front_y)), 3)
-
-    # Pygame 초기화
-    pygame.init()
-    width, height = 1000, 800
-    screen = pygame.display.set_mode((width, height))
-    pygame.display.set_caption("Road Network System Test")
-    clock = pygame.time.Clock()
-
-    # 도로 네트워크 관리자 생성
-    road_manager = RoadNetworkManager()
-
-    # 더미 차량 생성
-    vehicle = Vehicle(400, 300)
-
-    # 테스트용 변수
-    nodes = []  # 마우스 클릭으로 추가된 노드 (최대 2개)
-    obstacles = []  # 마우스 우클릭으로 추가된 장애물
-    debug_mode = False  # 디버그 모드
-
-    # 교차로 생성 함수
-    def create_intersection(center_x, center_y):
-        # 초기화
-        road_manager.reset()
-
-        # 교차로 중심
-        center = (center_x, center_y)
-
-        # 도로 길이
-        road_length = 200
-        road_width = 20
-
-        # 우측 통행을 위한 각 방향의 입구/출구 노드 (동, 서, 남, 북)
-        # 각 방향별로 두 개의 노드 생성 (입구, 출구)
-
-        # 동쪽 (오른쪽)
-        east_in = (center_x + road_length, center_y - road_width, math.pi)  # 서쪽 방향을 바라봄
-        east_out = (center_x + road_length, center_y + road_width, 0)       # 동쪽 방향을 바라봄
-
-        # 서쪽 (왼쪽)
-        west_in = (center_x - road_length, center_y + road_width, 0)        # 동쪽 방향을 바라봄
-        west_out = (center_x - road_length, center_y - road_width, math.pi) # 서쪽 방향을 바라봄
-
-        # 남쪽 (아래)
-        south_in = (center_x + road_width, center_y + road_length, -math.pi/2)  # 북쪽 방향을 바라봄
-        south_out = (center_x - road_width, center_y + road_length, math.pi/2)  # 남쪽 방향을 바라봄
-
-        # 북쪽 (위)
-        north_in = (center_x - road_width, center_y - road_length, math.pi/2)   # 남쪽 방향을 바라봄
-        north_out = (center_x + road_width, center_y - road_length, -math.pi/2) # 북쪽 방향을 바라봄
-
-        # 교차로 중심 근처 노드 (각 방향에서 교차로로 들어가는 지점, 사분면면)
-        center_1 = (center_x + road_width, center_y - road_width, math.pi)
-        center_2 = (center_x - road_width, center_y - road_width, math.pi/2)
-        center_3 = (center_x - road_width, center_y + road_width, 0)
-        center_4 = (center_x + road_width, center_y + road_width, -math.pi/2)
-
-        # 직진 경로 생성
-        # 동쪽 진입 -> 서쪽 진출
-        road_manager.connect(east_in, center_1, obstacles, 'straight')
-        road_manager.connect(center_1, center_2, obstacles, 'straight')
-        road_manager.connect(center_2, west_out, obstacles, 'straight')
-
-        # 서쪽 진입 -> 동쪽 진출
-        road_manager.connect(west_in, center_3, obstacles, 'straight')
-        road_manager.connect(center_3, center_4, obstacles, 'straight')
-        road_manager.connect(center_4, east_out, obstacles, 'straight')
-
-        # 남쪽 진입 -> 북쪽 진출
-        road_manager.connect(south_in, center_4, obstacles, 'straight')
-        road_manager.connect(center_4, center_1, obstacles, 'straight')
-        road_manager.connect(center_1, north_out, obstacles, 'straight')
-
-        # 북쪽 진입 -> 남쪽 진출
-        road_manager.connect(north_in, center_2, obstacles, 'straight')
-        road_manager.connect(center_2, center_3, obstacles, 'straight')
-        road_manager.connect(center_3, south_out, obstacles, 'straight')
-
-        # 좌회전 경로 생성
-        # 동쪽 진입 -> 남쪽 진출
-        road_manager.connect(east_in, center_1, obstacles, 'straight')
-        road_manager.connect(center_1, south_out, obstacles, 'curve')
-
-        # 서쪽 진입 -> 북쪽 진출
-        road_manager.connect(west_in, center_3, obstacles, 'straight')
-        road_manager.connect(center_3, north_out, obstacles, 'curve')
-
-        # 남쪽 진입 -> 서쪽 진출
-        road_manager.connect(south_in, center_4, obstacles, 'straight')
-        road_manager.connect(center_4, west_out, obstacles, 'curve')
-
-        # 북쪽 진입 -> 동쪽 진출
-        road_manager.connect(north_in, center_2, obstacles, 'straight')
-        road_manager.connect(center_2, east_out, obstacles, 'curve')
-
-        # 우회전 경로 생성
-        # 동쪽 진입 -> 북쪽 진출
-        road_manager.connect(east_in, north_out, obstacles, 'curve')
-
-        # 서쪽 진입 -> 남쪽 진출
-        road_manager.connect(west_in, south_out, obstacles, 'curve')
-
-        # 남쪽 진입 -> 동쪽 진출
-        road_manager.connect(south_in, east_out, obstacles, 'curve')
-
-        # 북쪽 진입 -> 서쪽 진출
-        road_manager.connect(north_in, west_out, obstacles, 'curve')
-
-    # 기본 교차로 생성
-    create_intersection(width/2, height/2)
-
-    # 게임 루프
-    running = True
-    while running:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                # 마우스 클릭 위치
-                x, y = pygame.mouse.get_pos()
-                if event.button == 1:  # 좌클릭: 노드 추가
-                    if len(nodes) < 2:
-                        nodes.append((x, y, 0))  # 기본 yaw = 0
-                        # 두 번째 노드가 추가되면 경로 계획
-                        if len(nodes) == 2:
-                            road_manager.connect(nodes[0], nodes[1], obstacles, 'plan')
-                            nodes = []  # 노드 리스트 초기화
-                elif event.button == 3:  # 우클릭: 장애물 추가
-                    obstacles.append((x, y, 10))  # 반경 10의 원형 장애물
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_F1:  # F1: 디버그 모드 토글
-                    debug_mode = not debug_mode
-                elif event.key == pygame.K_r:  # R: 초기화
-                    road_manager.reset()
-                    nodes = []
-                    obstacles = []
-                elif event.key == pygame.K_c:  # C: 교차로 생성
-                    create_intersection(width/2, height/2)
-
-        # 차량 이동 제어 (W,A,S,D)
-        keys = pygame.key.get_pressed()
-        move_speed = 3
-        dx, dy = 0, 0
-
-        if keys[pygame.K_w]:  # 위
-            dy -= move_speed
-        if keys[pygame.K_s]:  # 아래
-            dy += move_speed
-        if keys[pygame.K_a]:  # 왼쪽
-            dx -= move_speed
-        if keys[pygame.K_d]:  # 오른쪽
-            dx += move_speed
-
-        vehicle.move(dx, dy)
-
-        # 화면 그리기
-        screen.fill((0, 0, 0))  # 검은색 배경
-
-        # 교차로 그리기
-        road_manager.draw(screen, debug_mode)
-
-        # 더미 차량 그리기
-        vehicle.draw(screen)
-
-        # 장애물 그리기
-        for obs in obstacles:
-            pygame.draw.circle(screen, (255, 0, 0), (int(obs[0]), int(obs[1])), obs[2])
-
-        # Frenet 좌표계 d 값 출력 (차량과 경로의 거리)
-        frenet_d = road_manager.get_distance(vehicle)
-        frenet_text = f"Frenet d: {frenet_d:.2f}m"
-        font = pygame.font.SysFont(None, 16)
-        text = font.render(frenet_text, True, (255, 255, 255))
-        screen.blit(text, (10, 10))
-
-        # 컨트롤 도움말
-        if debug_mode:
-            help_texts = [
-                "Controls:",
-                "Left Click: Add node (2 clicks to create path)",
-                "Right Click: Add obstacle",
-                "W,A,S,D: Move vehicle",
-                "F1: Toggle debug mode",
-                "R: Reset",
-                "C: Create intersection"
-            ]
-
-            y_pos = 40
-            for line in help_texts:
-                text = font.render(line, True, (200, 200, 200))
-                screen.blit(text, (10, y_pos))
-                y_pos += 20
-
-        pygame.display.flip()
-        clock.tick(60)
-
-    pygame.quit()
-
-
-if __name__ == "__main__":
-    main()

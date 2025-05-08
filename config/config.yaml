@@ -15,6 +15,14 @@ simulation:
     default_speed: 30
     min_speed: 5
     max_speed: 50
+  rewards:
+    off_road_penalty: 5.0             # penalty for going off-road
+    goal_reached_reward: 10.0         # reward for reaching the goal
+    collision_penalty: 10.0           # penalty for collision
+    time_penalty_factor: 0.01         # penalty factor for each step taken
+    distance_reward_factor: 0.1       # reward factor for reducing distance to goal
+    orientation_reward_factor: 0.05   # reward factor for correct orientation towards goal
+    speed_reward_factor: 0.02         # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
@@ -54,6 +62,7 @@ visualization:
   frenet_point_color: [0, 255, 255]       # RGB for Frenet D debug visualization
   node_color: [0, 0, 255]                 # RGB for road nodes
   link_color: [255, 0, 255]               # RGB for road links
+  path_color: [0, 255, 0]                 # RGB for planned path
 
 vehicle:
   # 기본 차량 설정 (2024 Model 3 Long Range AWD)
