@@ -304,9 +304,9 @@ class PathPlanner:
         RRT 알고리즘에 Dubins steer 적용, 비홀로노믹 제약 고려
         RRT 알고리즘의 트리 노드들은 Node 클래스 사용하지 않고 내부적으로 노드 처리
         """
-        # 에러 상황 처리
-        if not obstacles:
-            return cls._straight(start_node, end_node)
+        # # 에러 상황 처리
+        # if not obstacles:
+        #     return cls._straight(start_node, end_node)
 
         class RRTNode:
             def __init__(self, x, y, yaw, parent=None):
@@ -346,6 +346,9 @@ class PathPlanner:
         collision_dist = width / 2 + 1.0
 
         for i in range(config["max_iterations"]):
+            # 현재 반복에서의 스텝 크기 동적 계산
+            current_iteration_step_size = config["base_step_size"] * random.uniform(config["min_step_factor"], config["max_step_factor"])
+
             # 랜덤 위치치 샘플링 (일정 확률로 목표 지점 선택)
             if random.random() < config["goal_sampling_rate"]:
                 rand_point = (goal.x, goal.y, None)  # yaw는 경로 생성 후 결정
@@ -359,7 +362,7 @@ class PathPlanner:
             nearest_point = nearest_node.get_tuple()
 
             # 스티어링 (Dubins Curve 적용)
-            new_point = cls._steer(nearest_point, rand_point, config["step_size"], config["min_radius"])
+            new_point = cls._steer(nearest_point, rand_point, current_iteration_step_size, config["min_radius"])
 
             # 장애물과 충돌 확인
             if cls._is_collision_free(nearest_point, new_point, obstacles, collision_dist):
@@ -367,7 +370,7 @@ class PathPlanner:
                 nodes.append(new_node)
 
                 # 목표 지점 근처에 도달했는지 확인
-                if new_node.distance_to(goal) < config["step_size"]:
+                if new_node.distance_to(goal) < config["goal_distance_threshold"]:
                     # 목표 노드에 연결 시도
                     if cls._is_collision_free(new_node.get_tuple(), goal.get_tuple(), obstacles, collision_dist):
                         # 목표 노드의 부모를 마지막 노드로 설정정

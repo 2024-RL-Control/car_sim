@@ -7,11 +7,14 @@ simulation:
   max_steps: 1000   # maximum steps per episode
   num_vehicles: 1   # number of vehicles on the environment, if num_vehicles = 1: single vehicle, else multi-vehicle
   path_planning:
-    max_iterations: 2000  # maximum iterations for path planning
-    step_size: 0.1       # step size for path planning [m]
-    goal_sampling_rate: 0.1  # goal sampling rate for path planning [0, 1]
-    road_width: 6.0      # Default road width [m]
-    min_radius: 10.0   # minimum turning radius for path planning [m]
+    max_iterations: 5000       # maximum iterations for path planning
+    base_step_size: 0.2         # Base for variable RRT step [m]
+    min_step_factor: 1.0        # Min multiplier for base_step_size
+    max_step_factor: 5.0       # Max multiplier for base_step_size
+    goal_distance_threshold: 3.0 # RRT node proximity to goal for final connection [m]
+    goal_sampling_rate: 0.1     # goal sampling rate for path planning [0, 1]
+    road_width: 6.0             # Default road width [m]
+    min_radius: 1.5             # minimum turning radius for path planning [m]
     default_speed: 30
     min_speed: 5
     max_speed: 50
