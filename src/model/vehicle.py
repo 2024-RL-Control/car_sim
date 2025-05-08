@@ -7,6 +7,7 @@ import pygame
 import numpy as np
 from .physics import PhysicsEngine
 from .object import RectangleObstacle, GoalManager
+from .road import RoadNetworkManager
 from .sensor import SensorManager
 
 # ======================
@@ -39,6 +40,10 @@ class VehicleState:
     distance_to_target: float = 0.0  # 목표까지의 거리
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
 
+    # frenet 좌표
+    frenet_d: float = None
+    frenet_point: tuple = None
+
     # 환경 속성
     terrain_type: str = "asphalt"  # 현재 지형 유형
 
@@ -68,6 +73,9 @@ class VehicleState:
         self.target_yaw = 0.0
         self.distance_to_target = 0.0
         self.yaw_diff_to_target = 0.0
+
+        self.frenet_d = None
+        self.frenet_point = None
 
         self.terrain_type = "asphalt"
 
@@ -106,6 +114,13 @@ class VehicleState:
         """뒷바퀴 축 위치에서 heading 방향으로 이동, 차량 중심점 위치 업데이트"""
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
         self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
+
+    def update_frenet(self):
+        """
+        차량의 frenet 좌표 업데이트
+        """
+        self.frenet_d, self.frenet_point, outside_road = RoadNetworkManager.get_frenet_d((self.x, self.y, self.yaw))
+        return outside_road
 
 # ======================
 # Vehicle Model
@@ -252,6 +267,9 @@ class Vehicle:
         # 차량 센서 업데이트
         self.sensor_manager.update(dt, time_elapsed, objects)
 
+        # 도로 정보 업데이트
+        outside_road = self._update_frenet()
+
         # 충돌 검사
         collision = self._check_collision(objects)
 
@@ -260,7 +278,10 @@ class Vehicle:
         if self.goal_manager.has_goals():
             reached = self._check_target_reached()
 
-        return self.state, collision, reached
+        return self.state, collision, outside_road, reached
+
+    def _update_frenet(self):
+        return self.state.update_frenet()
 
     def _check_collision(self, objects):
         """
@@ -402,6 +423,9 @@ class Vehicle:
                 # 차량 센서 그리기
                 self.sensor_manager.draw(screen, world_to_screen_func, debug)
 
+                # frenet 좌표 시각화
+                self._draw_frenet_point(screen, world_to_screen_func)
+
             # 충돌 바디의 경계 원 그리기 메서드 활용
             self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
@@ -413,6 +437,11 @@ class Vehicle:
 
         # 차체 그리기
         self._draw_body(screen, world_to_screen_func)
+
+    def _draw_frenet_point(self, screen, world_to_screen_func):
+        """frenet 좌표 시각화"""
+        if self.state.frenet_point is not None:
+            pygame.draw.circle(screen, self.visual_config['frenet_point_color'], world_to_screen_func(self.state.frenet_point), 5)
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
@@ -925,25 +954,27 @@ class VehicleManager:
             obstacles = []
 
         collisions = {}
+        outside_roads = {}
         reached_targets = {}
 
         # 단일 액션인 경우 (단일 차량 모드)
         if not isinstance(actions, list):
             if len(self.vehicles) > 0:
                 vehicle = self.vehicles[0]
-                _, collision, reached = vehicle.step(actions, dt, time_elapsed, obstacles, self.vehicles)
+                _, collision, outside_road, reached = vehicle.step(actions, dt, time_elapsed, obstacles, self.vehicles)
                 collisions[vehicle.id] = collision
+                outside_roads[vehicle.id] = outside_road
                 reached_targets[vehicle.id] = reached
         else:
             # 다중 차량 모드
             for i, vehicle in enumerate(self.vehicles):
                 if i < len(actions):
                     vehicle_action = actions[i]
-                    _, collision, reached = vehicle.step(vehicle_action, dt, time_elapsed, obstacles, self.vehicles)
+                    _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, obstacles, self.vehicles)
                     collisions[vehicle.id] = collision
+                    outside_roads[vehicle.id] = outside_road
                     reached_targets[vehicle.id] = reached
-
-        return collisions, reached_targets
+        return collisions, outside_roads, reached_targets
 
     def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
         """

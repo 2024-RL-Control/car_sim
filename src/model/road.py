@@ -760,7 +760,7 @@ class RoadNetworkManager:
         가장 가까운 포인트와의 거리 계산(Frenet d), 차량의 상태로 활용
         """
         if not cls.links:
-            return None, None, None
+            return None, None, False
 
         # 차량 위치
         x, y, yaw = vehicle_position
@@ -795,7 +795,7 @@ class RoadNetworkManager:
                 closest_link = link
 
         if not closest_point:
-            return None, None, None
+            return None, None, False
 
         closest_point  # 가장 가까운 포인트 저장
 
