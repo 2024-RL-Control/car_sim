@@ -187,8 +187,8 @@ class Link:
         Link 객체의 직렬화 상태 반환
         """
         return {
-            "start": self.start.get_serializable_state(),
-            "end": self.end.get_serializable_state(),
+            "start_id": self.start.id,
+            "end_id": self.end.id,
             "mode": self.mode,
             "width": self.width
         }
@@ -841,6 +841,60 @@ class RoadNetworkManager:
         bool_outside_road = abs(d) > cls.config['road_width'] / 2.0
 
         return d, closest_point, bool_outside_road
+
+    def get_serializable_state(self):
+        """
+        RoadNetworkManager 객체의 직렬화 상태 반환
+        """
+        nodes_data = {}
+        for node in self.nodes:
+            nodes_data[node.id] = node.get_serializable_state()
+
+        links_data = []
+        for link in self.links:
+            links_data.append(link.get_serializable_state())
+
+        return {
+            "nodes": nodes_data,
+            "links": links_data,
+            "node_id_iter": Node._id_iter
+        }
+
+    def load_from_serialized(self, data, obstacles):
+        """
+        직렬화된 데이터로부터 RoadNetworkManager 객체 상태 복원
+
+        Args:
+            data: 직렬화된 데이터 딕셔너리
+        """
+        # 초기화
+        self.reset()
+
+        # 노드 복원
+        nodes_dict = {}
+        for node_id, node_data in data["nodes"].items():
+            node = Node(0, 0)  # 임시 값으로 생성
+            node.load_from_serialized(node_data)
+            self.nodes.append(node)
+            nodes_dict[node.id] = node
+
+        # 노드 ID 이터레이터 복원
+        Node._id_iter = data.get("node_id_iter", 0)
+
+        # 링크 복원
+        for link_data in data["links"]:
+            # 링크의 시작 및 끝 노드 가져오기
+            start_id = link_data["start_id"]
+            end_id = link_data["end_id"]
+
+            # 이미 복원된 노드들에서 해당 노드들 찾기
+            start_node = nodes_dict[start_id]
+            end_node = nodes_dict[end_id]
+
+            # 새 링크 생성
+            link = Link(start_node, end_node, obstacles, link_data["mode"], self.config)
+
+            self.links.append(link)
 
     def reset(self):
         """노드와 링크 초기화"""

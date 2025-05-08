@@ -136,6 +136,9 @@ class CarSimulatorEnv(gym.Env):
             # 장애물 매니저 관련 데이터
             'obstacles': self.obstacle_manager.get_serializable_obstacles(),
 
+            # 도로 네트워크 관련 데이터
+            'road_network': self.road_manager.get_serializable_state(),
+
             # 카메라 설정
             'camera': self.camera.get_serializable_camera(),
 
@@ -176,6 +179,13 @@ class CarSimulatorEnv(gym.Env):
             self.obstacle_manager.clear_obstacles()  # 기존 장애물 제거
             if 'obstacles' in save_data:
                 self.obstacle_manager.load_obstacles_from_serialized(save_data['obstacles'])
+
+            # 장애물 정보 복원
+            obstacles = self.obstacle_manager.get_all_outer_circles()
+
+            # 도로 네트워크 정보 복원
+            if 'road_network' in save_data:
+                self.road_manager.load_from_serialized(save_data['road_network'], obstacles)
 
             # 카메라 설정 복원
             if 'camera' in save_data:
