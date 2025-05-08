@@ -323,10 +323,10 @@ class CarSimulatorEnv(gym.Env):
             추가된 목적지 ID
         """
         goal_id = self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
-        if goal_id:
+        if goal_id is not None:
             vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
             road = self.add_road(vehicle, x, y, yaw)
-            return goal_id and road
+            return road
         else:
             return goal_id
 
