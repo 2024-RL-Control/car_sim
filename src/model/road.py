@@ -777,22 +777,21 @@ class RoadNetworkManager:
 
         return closest_point, min_dist
 
-    @classmethod
-    def get_frenet_d(cls, vehicle_position=(0,0,0)):
+    def get_frenet_d(self, vehicle_position=(0,0,0)):
         """
         가장 가까운 포인트와의 거리 계산(Frenet d), 차량의 상태로 활용
         """
-        if not cls.links:
+        if not self.links:
             return None, None, False
 
         # 차량 위치
         x, y, yaw = vehicle_position
 
         # 가장 가까운 노드 찾기
-        closest_node = cls._get_closest_node(x, y)
+        closest_node = self._get_closest_node(x, y)
 
         # 해당 노드와 연결된 링크 찾기
-        links = cls._find_link_by_node(closest_node)
+        links = self._find_link_by_node(closest_node)
 
         # 가장 가까운 링크와 포인트 찾기
         min_dist = float('inf')
@@ -800,18 +799,18 @@ class RoadNetworkManager:
         closest_link = None
 
         for link in links:
-            point, dist = cls._get_closest_point(x, y, link)
+            point, dist = self._get_closest_point(x, y, link)
             if dist < min_dist:
                 min_dist = dist
                 closest_point = point
                 closest_link = link
 
         # 추가적으로 근처의 다른 링크도 확인
-        for link in cls.links:
+        for link in self.links:
             if link in links:
                 continue
 
-            point, dist = cls._get_closest_point(x, y, link)
+            point, dist = self._get_closest_point(x, y, link)
             if dist < min_dist:
                 min_dist = dist
                 closest_point = point
@@ -838,7 +837,7 @@ class RoadNetworkManager:
         # d 계산 (수직 벡터와의 내적)
         d = dx * perp_dir_x + dy * perp_dir_y
 
-        bool_outside_road = abs(d) > cls.config['road_width'] / 2.0
+        bool_outside_road = abs(d) > self.config['road_width'] / 2.0
 
         return d, closest_point, bool_outside_road
 

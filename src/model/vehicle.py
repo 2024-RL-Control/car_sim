@@ -7,7 +7,6 @@ import pygame
 import numpy as np
 from .physics import PhysicsEngine
 from .object import RectangleObstacle, GoalManager
-from .road import RoadNetworkManager
 from .sensor import SensorManager
 
 # ======================
@@ -115,11 +114,11 @@ class VehicleState:
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
         self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
 
-    def update_frenet(self):
+    def update_frenet(self, road_manager):
         """
         차량의 frenet 좌표 업데이트
         """
-        self.frenet_d, self.frenet_point, outside_road = RoadNetworkManager.get_frenet_d((self.x, self.y, self.yaw))
+        self.frenet_d, self.frenet_point, outside_road = road_manager.get_frenet_d((self.x, self.y, self.yaw))
         return outside_road
 
 # ======================
@@ -246,7 +245,7 @@ class Vehicle:
         self._load_graphics()
         self._update_collision_body()
 
-    def step(self, action, dt, time_elapsed, obstacles=[], vehicles=[]):
+    def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
@@ -268,7 +267,7 @@ class Vehicle:
         self.sensor_manager.update(dt, time_elapsed, objects)
 
         # 도로 정보 업데이트
-        outside_road = self._update_frenet()
+        outside_road = self._update_frenet(road_manager)
 
         # 충돌 검사
         collision = self._check_collision(objects)
@@ -280,8 +279,8 @@ class Vehicle:
 
         return self.state, collision, outside_road, reached
 
-    def _update_frenet(self):
-        return self.state.update_frenet()
+    def _update_frenet(self, road_manager):
+        return self.state.update_frenet(road_manager)
 
     def _check_collision(self, objects):
         """
@@ -688,7 +687,7 @@ class Vehicle:
 class VehicleManager:
     """차량들을 관리하는 클래스"""
 
-    def __init__(self, vehicle_config=None, physics_config=None, visual_config=None):
+    def __init__(self, road_manager, vehicle_config=None, physics_config=None, visual_config=None):
         """
         차량 관리자 초기화
 
@@ -701,6 +700,8 @@ class VehicleManager:
         self.vehicle_map = {}  # {vehicle_id: vehicle} 매핑
         self.active_vehicle_idx = 0  # 현재 활성화된 차량 인덱스
         self.next_vehicle_id = 0  # 다음 차량 ID (자동 생성용)
+
+        self.road_manager = road_manager  # 도로 관리자
 
         # 설정 저장
         self.vehicle_config = vehicle_config
@@ -961,7 +962,7 @@ class VehicleManager:
         if not isinstance(actions, list):
             if len(self.vehicles) > 0:
                 vehicle = self.vehicles[0]
-                _, collision, outside_road, reached = vehicle.step(actions, dt, time_elapsed, obstacles, self.vehicles)
+                _, collision, outside_road, reached = vehicle.step(actions, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
                 collisions[vehicle.id] = collision
                 outside_roads[vehicle.id] = outside_road
                 reached_targets[vehicle.id] = reached
@@ -970,7 +971,7 @@ class VehicleManager:
             for i, vehicle in enumerate(self.vehicles):
                 if i < len(actions):
                     vehicle_action = actions[i]
-                    _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, obstacles, self.vehicles)
+                    _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
                     collisions[vehicle.id] = collision
                     outside_roads[vehicle.id] = outside_road
                     reached_targets[vehicle.id] = reached

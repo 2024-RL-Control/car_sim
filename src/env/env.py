@@ -40,8 +40,15 @@ class CarSimulatorEnv(gym.Env):
         self.num_vehicles = self.config['simulation']['num_vehicles']
         self.multi_vehicle = (self.num_vehicles > 1)
 
+        # 장애물 매니저 초기화
+        self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
+
+        # 도로 시스템 초기화
+        self.road_manager = RoadNetworkManager(self.config['simulation']['path_planning'])
+
         # 차량 관리자 초기화
         self.vehicle_manager = VehicleManager(
+            road_manager=self.road_manager,
             vehicle_config=self.config['vehicle'],
             physics_config=self.config['physics'],
             visual_config=self.config['visualization']
@@ -50,12 +57,6 @@ class CarSimulatorEnv(gym.Env):
         # 초기 차량들 생성
         for i in range(self.num_vehicles):
             self.vehicle_manager.create_vehicle(x=i*100, y=0, vehicle_id=i)
-
-        # 장애물 매니저 초기화
-        self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
-
-        # 도로 시스템 초기화
-        self.road_manager = RoadNetworkManager(self.config['simulation']['path_planning'])
 
         # UI 모듈 초기화
         self.camera = Camera(self.config)
