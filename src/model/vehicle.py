@@ -440,7 +440,7 @@ class Vehicle:
     def _draw_frenet_point(self, screen, world_to_screen_func):
         """frenet 좌표 시각화"""
         if self.state.frenet_point is not None:
-            pygame.draw.circle(screen, (0, 255, 255), world_to_screen_func(self.state.frenet_point), 5)
+            pygame.draw.circle(screen, (0, 255, 255), world_to_screen_func(self.state.frenet_point[0], self.state.frenet_point[1]), 5)
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""

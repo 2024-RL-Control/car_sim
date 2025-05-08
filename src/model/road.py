@@ -35,6 +35,10 @@ class Node:
             return abs(self.x - other.x) < 0.01 and abs(self.y - other.y) < 0.01 and abs(self.yaw - other.yaw) < 0.01
         return False
 
+    def __hash__(self):
+        # ID 기반으로 해시값 생성 (set, dict 사용 위함)
+        return hash(self.id)
+
     def get_point(self):
         """
         (x, y, yaw) 반환
@@ -166,15 +170,15 @@ class Link:
             ]
 
             # 스크린 좌표로 변환
-            screen_points = [world_to_screen_func(*wp) for wp in world_points]
+            screen_points = [world_to_screen_func(*wp[:2]) for wp in world_points]
 
             # 사각형 그리기
             pygame.draw.polygon(screen, road_color, screen_points)
 
             # 중앙선 그리기 (디버그 모드)
             if debug:
-                screen_p1 = world_to_screen_func(*p1_world)
-                screen_p2 = world_to_screen_func(*p2_world)
+                screen_p1 = world_to_screen_func(p1_world[0], p1_world[1])
+                screen_p2 = world_to_screen_func(p2_world[0], p2_world[1])
                 pygame.draw.line(screen, (255, 255, 0), screen_p1, screen_p2, 1)
 
         # 노드 그리기 (world_to_screen_func 전달)
@@ -186,7 +190,7 @@ class Link:
             font = pygame.font.SysFont(None, 12)
             text = font.render(f"{self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point_world = self.path[len(self.path)//2]
-            mid_point_screen = world_to_screen_func(*mid_point_world)
+            mid_point_screen = world_to_screen_func(mid_point_world[0], mid_point_world[1])
             screen.blit(text, (int(mid_point_screen[0]), int(mid_point_screen[1]) - 20))
 
     def get_serializable_state(self):
