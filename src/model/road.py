@@ -13,16 +13,17 @@ class Node:
         self.id = Node._id_iter
         Node._id_iter += 1
 
-    def draw(self, screen, debug=False, color=(0, 0, 255), radius=5):
+    def draw(self, screen, world_to_screen_func, debug=False, color=(0, 0, 255), radius=5):
         """
         pygame 시각화 메소드
         debug 모드 시 노드 id 같이 출력
         """
-        pygame.draw.circle(screen, color, (int(self.x), int(self.y)), radius)
+        screen_pos = world_to_screen_func((self.x, self.y))
+        pygame.draw.circle(screen, color, (int(screen_pos[0]), int(screen_pos[1])), radius)
         if debug:
             font = pygame.font.SysFont(None, 12)
             text = font.render(f"{self.id}", True, (255, 255, 255))
-            screen.blit(text, (int(self.x)-2, int(self.y)-4))
+            screen.blit(text, (int(screen_pos[0])-2, int(screen_pos[1])-4))
 
     def distance(self, other):
         """두 노드 사이의 유클리드 거리 계산"""
@@ -119,7 +120,7 @@ class Link:
         self._sample_step = step_size
         return result
 
-    def draw(self, screen, debug=False):
+    def draw(self, screen, world_to_screen_func, debug=False):
         """
         pygame 시각화 메소드
         mode에 따라 더 정확한 pygame 시각화 메소드 사용
@@ -137,50 +138,56 @@ class Link:
 
         # 도로 그리기
         for i in range(len(self.path) - 1):
-            p1 = self.path[i]
-            p2 = self.path[i + 1]
+            p1_world = self.path[i]
+            p2_world = self.path[i+1]
 
             # 선분의 방향 벡터
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
+            dx = p2_world[0] - p1_world[0]
+            dy = p2_world[1] - p1_world[1]
             length = math.sqrt(dx*dx + dy*dy)
             if length < 0.01:
                 continue
 
             # 방향 벡터를 정규화
-            dx, dy = dx/length, dy/length
+            dx_norm, dy_norm = dx/length, dy/length
 
             # 수직 방향 벡터 (시계 방향으로 90도 회전)
-            perpx, perpy = -dy, dx
+            perpx, perpy = -dy_norm, dx_norm
 
             # 도로 너비의 절반
             half_width = self.width / 2
 
-            # 도로 모서리 4개 점
-            points = [
-                (p1[0] + perpx * half_width, p1[1] + perpy * half_width),
-                (p2[0] + perpx * half_width, p2[1] + perpy * half_width),
-                (p2[0] - perpx * half_width, p2[1] - perpy * half_width),
-                (p1[0] - perpx * half_width, p1[1] - perpy * half_width)
+            # 도로 모서리 4개 점 (월드 좌표)
+            world_points = [
+                (p1_world[0] + perpx * half_width, p1_world[1] + perpy * half_width),
+                (p2_world[0] + perpx * half_width, p2_world[1] + perpy * half_width),
+                (p2_world[0] - perpx * half_width, p2_world[1] - perpy * half_width),
+                (p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width)
             ]
+            
+            # 스크린 좌표로 변환
+            screen_points = [world_to_screen_func(wp) for wp in world_points]
 
             # 사각형 그리기
-            pygame.draw.polygon(screen, road_color, points)
+            pygame.draw.polygon(screen, road_color, screen_points)
 
             # 중앙선 그리기 (디버그 모드)
             if debug:
-                pygame.draw.line(screen, (255, 255, 0), (p1[0], p1[1]), (p2[0], p2[1]), 1)
+                screen_p1 = world_to_screen_func(p1_world)
+                screen_p2 = world_to_screen_func(p2_world)
+                pygame.draw.line(screen, (255, 255, 0), screen_p1, screen_p2, 1)
 
-        # 노드 그리기
-        self.start.draw(screen, debug)
-        self.end.draw(screen, debug)
+        # 노드 그리기 (world_to_screen_func 전달)
+        self.start.draw(screen, world_to_screen_func, debug)
+        self.end.draw(screen, world_to_screen_func, debug)
 
         # 디버그 정보 출력
         if debug:
             font = pygame.font.SysFont(None, 12)
             text = font.render(f"{self.start.id}->{self.end.id}", True, (255, 255, 255))
-            mid_point = self.path[len(self.path)//2]
-            screen.blit(text, (int(mid_point[0]), int(mid_point[1]) - 20))
+            mid_point_world = self.path[len(self.path)//2]
+            mid_point_screen = world_to_screen_func(mid_point_world)
+            screen.blit(text, (int(mid_point_screen[0]), int(mid_point_screen[1]) - 20))
 
     def get_serializable_state(self):
         """
@@ -901,11 +908,11 @@ class RoadNetworkManager:
         self.links = []
         Node._id_iter = 0  # 노드 ID 초기화
 
-    def draw(self, screen, debug=False):
+    def draw(self, screen, world_to_screen_func, debug=False):
         """네트워크 시각화"""
         # 모든 링크 그리기
         for link in self.links:
-            link.draw(screen, debug)
+            link.draw(screen, world_to_screen_func, debug)
 
         if debug:
             # 모든 노드 그리기 (링크가 그리지 않은 노드만)
@@ -917,4 +924,4 @@ class RoadNetworkManager:
             # 링크에 포함되지 않은 노드 그리기
             for node in self.nodes:
                 if node not in drawn_nodes:
-                    node.draw(screen, debug)
+                    node.draw(screen, world_to_screen_func, debug)
