@@ -18,7 +18,7 @@ class Node:
         pygame 시각화 메소드
         debug 모드 시 노드 id 같이 출력
         """
-        screen_pos = world_to_screen_func((self.x, self.y))
+        screen_pos = world_to_screen_func(self.x, self.y)
         pygame.draw.circle(screen, color, (int(screen_pos[0]), int(screen_pos[1])), radius)
         if debug:
             font = pygame.font.SysFont(None, 12)
@@ -164,17 +164,17 @@ class Link:
                 (p2_world[0] - perpx * half_width, p2_world[1] - perpy * half_width),
                 (p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width)
             ]
-            
+
             # 스크린 좌표로 변환
-            screen_points = [world_to_screen_func(wp) for wp in world_points]
+            screen_points = [world_to_screen_func(*wp) for wp in world_points]
 
             # 사각형 그리기
             pygame.draw.polygon(screen, road_color, screen_points)
 
             # 중앙선 그리기 (디버그 모드)
             if debug:
-                screen_p1 = world_to_screen_func(p1_world)
-                screen_p2 = world_to_screen_func(p2_world)
+                screen_p1 = world_to_screen_func(*p1_world)
+                screen_p2 = world_to_screen_func(*p2_world)
                 pygame.draw.line(screen, (255, 255, 0), screen_p1, screen_p2, 1)
 
         # 노드 그리기 (world_to_screen_func 전달)
@@ -186,7 +186,7 @@ class Link:
             font = pygame.font.SysFont(None, 12)
             text = font.render(f"{self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point_world = self.path[len(self.path)//2]
-            mid_point_screen = world_to_screen_func(mid_point_world)
+            mid_point_screen = world_to_screen_func(*mid_point_world)
             screen.blit(text, (int(mid_point_screen[0]), int(mid_point_screen[1]) - 20))
 
     def get_serializable_state(self):

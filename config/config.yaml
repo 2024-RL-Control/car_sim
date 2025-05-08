@@ -16,7 +16,7 @@ simulation:
     min_speed: 5
     max_speed: 50
   rewards:
-    off_road_penalty: 5.0             # penalty for going off-road
+    outside_road_penalty: 5.0         # penalty for going outside the road
     goal_reached_reward: 10.0         # reward for reaching the goal
     collision_penalty: 10.0           # penalty for collision
     time_penalty_factor: 0.01         # penalty factor for each step taken
