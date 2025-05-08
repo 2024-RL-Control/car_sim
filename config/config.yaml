@@ -1,4 +1,4 @@
-﻿# Vehicle Simulator Configuration
+# Vehicle Simulator Configuration
 
 # Simulation parameters
 simulation:
@@ -10,6 +10,7 @@ simulation:
     max_iterations: 2000  # maximum iterations for path planning
     step_size: 0.1       # step size for path planning [m]
     goal_sampling_rate: 0.1  # goal sampling rate for path planning [0, 1]
+    road_width: 6.0      # Default road width [m]
     min_radius: 10.0   # minimum turning radius for path planning [m]
     default_speed: 30
     min_speed: 5
@@ -45,6 +46,14 @@ visualization:
   lidar_ray_failure_color: [150, 150, 150]            # RGB
   lidar_sensor_data_color: [255, 0, 0]                # RGB
   lidar_sensor_history_data_color: [0, 100, 200, 100] # RGBA
+
+  # Road visualization
+  road_color: [80, 80, 80]                # RGB for road surface
+  road_line_color: [150, 150, 150]        # RGB for road lines (e.g., lane markings)
+  road_center_line_color: [255, 255, 0]   # RGB for road center line (debug)
+  frenet_point_color: [0, 255, 255]       # RGB for Frenet D debug visualization
+  node_color: [0, 0, 255]                 # RGB for road nodes
+  link_color: [255, 0, 255]               # RGB for road links
 
 vehicle:
   # 기본 차량 설정 (2024 Model 3 Long Range AWD)
