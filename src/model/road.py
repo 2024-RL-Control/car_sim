@@ -69,7 +69,7 @@ class Link:
         self.start = start_node
         self.end = end_node
         self.mode = mode
-        self.width = 6  # 6m
+        self.width = config['road_width']
         self.path = PathPlanner.plan(
             start_node,
             end_node,
@@ -343,7 +343,7 @@ class PathPlanner:
         nodes = [start]
 
         # 장애물 충돌 검사 거리 (도로 너비의 절반 + 여유)
-        collision_dist = width / 2 + 2.0
+        collision_dist = width / 2 + 1.0
 
         for i in range(config["max_iterations"]):
             # 랜덤 위치치 샘플링 (일정 확률로 목표 지점 선택)
