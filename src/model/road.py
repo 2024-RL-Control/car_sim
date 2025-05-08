@@ -3,7 +3,6 @@ import pygame
 import numpy as np
 import math
 import random
-from collections import deque
 
 class Node:
     _id_iter = 0
@@ -40,6 +39,20 @@ class Node:
         (x, y, yaw) 반환
         """
         return (self.x, self.y, self.yaw)
+
+    def get_serializable_state(self):
+        return {
+            "x": self.x,
+            "y": self.y,
+            "yaw": self.yaw,
+            "id": self.id
+        }
+
+    def load_from_serialized(self, data):
+        self.x = data["x"]
+        self.y = data["y"]
+        self.yaw = data["yaw"]
+        self.id = data["id"]
 
 
 class Link:
@@ -169,6 +182,16 @@ class Link:
             mid_point = self.path[len(self.path)//2]
             screen.blit(text, (int(mid_point[0]), int(mid_point[1]) - 20))
 
+    def get_serializable_state(self):
+        """
+        Link 객체의 직렬화 상태 반환
+        """
+        return {
+            "start": self.start.get_serializable_state(),
+            "end": self.end.get_serializable_state(),
+            "mode": self.mode,
+            "width": self.width
+        }
 
 class PathPlanner:
     """
