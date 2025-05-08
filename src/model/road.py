@@ -755,7 +755,7 @@ class RoadNetworkManager:
         return closest_point, min_dist
 
     @classmethod
-    def get_frenet_d(cls, vehicle):
+    def get_frenet_d(cls, vehicle_position=(0,0,0)):
         """
         가장 가까운 포인트와의 거리 계산(Frenet d), 차량의 상태로 활용
         """
@@ -763,7 +763,7 @@ class RoadNetworkManager:
             return None, None, None
 
         # 차량 위치
-        x, y, yaw = vehicle.get_position()
+        x, y, yaw = vehicle_position
 
         # 가장 가까운 노드 찾기
         closest_node = cls._get_closest_node(x, y)
@@ -815,7 +815,9 @@ class RoadNetworkManager:
         # d 계산 (수직 벡터와의 내적)
         d = dx * perp_dir_x + dy * perp_dir_y
 
-        return d, closest_point, cls.config['road_width']
+        bool_outside_road = abs(d) > cls.config['road_width'] / 2.0
+
+        return d, closest_point, bool_outside_road
 
     def reset(self):
         """노드와 링크 초기화"""
