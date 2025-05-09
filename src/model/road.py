@@ -3,6 +3,15 @@ import pygame
 import numpy as np
 import math
 import random
+from collections import deque
+
+def ortho(vect2d):
+    """Computes an orthogonal vector to the one given"""
+    return np.array((-vect2d[1], vect2d[0]))
+
+def dist(pt_a, pt_b):
+    """Euclidian distance between two (x, y) points"""
+    return ((pt_a[0]-pt_b[0])**2 + (pt_a[1]-pt_b[1])**2)**.5
 
 class Node:
     _id_iter = 0
@@ -204,6 +213,172 @@ class Link:
             "width": self.width
         }
 
+class Dubins:
+    def __init__(self, radius, point_separation):
+        assert radius > 0 and point_separation > 0
+        self.radius = radius
+        self.point_separation = point_separation
+
+    def all_options(self, start, end, sort=False):
+        center_0_left = self.find_center(start, 'L')
+        center_0_right = self.find_center(start, 'R')
+        center_2_left = self.find_center(end, 'L')
+        center_2_right = self.find_center(end, 'R')
+        options = [self.lsl(start, end, center_0_left, center_2_left),
+                   self.rsr(start, end, center_0_right, center_2_right),
+                   self.rsl(start, end, center_0_right, center_2_left),
+                   self.lsr(start, end, center_0_left, center_2_right),
+                   self.rlr(start, end, center_0_right, center_2_right),
+                   self.lrl(start, end, center_0_left, center_2_left)]
+        if sort:
+            options.sort(key=lambda x: x[0])
+        return options
+
+    def dubins_path(self, start, end):
+        options = self.all_options(start, end)
+        dubins_path, straight = min(options, key=lambda x: x[0])[1:]
+        return self.generate_points(start, end, dubins_path, straight)
+
+    def generate_points(self, start, end, dubins_path, straight):
+        if straight:
+            return self.generate_points_straight(start, end, dubins_path)
+        return self.generate_points_curve(start, end, dubins_path)
+
+    def lsl(self, start, end, center_0, center_2):
+        straight_dist = dist(center_0, center_2)
+        alpha = np.arctan2((center_2-center_0)[1], (center_2-center_0)[0])
+        beta_2 = (end[2]-alpha)%(2*np.pi)
+        beta_0 = (alpha-start[2])%(2*np.pi)
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (beta_0, beta_2, straight_dist), True)
+
+    def rsr(self, start, end, center_0, center_2):
+        straight_dist = dist(center_0, center_2)
+        alpha = np.arctan2((center_2-center_0)[1], (center_2-center_0)[0])
+        beta_2 = (-end[2]+alpha)%(2*np.pi)
+        beta_0 = (-alpha+start[2])%(2*np.pi)
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (-beta_0, -beta_2, straight_dist), True)
+
+    def rsl(self, start, end, center_0, center_2):
+        median_point = (center_2 - center_0)/2
+        psia = np.arctan2(median_point[1], median_point[0])
+        half_intercenter = np.linalg.norm(median_point)
+        if half_intercenter < self.radius:
+            return (float('inf'), (0, 0, 0), True)
+        alpha = np.arccos(self.radius/half_intercenter)
+        beta_0 = -(psia+alpha-start[2]-np.pi/2)%(2*np.pi)
+        beta_2 = (np.pi+end[2]-np.pi/2-alpha-psia)%(2*np.pi)
+        straight_dist = 2*(half_intercenter**2-self.radius**2)**.5
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (-beta_0, beta_2, straight_dist), True)
+
+    def lsr(self, start, end, center_0, center_2):
+        median_point = (center_2 - center_0)/2
+        psia = np.arctan2(median_point[1], median_point[0])
+        half_intercenter = np.linalg.norm(median_point)
+        if half_intercenter < self.radius:
+            return (float('inf'), (0, 0, 0), True)
+        alpha = np.arccos(self.radius/half_intercenter)
+        beta_0 = (psia-alpha-start[2]+np.pi/2)%(2*np.pi)
+        beta_2 = (.5*np.pi-end[2]-alpha+psia)%(2*np.pi)
+        straight_dist = 2*(half_intercenter**2-self.radius**2)**.5
+        total_len = self.radius*(beta_2+beta_0)+straight_dist
+        return (total_len, (beta_0, -beta_2, straight_dist), True)
+
+    def lrl(self, start, end, center_0, center_2):
+        dist_intercenter = dist(center_0, center_2)
+        intercenter = (center_2 - center_0)/2
+        psia = np.arctan2(intercenter[1], intercenter[0])
+        if 2*self.radius < dist_intercenter > 4*self.radius:
+            return (float('inf'), (0, 0, 0), False)
+        gamma = 2*np.arcsin(dist_intercenter/(4*self.radius))
+        beta_0 = (psia-start[2]+np.pi/2+(np.pi-gamma)/2)%(2*np.pi)
+        beta_1 = (-psia+np.pi/2+end[2]+(np.pi-gamma)/2)%(2*np.pi)
+        total_len = (2*np.pi-gamma+abs(beta_0)+abs(beta_1))*self.radius
+        return (total_len,
+                (beta_0, beta_1, 2*np.pi-gamma),
+                False)
+
+    def rlr(self, start, end, center_0, center_2):
+        dist_intercenter = dist(center_0, center_2)
+        intercenter = (center_2 - center_0)/2
+        psia = np.arctan2(intercenter[1], intercenter[0])
+        if 2*self.radius < dist_intercenter > 4*self.radius:
+            return (float('inf'), (0, 0, 0), False)
+        gamma = 2*np.arcsin(dist_intercenter/(4*self.radius))
+        beta_0 = -((-psia+(start[2]+np.pi/2)+(np.pi-gamma)/2)%(2*np.pi))
+        beta_1 = -((psia+np.pi/2-end[2]+(np.pi-gamma)/2)%(2*np.pi))
+        total_len = (2*np.pi-gamma+abs(beta_0)+abs(beta_1))*self.radius
+        return (total_len,
+                (beta_0, beta_1, 2*np.pi-gamma),
+                False)
+
+    def find_center(self, point, side):
+        assert side in 'LR'
+        angle = point[2] + (np.pi/2 if side == 'L' else -np.pi/2)
+        return np.array((point[0] + np.cos(angle)*self.radius,
+                         point[1] + np.sin(angle)*self.radius))
+
+    def generate_points_straight(self, start, end, path):
+        total = self.radius*(abs(path[1])+abs(path[0]))+path[2] # Path length
+        center_0 = self.find_center(start, 'L' if path[0] > 0 else 'R')
+        center_2 = self.find_center(end, 'L' if path[1] > 0 else 'R')
+
+        # We first need to find the points where the straight segment starts
+        if abs(path[0]) > 0:
+            angle = start[2]+(abs(path[0])-np.pi/2)*np.sign(path[0])
+            ini = center_0+self.radius*np.array([np.cos(angle), np.sin(angle)])
+        else: ini = np.array(start[:2])
+        # We then identify its end
+        if abs(path[1]) > 0:
+            angle = end[2]+(-abs(path[1])-np.pi/2)*np.sign(path[1])
+            fin = center_2+self.radius*np.array([np.cos(angle), np.sin(angle)])
+        else: fin = np.array(end[:2])
+        dist_straight = dist(ini, fin)
+
+        # We can now generate all the points with the desired precision
+        points = []
+        for x in np.arange(0, total, self.point_separation):
+            if x < abs(path[0])*self.radius: # First turn
+                points.append(self.circle_arc(start, path[0], center_0, x))
+            elif x > total - abs(path[1])*self.radius: # Last turn
+                points.append(self.circle_arc(end, path[1], center_2, x-total))
+            else: # Straight segment
+                coeff = (x-abs(path[0])*self.radius)/dist_straight
+                points.append(coeff*fin + (1-coeff)*ini)
+        points.append(end[:2])
+        return np.array(points)
+
+    def generate_points_curve(self, start, end, path):
+        total = self.radius*(abs(path[1])+abs(path[0])+abs(path[2]))
+        center_0 = self.find_center(start, 'L' if path[0] > 0 else 'R')
+        center_2 = self.find_center(end, 'L' if path[1] > 0 else 'R')
+        intercenter = dist(center_0, center_2)
+        center_1 = (center_0 + center_2)/2 +\
+                   np.sign(path[0])*ortho((center_2-center_0)/intercenter)\
+                    *(4*self.radius**2-(intercenter/2)**2)**.5
+        psi_0 = np.arctan2((center_1 - center_0)[1],
+                           (center_1 - center_0)[0])-np.pi
+
+        points = []
+        for x in np.arange(0, total, self.point_separation):
+            if x < abs(path[0])*self.radius: # First turn
+                points.append(self.circle_arc(start, path[0], center_0, x))
+            elif x > total - abs(path[1])*self.radius: # Last turn
+                points.append(self.circle_arc(end, path[1], center_2, x-total))
+            else: # Middle Turn
+                angle = psi_0-np.sign(path[0])*(x/self.radius-abs(path[0]))
+                vect = np.array([np.cos(angle), np.sin(angle)])
+                points.append(center_1+self.radius*vect)
+        points.append(end[:2])
+        return np.array(points)
+
+    def circle_arc(self, reference, beta, center, x):
+        angle = reference[2]+((x/self.radius)-np.pi/2)*np.sign(beta)
+        vect = np.array([np.cos(angle), np.sin(angle)])
+        return center+self.radius*vect
+
 class PathPlanner:
     """
     경로 계획 클래스
@@ -298,257 +473,212 @@ class PathPlanner:
         return max(min_speed, min(max_speed, velocity))
 
     @classmethod
-    def _rrt_with_dubins(cls, start_node, end_node, obstacles, width, config):
+    def _is_collision_path(cls, path_points, obstacles, collision_dist):
+        """Checks if any point in path_points collides with obstacles."""
+        # Handle None, empty list, or empty NumPy array
+        if path_points is None or len(path_points) == 0:
+            return False  # Empty path is not in collision
+        for point in path_points: # Assuming point is (x, y, optional_yaw)
+            point_coords = (point[0], point[1]) # Take only x, y for distance calculation
+            for obstacle in obstacles: # obstacle format: (x_center, y_center, radius)
+                obs_center = np.array([obstacle[0], obstacle[1]])
+                # collision_dist already includes half width + buffer
+                obs_effective_radius = obstacle[2] + collision_dist
+
+                dist_sq = (point_coords[0] - obs_center[0])**2 + (point_coords[1] - obs_center[1])**2
+                if dist_sq < obs_effective_radius**2:
+                    return True  # Collision detected
+        return False # No collision
+
+    @classmethod
+    def _reconstruct_path(cls, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
+        """
+        Reconstructs the path from start to goal using parent pointers.
+        Returns a list of (x, y, yaw) waypoints.
+        """
+        if goal_reached_pos is None or goal_reached_pos not in rrt_nodes_map:
+            return []
+
+        # Handle trivial case: goal is the root
+        if goal_reached_pos == root_pos:
+            edge_for_start_goal = rrt_edges_map.get((root_pos, root_pos))
+            if edge_for_start_goal and edge_for_start_goal.path:
+                return list(edge_for_start_goal.path)
+            return [root_pos]
+
+        final_path_waypoints_segments = deque()
+        current_pos = goal_reached_pos
+
+        while current_pos != root_pos:
+            node_data = rrt_nodes_map.get(current_pos)
+            if node_data is None or node_data.parent_pos is None:
+                # This case should ideally not be reached if tree is consistent
+                # and current_pos is not root_pos yet.
+                print("Path reconstruction error: Inconsistent tree or orphaned node.")
+                return []
+
+            parent_pos = node_data.parent_pos
+            edge = rrt_edges_map.get((parent_pos, current_pos))
+
+            if edge is None or not edge.path:
+                print(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
+                return []
+
+            final_path_waypoints_segments.appendleft(list(edge.path))
+            current_pos = parent_pos
+
+        # Concatenate segments
+        full_path = []
+        for i, segment in enumerate(final_path_waypoints_segments):
+            if not segment: # Should not happen if edge.path was checked
+                continue
+            if i == 0:
+                full_path.extend(segment)
+            else:
+                if full_path and np.array_equal(full_path[-1], segment[0]):
+                    full_path.extend(segment[1:])
+                else:
+                    full_path.extend(segment)
+        return full_path
+
+    @classmethod
+    def _rrt_with_dubins(cls, start_node, end_node, obstacles, width, config, precision=(5, 5, 1)):
         """
         RRT 알고리즘을 통해 목적지까지의 도로 너비 고려한 장애물 회피 경로 생성
         RRT 알고리즘에 Dubins steer 적용, 비홀로노믹 제약 고려
         RRT 알고리즘의 트리 노드들은 Node 클래스 사용하지 않고 내부적으로 노드 처리
         """
-        # # 에러 상황 처리
-        # if not obstacles:
-        #     return cls._straight(start_node, end_node)
+
+        nodes = {}
+        edges = {}
+        local_planner = Dubins(radius=config["min_radius"], point_separation=config["point_separation"])
+        goal = (0, 0, 0)
+        root = (0, 0, 0)
 
         class RRTNode:
-            def __init__(self, x, y, yaw, parent=None):
-                self.x = x
-                self.y = y
-                self.yaw = yaw
-                self.parent = parent
-                # 비교를 위한 반올림된 값
-                self.key = (round(x, 4), round(y, 4), round(yaw, 4))
+            def __init__(self, position, time, cost, parent_pos=None):
+                self.destination_list = []
+                self.position = position
+                self.time = time
+                self.cost = cost
+                self.parent_pos = parent_pos # Store parent's position tuple
 
-            def __eq__(self, other):
-                if isinstance(other, RRTNode):
-                    return self.key == other.key
-                return False
+        class Edge:
+            def __init__(self, node_from, node_to, path, cost):
+                self.node_from = node_from
+                self.node_to = node_to
+                self.path = deque(path)
+                self.cost = cost
 
-            def __hash__(self):
-                return hash(self.key)
+        # 시작, 목표 위치치
+        start = (start_node.x, start_node.y, start_node.yaw)
+        goal = (end_node.x, end_node.y, end_node.yaw)
+        root = start # RRT root position
+        collision_dist = width / 2.0 # Effective radius for collision checking against path center line
 
-            def get_tuple(self):
-                return (self.x, self.y, self.yaw)
+        # Initial check if start is already at goal
+        is_already_at_goal = True
+        for i_dim in range(len(goal)):
+            # Using a slightly tighter precision for this direct check if desired
+            if abs(goal[i_dim] - start[i_dim]) > precision[i_dim] / 2.0:
+                is_already_at_goal = False
+                break
+        if is_already_at_goal:
+            direct_options = local_planner.all_options(start, goal)
+            if direct_options:
+                # Filter out inf cost paths and find the best one
+                valid_options = [opt for opt in direct_options if opt[0] != float('inf')]
+                if valid_options:
+                    best_option_cost, best_option_type, best_option_params = min(valid_options, key=lambda opt: opt[0])
+                    direct_path_points = local_planner.generate_points(start, goal, best_option_type, best_option_params)
+                    if not cls._is_collision_path(direct_path_points, obstacles, collision_dist):
+                        # Add a minimal RRT structure if needed by caller, or just return path
+                        # For consistency with RRT path reconstruction, we can simulate an edge
+                        nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
+                        if start != goal: # Only add edge if start and goal are different points for Dubins path
+                             nodes[goal] = RRTNode(goal, best_option_cost, best_option_cost, parent_pos=start)
+                             edges[(start, goal)] = Edge(start, goal, direct_path_points, best_option_cost)
+                             return cls._reconstruct_path(root, goal, nodes, edges)
+                        else: # start == goal, path is just the point
+                             return [start]
+            # Fallback if no direct Dubins path or if it's in collision, but start and goal are very close
+            return [start] # Simplest path is just the start/goal point itself
 
-            def distance_to(self, other):
-                """다른 노드와의 거리 계산"""
-                if isinstance(other, RRTNode):
-                    return math.sqrt((self.x - other.x)**2 + (self.y - other.y)**2)
-                else:  # 튜플이나 다른 형태의 좌표
-                    return math.sqrt((self.x - other[0])**2 + (self.y - other[1])**2)
+        nodes[start] = RRTNode(start, 0, 0, parent_pos=None) # Root node
 
-        # 시작, 목표 노드
-        start = RRTNode(start_node.x, start_node.y, start_node.yaw)
-        goal = RRTNode(end_node.x, end_node.y, end_node.yaw)
-
-        # RRT 트리
-        nodes = [start]
-
-        # 장애물 충돌 검사 거리 (도로 너비의 절반 + 여유)
-        collision_dist = width / 2 + 1.0
-
-        for i in range(config["max_iterations"]):
+        for i_iter in range(config["max_iterations"]):
             # 현재 반복에서의 스텝 크기 동적 계산
             current_iteration_step_size = config["base_step_size"] * random.uniform(config["min_step_factor"], config["max_step_factor"])
 
-            # 랜덤 위치치 샘플링 (일정 확률로 목표 지점 선택)
+            # 랜덤 위치 샘플링 (일정 확률로 목표 지점 선택)
             if random.random() < config["goal_sampling_rate"]:
-                rand_point = (goal.x, goal.y, None)  # yaw는 경로 생성 후 결정
+                sample = goal
             else:
-                rand_x = random.uniform(min(start.x, goal.x) - 100, max(start.x, goal.x) + 100)
-                rand_y = random.uniform(min(start.y, goal.y) - 100, max(start.y, goal.y) + 100)
-                rand_point = (rand_x, rand_y, None)
+                rand_x = random.uniform(min(start[0], goal[0]) - current_iteration_step_size, max(start[0], goal[0]) + current_iteration_step_size)
+                rand_y = random.uniform(min(start[1], goal[1]) - current_iteration_step_size, max(start[1], goal[1]) + current_iteration_step_size)
+                rand_yaw = random.uniform(-math.pi, math.pi)
+                sample = (rand_x, rand_y, rand_yaw)
 
-            # 가장 가까운 노드 찾기
-            nearest_node = min(nodes, key=lambda n: n.distance_to(rand_point))
-            nearest_point = nearest_node.get_tuple()
+            # Find nearest node logic (simplified RRT for this example, RRT* is more complex here)
+            nearest_node_pos = None
+            min_dist_sq = float('inf')
+            for existing_node_pos in nodes:
+                dist_sq = (sample[0] - existing_node_pos[0])**2 + (sample[1] - existing_node_pos[1])**2 # Simple Euclidean for nearest
+                if dist_sq < min_dist_sq:
+                    min_dist_sq = dist_sq
+                    nearest_node_pos = existing_node_pos
 
-            # 스티어링 (Dubins Curve 적용)
-            new_point = cls._steer(nearest_point, rand_point, current_iteration_step_size, config["min_radius"])
+            if nearest_node_pos is None: continue # Should not happen if root exists
 
-            # 장애물과 충돌 확인
-            if cls._is_collision_free(nearest_point, new_point, obstacles, collision_dist):
-                new_node = RRTNode(new_point[0], new_point[1], new_point[2], parent=nearest_node)
-                nodes.append(new_node)
+            # Now get Dubins options from this `nearest_node_pos` to `sample`
+            dubins_options_from_nearest = local_planner.all_options(nearest_node_pos, sample)
 
-                # 목표 지점 근처에 도달했는지 확인
-                if new_node.distance_to(goal) < config["goal_distance_threshold"]:
-                    # 목표 노드에 연결 시도
-                    if cls._is_collision_free(new_node.get_tuple(), goal.get_tuple(), obstacles, collision_dist):
-                        # 목표 노드의 부모를 마지막 노드로 설정정
-                        goal.parent = new_node
-                        nodes.append(goal)
-                        break
+            for dubins_opt_data in dubins_options_from_nearest: # dubins_opt_data is (cost, type, params)
+                if dubins_opt_data[0] == float('inf'):
+                    continue # Skip infinite cost paths
 
-        # 경로 생성
-        path = []
-        current = goal
+                # `path_segment_points` is the list of (x,y,yaw) for this Dubins segment
+                path_segment_points = local_planner.generate_points(nearest_node_pos, # Parent node's position
+                                                                    sample,       # Target random point
+                                                                    dubins_opt_data[1], # Dubins type
+                                                                    dubins_opt_data[2]) # Dubins params
 
-        # 목표 노드가 트리에 연결되었는지 확인
-        if goal.parent is not None:
-            # 역추적하여 경로 생성
-            while current is not None:
-                path.append(current.get_tuple())
-                current = current.parent
-            path.reverse()  # 시작 -> 목표 순서로 반전
+                if cls._is_collision_path(path_segment_points, obstacles, collision_dist):
+                    continue # Path in collision, try next Dubins option or next RRT iteration
 
-            # 경로 스무딩
-            path = cls._smooth_path(path, obstacles, collision_dist)
-        else:
-            # 경로를 찾지 못한 경우
-            print("Path not found after maximum iterations")
+                # Path is collision-free, add sample to tree
+                # Cost to reach sample from nearest_node_pos is dubins_opt_data[0]
+                # Total cost/time for sample:
+                parent_rrt_node = nodes[nearest_node_pos]
+                new_node_time = parent_rrt_node.time + dubins_opt_data[0] # Assuming cost is time or distance
+                new_node_cost = parent_rrt_node.cost + dubins_opt_data[0]
 
-            # 최대한 목표 지점에 가까운 경로 생성
-            closest_to_goal = min(nodes, key=lambda n: n.distance_to(goal))
+                # RRT* would check if this path is better for sample if sample already in nodes
+                # And RRT* would do rewiring. For basic RRT, we just add if not present or extend.
+                # For simplicity, if sample can be reached cheaper via another path, RRT* updates it.
+                # Here, we assume sample is a new configuration to add, or we're choosing the best way to connect it.
 
-            current = closest_to_goal
-            while current is not None:
-                path.append(current.get_tuple())
-                current = current.parent
-            path.reverse()
+                # Add the new node and edge
+                # If sample is already a key in `nodes` due to a previous connection, RRT* would compare cost.
+                # For this adaptation, we'll overwrite if this path is better or simply add.
+                # To strictly follow RRT, `sample` would be a new node.
+                if sample not in nodes or new_node_cost < nodes[sample].cost:
+                    nodes[sample] = RRTNode(sample, new_node_time, new_node_cost, parent_pos=nearest_node_pos)
+                    # nodes[nearest_node_pos].destination_list.append(sample) # For RRT* child tracking
+                    edges[(nearest_node_pos, sample)] = Edge(nearest_node_pos, sample, path_segment_points, dubins_opt_data[0])
 
-        return path
+                    # Check if this newly added/updated sample is the goal
+                    is_goal_reached = True
+                    for i_dim, val_dim in enumerate(sample):
+                        if abs(goal[i_dim] - val_dim) > precision[i_dim]:
+                            is_goal_reached = False
+                            break
+                    if is_goal_reached:
+                        return cls._reconstruct_path(root, sample, nodes, edges)
+                break # Found a valid connection from nearest_node_pos to sample, proceed to next RRT iteration
 
-    @classmethod
-    def _distance(cls, node1, node2):
-        """두 노드 사이의 유클리드 거리"""
-        return math.sqrt((node1[0] - node2[0])**2 + (node1[1] - node2[1])**2)
-
-    @classmethod
-    def _steer(cls, from_node, to_node, step_size, min_radius):
-        """
-        from_node에서 to_node 방향으로 step_size만큼 이동
-        Dubins 제약 (최소 회전 반경)을 고려
-        """
-        # 방향 벡터
-        dx = to_node[0] - from_node[0]
-        dy = to_node[1] - from_node[1]
-
-        # 거리
-        dist = math.sqrt(dx*dx + dy*dy)
-
-        if dist < 0.01:
-            return from_node  # 거리가 너무 가까우면 원래 노드 반환
-
-        # 정규화
-        dx, dy = dx/dist, dy/dist
-
-        # from_node의 현재 방향과 목표 방향 사이의 각도 차이 계산
-        target_yaw = math.atan2(dy, dx)
-        current_yaw = from_node[2]
-
-        # 각도 차이 (-pi ~ pi 범위로 조정)
-        delta_yaw = target_yaw - current_yaw
-        while delta_yaw > math.pi: delta_yaw -= 2 * math.pi
-        while delta_yaw < -math.pi: delta_yaw += 2 * math.pi
-
-        # 최대 각도 변화 제한 (비홀로노믹 제약)
-        max_yaw_change = step_size / min_radius  # 회전 반경에 따른 최대 각도 변화
-
-        if abs(delta_yaw) > max_yaw_change:
-            # 최대 각도 변화로 제한
-            new_yaw = current_yaw + (max_yaw_change if delta_yaw > 0 else -max_yaw_change)
-
-            # 수정된 방향으로 이동
-            new_x = from_node[0] + step_size * math.cos(new_yaw)
-            new_y = from_node[1] + step_size * math.sin(new_yaw)
-        else:
-            # 목표 방향으로 직접 이동
-            step = min(step_size, dist)  # 목표까지의 거리가 step_size보다 작으면 그 거리만큼만 이동
-            new_x = from_node[0] + step * dx
-            new_y = from_node[1] + step * dy
-            new_yaw = target_yaw
-
-        return (new_x, new_y, new_yaw)
-
-    @classmethod
-    def _is_collision_free(cls, point1, point2, obstacles, collision_dist):
-        """
-        point1과 point2 사이의 경로가 장애물과 충돌하지 않는지 확인
-        선분-원형 교차 수학 공식 사용
-        충돌하지 않으면 True, 충돌하면 False 반환
-        """
-        # 선분의 시작점과 끝점
-        p1 = np.array([point1[0], point1[1]])
-        p2 = np.array([point2[0], point2[1]])
-
-        # 선분 벡터
-        d = p2 - p1
-
-        # 선분 길이의 제곱
-        len_squared = np.dot(d, d)
-
-        if len_squared < 1e-10:  # 선분 길이가 0에 가까운 경우
-            # 시작점만 검사
-            for obstacle in obstacles:
-                obs_center = np.array([obstacle[0], obstacle[1]])
-                obs_radius = obstacle[2] + collision_dist
-
-                # 시작점과 장애물 거리 계산
-                dist = np.linalg.norm(p1 - obs_center)
-                if dist <= obs_radius:
-                    return False
-            return True
-
-        # 각 장애물에 대해 검사
-        for obstacle in obstacles:
-            obs_center = np.array([obstacle[0], obstacle[1]])
-            obs_radius = obstacle[2] + collision_dist
-
-            # 장애물 중심에서 선분까지의 최단 거리 계산
-            # 선분 매개변수 t 계산 (0 <= t <= 1이면 선분 위의 점)
-            t = max(0, min(1, np.dot(obs_center - p1, d) / len_squared))
-
-            # 선분 위의 최단 거리 지점
-            projection = p1 + t * d
-
-            # 장애물 중심에서 투영점까지의 거리
-            dist = np.linalg.norm(obs_center - projection)
-
-            # 거리가 장애물 반경 + 충돌 거리보다 작으면 충돌
-            if dist <= obs_radius:
-                return False
-
-        return True
-
-    @classmethod
-    def _smooth_path(cls, path, obstacles, collision_dist):
-        """경로 스무딩 - 불필요한 노드 제거"""
-        if len(path) <= 2:
-            return path
-
-        smooth_path = [path[0]]
-        i = 0
-
-        while i < len(path) - 1:
-            current = path[i]
-
-            # 현재 노드에서 직접 연결 가능한 가장 먼 노드 찾기
-            for j in range(len(path) - 1, i, -1):
-                if cls._is_collision_free(current, path[j], obstacles, collision_dist):
-                    smooth_path.append(path[j])
-                    i = j
-                    break
-            else:
-                # 직접 연결 가능한 노드를 찾지 못한 경우
-                smooth_path.append(path[i + 1])
-                i += 1
-
-        # yaw 값 업데이트 - 각 노드의 yaw는 다음 노드를 향하는 방향
-        for i in range(len(smooth_path) - 1):
-            dx = smooth_path[i+1][0] - smooth_path[i][0]
-            dy = smooth_path[i+1][1] - smooth_path[i][1]
-            yaw = math.atan2(dy, dx)
-            smooth_path[i] = (smooth_path[i][0], smooth_path[i][1], yaw)
-
-        # 마지막 노드의 yaw 값은 원래 목표의 yaw를 유지
-        if len(smooth_path) > 1:
-            last_index = len(smooth_path) - 1
-            smooth_path[last_index] = (
-                smooth_path[last_index][0],
-                smooth_path[last_index][1],
-                path[-1][2]  # 원래 목표의 yaw
-            )
-
-        return smooth_path
+        # Max iterations reached, no path found
+        return []
 
     @classmethod
     def _straight(cls, node1, node2):
@@ -567,26 +697,20 @@ class PathPlanner:
         # 5개 지점으로 경로 생성 (부드러운 시각화를 위해)
         path = []
         for i in range(5):
-            t = i / 4  # 0, 0.25, 0.5, 0.75, 1.0
-            x = start[0] + t * dx
-            y = start[1] + t * dy
+            t = i / 4  # 0 ~ 1
 
-            # 시작과 끝의 yaw는 원래 값 유지, 중간은 보간
-            if i == 0:
-                path_yaw = start[2]
-            elif i == 4:
-                path_yaw = end[2]
-            else:
-                # 시작과 끝의 yaw 사이를 보간
-                # yaw 보간 시 각도의 차이를 고려해야 함
-                delta_yaw = end[2] - start[2]
-                # -pi ~ pi 범위로 조정
-                while delta_yaw > math.pi: delta_yaw -= 2 * math.pi
-                while delta_yaw < -math.pi: delta_yaw += 2 * math.pi
+            # 이차 베지에 곡선 공식: B(t) = (1-t)²P₀ + 2(1-t)tP₁ + t²P₂
+            x = (1-t)**2 * start[0] + 2*(1-t)*t * ((start[0] + end[0]) / 2) + t**2 * end[0]
+            y = (1-t)**2 * start[1] + 2*(1-t)*t * ((start[1] + end[1]) / 2) + t**2 * end[1]
 
-                path_yaw = start[2] + t * delta_yaw
+            # yaw 계산 (접선의 방향)
+            # 접선 벡터 = dB/dt = 2(1-t)(P₁-P₀) + 2t(P₂-P₁)
+            dx = 2*(1-t)*(end[0] - start[0]) + 2*t*(end[0] - ((start[0] + end[0]) / 2))
+            dy = 2*(1-t)*(end[1] - start[1]) + 2*t*(end[1] - ((start[1] + end[1]) / 2))
 
-            path.append((x, y, path_yaw))
+            yaw = math.atan2(dy, dx)
+
+            path.append((x, y, yaw))
 
         return path
 
