@@ -352,7 +352,7 @@ class CarSimulatorEnv(gym.Env):
             vehicles = self.vehicle_manager.get_all_vehicles()
             for v in vehicles:
                 if v.id != vehicle_id:
-                    objects.extend(v.get_outer_circle())
+                    objects.extend(v.get_outer_circles_world())
         link = self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
 
         if link:

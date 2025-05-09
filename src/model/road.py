@@ -561,7 +561,7 @@ class PathPlanner:
                 self.position = position
                 self.time = time
                 self.cost = cost
-                self.parent_pos = parent_pos # Store parent's position tuple
+                self.parent_pos = parent_pos
 
         class Edge:
             def __init__(self, node_from, node_to, path, cost):
@@ -570,47 +570,38 @@ class PathPlanner:
                 self.path = deque(path)
                 self.cost = cost
 
-        # 시작, 목표 위치치
         start = (start_node.x, start_node.y, start_node.yaw)
         goal = (end_node.x, end_node.y, end_node.yaw)
-        root = start # RRT root position
-        collision_dist = width / 2.0 # Effective radius for collision checking against path center line
+        root = start
+        collision_dist = width / 2.0
 
-        # Initial check if start is already at goal
         is_already_at_goal = True
         for i_dim in range(len(goal)):
-            # Using a slightly tighter precision for this direct check if desired
             if abs(goal[i_dim] - start[i_dim]) > precision[i_dim] / 2.0:
                 is_already_at_goal = False
                 break
         if is_already_at_goal:
             direct_options = local_planner.all_options(start, goal)
             if direct_options:
-                # Filter out inf cost paths and find the best one
                 valid_options = [opt for opt in direct_options if opt[0] != float('inf')]
                 if valid_options:
                     best_option_cost, best_option_type, best_option_params = min(valid_options, key=lambda opt: opt[0])
                     direct_path_points = local_planner.generate_points(start, goal, best_option_type, best_option_params)
                     if not cls._is_collision_path(direct_path_points, obstacles, collision_dist):
-                        # Add a minimal RRT structure if needed by caller, or just return path
-                        # For consistency with RRT path reconstruction, we can simulate an edge
                         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
-                        if start != goal: # Only add edge if start and goal are different points for Dubins path
+                        if start != goal:
                              nodes[goal] = RRTNode(goal, best_option_cost, best_option_cost, parent_pos=start)
                              edges[(start, goal)] = Edge(start, goal, direct_path_points, best_option_cost)
                              return cls._reconstruct_path(root, goal, nodes, edges)
-                        else: # start == goal, path is just the point
+                        else:
                              return [start]
-            # Fallback if no direct Dubins path or if it's in collision, but start and goal are very close
-            return [start] # Simplest path is just the start/goal point itself
+            return [start]
 
-        nodes[start] = RRTNode(start, 0, 0, parent_pos=None) # Root node
+        nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
 
         for i_iter in range(config["max_iterations"]):
-            # 현재 반복에서의 스텝 크기 동적 계산
             current_iteration_step_size = config["base_step_size"] * random.uniform(config["min_step_factor"], config["max_step_factor"])
 
-            # 랜덤 위치 샘플링 (일정 확률로 목표 지점 선택)
             if random.random() < config["goal_sampling_rate"]:
                 sample = goal
             else:
@@ -619,7 +610,6 @@ class PathPlanner:
                 rand_yaw = random.uniform(-math.pi, math.pi)
                 sample = (rand_x, rand_y, rand_yaw)
 
-            # Find nearest node logic (simplified RRT for this example, RRT* is more complex here)
             nearest_node_pos = None
             min_dist_sq = float('inf')
             for existing_node_pos in nodes:
@@ -628,46 +618,30 @@ class PathPlanner:
                     min_dist_sq = dist_sq
                     nearest_node_pos = existing_node_pos
 
-            if nearest_node_pos is None: continue # Should not happen if root exists
+            if nearest_node_pos is None: continue
 
-            # Now get Dubins options from this `nearest_node_pos` to `sample`
             dubins_options_from_nearest = local_planner.all_options(nearest_node_pos, sample)
 
-            for dubins_opt_data in dubins_options_from_nearest: # dubins_opt_data is (cost, type, params)
+            for dubins_opt_data in dubins_options_from_nearest:
                 if dubins_opt_data[0] == float('inf'):
-                    continue # Skip infinite cost paths
+                    continue
 
-                # `path_segment_points` is the list of (x,y,yaw) for this Dubins segment
-                path_segment_points = local_planner.generate_points(nearest_node_pos, # Parent node's position
-                                                                    sample,       # Target random point
-                                                                    dubins_opt_data[1], # Dubins type
-                                                                    dubins_opt_data[2]) # Dubins params
+                path_segment_points = local_planner.generate_points(nearest_node_pos,
+                                                                    sample,
+                                                                    dubins_opt_data[1],
+                                                                    dubins_opt_data[2])
 
                 if cls._is_collision_path(path_segment_points, obstacles, collision_dist):
-                    continue # Path in collision, try next Dubins option or next RRT iteration
+                    continue
 
-                # Path is collision-free, add sample to tree
-                # Cost to reach sample from nearest_node_pos is dubins_opt_data[0]
-                # Total cost/time for sample:
                 parent_rrt_node = nodes[nearest_node_pos]
-                new_node_time = parent_rrt_node.time + dubins_opt_data[0] # Assuming cost is time or distance
+                new_node_time = parent_rrt_node.time + dubins_opt_data[0]
                 new_node_cost = parent_rrt_node.cost + dubins_opt_data[0]
 
-                # RRT* would check if this path is better for sample if sample already in nodes
-                # And RRT* would do rewiring. For basic RRT, we just add if not present or extend.
-                # For simplicity, if sample can be reached cheaper via another path, RRT* updates it.
-                # Here, we assume sample is a new configuration to add, or we're choosing the best way to connect it.
-
-                # Add the new node and edge
-                # If sample is already a key in `nodes` due to a previous connection, RRT* would compare cost.
-                # For this adaptation, we'll overwrite if this path is better or simply add.
-                # To strictly follow RRT, `sample` would be a new node.
                 if sample not in nodes or new_node_cost < nodes[sample].cost:
                     nodes[sample] = RRTNode(sample, new_node_time, new_node_cost, parent_pos=nearest_node_pos)
-                    # nodes[nearest_node_pos].destination_list.append(sample) # For RRT* child tracking
                     edges[(nearest_node_pos, sample)] = Edge(nearest_node_pos, sample, path_segment_points, dubins_opt_data[0])
 
-                    # Check if this newly added/updated sample is the goal
                     is_goal_reached = True
                     for i_dim, val_dim in enumerate(sample):
                         if abs(goal[i_dim] - val_dim) > precision[i_dim]:
@@ -675,9 +649,8 @@ class PathPlanner:
                             break
                     if is_goal_reached:
                         return cls._reconstruct_path(root, sample, nodes, edges)
-                break # Found a valid connection from nearest_node_pos to sample, proceed to next RRT iteration
+                break
 
-        # Max iterations reached, no path found
         return []
 
     @classmethod

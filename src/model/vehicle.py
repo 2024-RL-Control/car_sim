@@ -261,7 +261,7 @@ class Vehicle:
         if vehicles:
             for vehicle in vehicles:
                 if vehicle.id != self.id:  # 자기 자신이 아닌 차량만 추가
-                    objects.extend(vehicle._get_outer_circles_world())
+                    objects.extend(vehicle.get_outer_circles_world())
 
         # 차량 센서 업데이트
         self.sensor_manager.update(dt, time_elapsed, objects)
@@ -299,9 +299,9 @@ class Vehicle:
             return False
 
         # 다른 객체들과의 외접원 수준의 충돌 검사
-        return self._circles_collision(self._get_outer_circles_world(), objects)
+        return self._circles_collision(self.get_outer_circles_world(), objects)
 
-    def _get_outer_circles_world(self):
+    def get_outer_circles_world(self):
         """차량 외접원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""
         return self.collision_body.get_outer_circles_world()
 
