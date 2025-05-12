@@ -45,6 +45,9 @@ class Node:
             return abs(self.x - other[0]) < 0.01 and abs(self.y - other[1]) < 0.01 and abs(self.yaw - other[2]) < 0.01
         return False
 
+    def __hash__(self):
+        return hash(self.id)
+
     def get_point(self):
         """
         (x, y, yaw) 반환
@@ -364,6 +367,21 @@ class Dubins:
         vect = np.array([np.cos(angle), np.sin(angle)])
         return center+self.radius*vect
 
+class RRTNode:
+    def __init__(self, position, time, cost, parent_pos=None):
+        self.destination_list = []
+        self.position = position
+        self.time = time
+        self.cost = cost
+        self.parent_pos = parent_pos
+
+class RRTEdge:
+    def __init__(self, node_from, node_to, path, cost):
+        self.node_from = node_from
+        self.node_to = node_to
+        self.path = deque(path)
+        self.cost = cost
+
 class PathPlanner:
     """
     경로 계획 클래스
@@ -377,21 +395,6 @@ class PathPlanner:
         self.precision = (5, 5, 1)
         self.width = config["road_width"]
         self.config = config
-
-        class RRTNode:
-            def __init__(self, position, time, cost, parent_pos=None):
-                self.destination_list = []
-                self.position = position
-                self.time = time
-                self.cost = cost
-                self.parent_pos = parent_pos
-
-        class Edge:
-            def __init__(self, node_from, node_to, path, cost):
-                self.node_from = node_from
-                self.node_to = node_to
-                self.path = deque(path)
-                self.cost = cost
 
     def plan(self, point1, point2, obstacles, mode):
         """
@@ -505,48 +508,49 @@ class PathPlanner:
     def _reconstruct_path(self, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
         """
         Reconstructs the path from start to goal using parent pointers.
-        Returns a list of (x, y, yaw) waypoints.
+        Returns a tuple containing:
+        1. A list of (x, y, yaw) points representing the nodes
+        2. A list of path segments between consecutive nodes
         """
         if goal_reached_pos is None or goal_reached_pos not in rrt_nodes_map:
-            return []
+            return [], []
+
+        # Initialize the lists to return
+        nodes_points = []
+        paths_list = []
 
         if goal_reached_pos == root_pos:
             edge_for_start_goal = rrt_edges_map.get((root_pos, root_pos))
             if edge_for_start_goal and edge_for_start_goal.path:
-                return list(edge_for_start_goal.path)
-            return [root_pos]
+                nodes_points = [root_pos]
+                paths_list = [list(edge_for_start_goal.path)]
+                return nodes_points, paths_list
+            return [root_pos], []
 
-        final_path_waypoints_segments = deque()
+        # Build the path in reverse order (from goal to start)
+        nodes_in_order = [goal_reached_pos]
+        path_segments = []
+
         current_pos = goal_reached_pos
-
         while current_pos != root_pos:
             node_data = rrt_nodes_map.get(current_pos)
             if node_data is None or node_data.parent_pos is None:
                 print("Path reconstruction error: Inconsistent tree or orphaned node.")
-                return []
+                return [], []
 
             parent_pos = node_data.parent_pos
             edge = rrt_edges_map.get((parent_pos, current_pos))
 
             if edge is None or not edge.path:
                 print(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
-                return []
+                return [], []
 
-            final_path_waypoints_segments.appendleft(list(edge.path))
+            nodes_in_order.insert(0, parent_pos)
+            path_segments.insert(0, list(edge.path))
             current_pos = parent_pos
 
-        full_path = []
-        for i, segment in enumerate(final_path_waypoints_segments):
-            if not segment:
-                continue
-            if i == 0:
-                full_path.extend(segment)
-            else:
-                if full_path and np.array_equal(full_path[-1], segment[0]):
-                    full_path.extend(segment[1:])
-                else:
-                    full_path.extend(segment)
-        return full_path
+        # Return the ordered nodes and path segments
+        return nodes_in_order, path_segments
 
     def _is_goal(self, sample, goal):
         """
@@ -557,7 +561,7 @@ class PathPlanner:
                 return False
         return True
 
-    def _rrt_with_dubins(self, start_node, end_node, obstacles):
+    def _rrt_with_dubins(self, point1, point2, obstacles):
         """
         RRT 알고리즘을 통해 목적지까지의 도로 너비 고려한 장애물 회피 경로 생성
         RRT 알고리즘에 Dubins steer 적용, 비홀로노믹 제약 고려
@@ -565,8 +569,8 @@ class PathPlanner:
         """
         nodes = {}
         edges = {}
-        start = (start_node.x, start_node.y, start_node.yaw)
-        goal = (end_node.x, end_node.y, end_node.yaw)
+        start = point1
+        goal = point2
         root = start
         collision_dist = self.width / 2.0
 
@@ -604,7 +608,7 @@ class PathPlanner:
 
                 if new_node_pos not in nodes or new_node_cost < nodes[new_node_pos].cost:
                     nodes[new_node_pos] = RRTNode(new_node_pos, new_node_time, new_node_cost, parent_pos=node_from_option)
-                    edges[(node_from_option, new_node_pos)] = Edge(node_from_option, new_node_pos, path_segment_points, opt_data[0])
+                    edges[(node_from_option, new_node_pos)] = RRTEdge(node_from_option, new_node_pos, path_segment_points, opt_data[0])
 
                     is_goal_reached = self._is_goal(new_node_pos, goal)
                     if is_goal_reached:
