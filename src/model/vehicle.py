@@ -51,6 +51,9 @@ class VehicleState:
     # 차량 과거 궤적
     history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
+    # 상태 이력 (최근 N개 상태 기록)
+    state_history: deque = field(default_factory=lambda: deque(maxlen=100))
+
     def reset(self):
         """차량 상태 초기화"""
         self.x = 0.0
@@ -82,6 +85,7 @@ class VehicleState:
         self.terrain_type = "asphalt"
 
         self.history_trajectory.clear()
+        self.state_history.clear()
 
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
@@ -123,6 +127,23 @@ class VehicleState:
         """
         self.frenet_point, self.frenet_d, self.target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.x, self.y, self.yaw))
         return outside_road
+
+    def update_state_history(self):
+        """현재 상태 복사본을 이력에 추가"""
+        # 현재 상태의 중요 필드들을 튜플로 복사
+        state_snapshot = (
+            time.time(),  # 타임스탬프
+            self.x,
+            self.y,
+            self.yaw,
+            self.vel_long,
+            self.acc_long,
+            self.vel_lat,
+            self.acc_lat,
+            self.steer,
+            self.frenet_d
+        )
+        self.state_history.append(state_snapshot)
 
 # ======================
 # Vehicle Model
@@ -280,10 +301,16 @@ class Vehicle:
         if self.goal_manager.has_goals():
             reached = self._check_target_reached()
 
+        # 상태 이력 업데이트
+        self._update_state_history()
+
         return self.state, collision, outside_road, reached
 
     def _update_road_data(self, road_manager):
         return self.state.update_road_data(road_manager)
+
+    def _update_state_history(self):
+        self.state.update_state_history()
 
     def _check_collision(self, objects):
         """
