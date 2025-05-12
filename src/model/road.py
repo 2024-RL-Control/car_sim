@@ -508,30 +508,21 @@ class PathPlanner:
     def _reconstruct_path(self, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
         """
         Reconstructs the path from start to goal using parent pointers.
-        Returns a tuple containing:
-        1. A list of (x, y, yaw) points representing the nodes
-        2. A list of path segments between consecutive nodes
+        Returns a list of (x, y, yaw) waypoints.
         """
         if goal_reached_pos is None or goal_reached_pos not in rrt_nodes_map:
             return [], []
 
-        # Initialize the lists to return
-        nodes_points = []
-        paths_list = []
-
         if goal_reached_pos == root_pos:
             edge_for_start_goal = rrt_edges_map.get((root_pos, root_pos))
             if edge_for_start_goal and edge_for_start_goal.path:
-                nodes_points = [root_pos]
-                paths_list = [list(edge_for_start_goal.path)]
-                return nodes_points, paths_list
+                return [root_pos], [list(edge_for_start_goal.path)]
             return [root_pos], []
 
-        # Build the path in reverse order (from goal to start)
-        nodes_in_order = [goal_reached_pos]
-        path_segments = []
-
+        final_path_waypoints_nodes = deque()
+        final_path_waypoints_segments = deque()
         current_pos = goal_reached_pos
+
         while current_pos != root_pos:
             node_data = rrt_nodes_map.get(current_pos)
             if node_data is None or node_data.parent_pos is None:
@@ -545,12 +536,22 @@ class PathPlanner:
                 print(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
                 return [], []
 
-            nodes_in_order.insert(0, parent_pos)
-            path_segments.insert(0, list(edge.path))
+            final_path_waypoints_nodes.appendleft(parent_pos)
+            final_path_waypoints_segments.appendleft(list(edge.path))
             current_pos = parent_pos
 
-        # Return the ordered nodes and path segments
-        return nodes_in_order, path_segments
+        full_path = []
+        for i, segment in enumerate(final_path_waypoints_segments):
+            if not segment:
+                continue
+            if i == 0:
+                full_path.append(segment)
+            else:
+                if full_path and np.array_equal(full_path[-1], segment[0]):
+                    full_path.append(segment[1:])
+                else:
+                    full_path.append(segment)
+        return list(final_path_waypoints_nodes), full_path
 
     def _is_goal(self, sample, goal):
         """
