@@ -418,13 +418,15 @@ class PathPlanner:
         """
         경로 곡률에 따른 목표 속도 계산
         최소 속도 5, 최대 속도 50
+        앞부분과 마지막 부분의 곡률에 더 높은 가중치 부여
         """
         if not path or len(path) < 3:
             return default_speed  # 기본 속도
 
-        # 전체 경로의 평균 곡률 계산
-        total_curvature = 0
-        count = 0
+        # 전체 경로의 가중 평균 곡률 계산
+        weighted_total_curvature = 0
+        total_weights = 0
+        curvatures = []
 
         for i in range(1, len(path) - 1):
             p1 = path[i-1]
@@ -460,21 +462,32 @@ class PathPlanner:
 
                 # 곡률 = 각도 변화 / 이동 거리
                 curvature = angle_change / dist
-
-                total_curvature += curvature
-                count += 1
+                curvatures.append((i, curvature))  # 인덱스와 곡률 저장
             except:
                 # 곡률 계산 오류 시 무시
                 pass
 
-        if count == 0:
+        if not curvatures:
             return default_speed  # 기본 속도
 
-        # 평균 곡률
-        avg_curvature = total_curvature / count
+        # 위치에 따른 가중치 적용
+        path_length = len(path) - 2  # 곡률을 계산할 수 있는 점의 개수
+
+        for idx, curvature in curvatures:
+            # 경로 위치에 따른 상대적 위치 (0~1)
+            relative_pos = (idx - 1) / (path_length - 1) if path_length > 1 else 0.5
+
+            # 가중치 계산: 앞부분(시작)과 뒷부분(끝)에 더 높은 가중치 부여
+            # 중앙은 가중치 1, 시작과 끝은 가중치 3으로 설정
+            weight = 3 - 4 * relative_pos if relative_pos < 0.5 else 1 + 4 * (relative_pos - 0.5)
+
+            weighted_total_curvature += curvature * weight
+            total_weights += weight
+
+        # 가중 평균 곡률
+        avg_curvature = weighted_total_curvature / total_weights if total_weights > 0 else 0
 
         # 곡률에 따른 속도 조정 (곡률이 높을수록 속도 감소)
-        # 일반적으로 곡률은 [0, 0.3] 범위의 값을 가짐
         max_curvature = 0.2  # 임의의 최대 곡률
         normalized_curvature = min(avg_curvature / max_curvature, 1.0)
 
