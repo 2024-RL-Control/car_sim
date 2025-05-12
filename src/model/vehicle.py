@@ -6,6 +6,7 @@ from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
 from .physics import PhysicsEngine
+from .trajectory import TrajectoryPredictor
 from .object import RectangleObstacle, GoalManager
 from .sensor import SensorManager
 
@@ -47,8 +48,8 @@ class VehicleState:
     # 환경 속성
     terrain_type: str = "asphalt"  # 현재 지형 유형
 
-    # 차량 궤적
-    trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
+    # 차량 과거 궤적
+    history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
     def reset(self):
         """차량 상태 초기화"""
@@ -80,7 +81,7 @@ class VehicleState:
 
         self.terrain_type = "asphalt"
 
-        self.trajectory.clear()
+        self.history_trajectory.clear()
 
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
@@ -90,9 +91,9 @@ class VehicleState:
         """cos/sin 인코딩을 통한 각도 표현"""
         return cos(angle), sin(angle)
 
-    def update_trajectory(self):
+    def update_history_trajectory(self):
         """현재 위치를 궤적에 추가"""
-        self.trajectory.append((self.x, self.y))
+        self.history_trajectory.append((self.x, self.y))
 
     def set_position(self, x, y, yaw=None):
         """차량 위치 및 방향 설정"""
@@ -431,7 +432,9 @@ class Vehicle:
             self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
             # 궤적 그리기
-            self._draw_trajectory(screen, world_to_screen_func)
+            self._draw_history_trajectory(screen, world_to_screen_func)
+
+        self.predict_and_draw_trajectory(screen, world_to_screen_func)
 
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)
@@ -623,13 +626,13 @@ class Vehicle:
 
         return result
 
-    def _draw_trajectory(self, screen, world_to_screen_func):
+    def _draw_history_trajectory(self, screen, world_to_screen_func):
         """차량 궤적 그리기"""
-        if len(self.state.trajectory) < 2:
+        if len(self.state.history_trajectory) < 2:
             return
 
         # 지난 궤적을 점선으로 표시
-        trajectory_points = [world_to_screen_func(x, y) for x, y in self.state.trajectory]
+        trajectory_points = [world_to_screen_func(x, y) for x, y in self.state.history_trajectory]
 
         # 줌 레벨에 맞게 선 너비 조정
         width = max(1, int(2 * self.visual_config['camera_zoom']))
@@ -638,6 +641,42 @@ class Vehicle:
         if len(trajectory_points) > 1:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
             pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
+
+    def predict_and_draw_trajectory(self, screen, world_to_screen_func, time_horizon=1.0, dt=0.1):
+        """미래 궤적 예측 및 시각화
+
+        Args:
+            screen: Pygame 화면 객체
+            world_to_screen_func: 월드 좌표를 화면 좌표로 변환하는 함수
+            time_horizon: 궤적 예측 시간 범위 [s]
+            dt: 시간 간격 [s]
+        """
+
+        # 목표 속도와 횡방향 위치 설정
+        target_velocity = self.state.target_vel_long if self.state.target_vel_long is not None else self.state.vel_long
+        target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
+
+        # 궤적 예측
+        predicted_trajectory = TrajectoryPredictor.predict_trajectory(
+            state=self.state,
+            target_velocity=target_velocity,
+            target_d=target_d,
+            time_horizon=time_horizon,
+            dt=dt
+        )
+
+        # 궤적 시각화 (카메라 객체 대신 world_to_screen_func 함수 사용)
+        if len(predicted_trajectory) < 2:
+            return
+
+        # 궤적 포인트들을 화면 좌표로 변환
+        screen_points = [world_to_screen_func(point.x, point.y) for point in predicted_trajectory]
+
+        # 예측 궤적 그리기 (다른 색상으로 구분)
+        # prediction_color = self.visual_config.get('prediction_color', (0, 255, 255))  # 청록색 기본값
+        # prediction_width = self.visual_config.get('prediction_width', 2)
+        width = max(1, int(2 * self.visual_config['camera_zoom']))
+        pygame.draw.lines(screen, (0, 255, 255), False, screen_points, width)
 
     def get_serializable_state(self):
         """
@@ -649,7 +688,7 @@ class Vehicle:
         state_dict = self.state.__dict__.copy()
 
         # 직렬화할 수 없는 trajectory 필드 처리
-        state_dict['trajectory'] = list(self.state.trajectory)
+        state_dict['history_trajectory'] = list(self.state.history_trajectory)
 
         return {
             'id': self.id,
@@ -669,8 +708,8 @@ class Vehicle:
             state_dict = serialized_data['state']
             for key, value in state_dict.items():
                 if hasattr(self.state, key):
-                    if key == 'trajectory':
-                        self.state.trajectory = deque(value, maxlen=3000)
+                    if key == 'history_trajectory':
+                        self.state.history_trajectory = deque(value, maxlen=3000)
                     else:
                         setattr(self.state, key, value)
 

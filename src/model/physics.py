@@ -291,5 +291,5 @@ class PhysicsEngine:
                 state, acc_long, acc_lat, yaw_rate, substep_dt, vehicle_config, physics_config
             )
 
-        # 궤적 업데이트
-        state.update_trajectory()
+        # 과거 궤적 업데이트
+        state.update_history_trajectory()
