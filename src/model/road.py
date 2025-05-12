@@ -758,6 +758,7 @@ class RoadNetworkManager:
         self.global_planner = PathPlanner(config)
         self.config = config
         self.width = self.config['road_width']
+        self.half_width = self.width / 2.0
         self.nodes = []
         self.links = []
 
@@ -881,31 +882,50 @@ class RoadNetworkManager:
         links = self._find_link_by_node(closest_node)
 
         # 가장 가까운 링크와 포인트 및 평균 목표 속도 계산
-        min_dist = float('inf')
+        min_weighted_dist = float('inf')
         closest_point = None
         closest_link = None
         average_target_vel = 0
 
+        yaw_weight = 2.0
+
         for link in links:
             point, dist = self._get_closest_point(x, y, link)
-            if dist < min_dist:
-                min_dist = dist
+            if point is None:
+                continue
+
+            point_yaw = point[2]
+            yaw_diff = abs(self._normalize_angle(yaw - point_yaw))
+
+            weighted_dist = dist * (1 + yaw_diff * yaw_weight)
+
+            if weighted_dist < min_weighted_dist:
+                min_weighted_dist = weighted_dist
                 closest_point = point
                 closest_link = link
             average_target_vel += link.get_target_vel()
 
-        average_target_vel /= len(links)
+        if (links):
+            average_target_vel /= len(links)
 
-        # # 추가적으로 근처의 다른 링크도 확인
-        # for link in self.links:
-        #     if link in links:
-        #         continue
+        # 추가적으로 근처의 다른 링크도 확인
+        for link in self.links:
+            if link in links:
+                continue
 
-        #     point, dist = self._get_closest_point(x, y, link)
-        #     if dist < min_dist:
-        #         min_dist = dist
-        #         closest_point = point
-        #         closest_link = link
+            point, dist = self._get_closest_point(x, y, link)
+            if point is None:
+                continue
+
+            point_yaw = point[2]
+            yaw_diff = abs(self._normalize_angle(yaw - point_yaw))
+
+            weighted_dist = dist * (1 + yaw_diff * yaw_weight)
+
+            if weighted_dist < min_weighted_dist:
+                min_weighted_dist = weighted_dist
+                closest_point = point
+                closest_link = link
 
         if not closest_point:
             return None, None, None, False
@@ -928,9 +948,17 @@ class RoadNetworkManager:
         # d 계산 (수직 벡터와의 내적)
         d = dx * perp_dir_x + dy * perp_dir_y
 
-        bool_outside_road = abs(d) > self.config['road_width'] / 2.0
+        bool_outside_road = abs(d) > self.half_width
 
         return closest_point, d, average_target_vel, bool_outside_road
+
+    def _normalize_angle(self, angle):
+        """각도를 -pi~pi 범위로 정규화"""
+        while angle > math.pi:
+            angle -= 2.0 * math.pi
+        while angle < -math.pi:
+            angle += 2.0 * math.pi
+        return angle
 
     def get_serializable_state(self):
         """
