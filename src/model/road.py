@@ -16,10 +16,10 @@ def dist(pt_a, pt_b):
 class Node:
     _id_iter = 0
     def __init__(self, x, y, yaw=0):
+        self.id = Node._id_iter
         self.x = x
         self.y = y
         self.yaw = yaw
-        self.id = Node._id_iter
         Node._id_iter += 1
 
     def draw(self, screen, world_to_screen_func, debug=False, color=(0, 0, 255), radius=5):
@@ -40,13 +40,10 @@ class Node:
 
     def __eq__(self, other):
         if isinstance(other, Node):
-            # 위치가 매우 가까우면 같은 노드로 간주 (부동소수점 오차 고려)
             return abs(self.x - other.x) < 0.01 and abs(self.y - other.y) < 0.01 and abs(self.yaw - other.yaw) < 0.01
+        if isinstance(other, tuple):
+            return abs(self.x - other[0]) < 0.01 and abs(self.y - other[1]) < 0.01 and abs(self.yaw - other[2]) < 0.01
         return False
-
-    def __hash__(self):
-        # ID 기반으로 해시값 생성 (set, dict 사용 위함)
-        return hash(self.id)
 
     def get_point(self):
         """
@@ -56,40 +53,39 @@ class Node:
 
     def get_serializable_state(self):
         return {
+            "id": self.id,
             "x": self.x,
             "y": self.y,
-            "yaw": self.yaw,
-            "id": self.id
+            "yaw": self.yaw
         }
 
     def load_from_serialized(self, data):
+        self.id = data["id"]
         self.x = data["x"]
         self.y = data["y"]
         self.yaw = data["yaw"]
-        self.id = data["id"]
 
 
 class Link:
-    def __init__(self, start_node, end_node, obstacles=[], mode='plan', config=None):
+    _id_iter = 0
+    def __init__(self, start_node, end_node, path, target_vel, width, mode):
         """
         start_node, end_node: Node 객체 (x, y, yaw 포함)
+        path: 경로
+        target_vel: 목표 속도
+        width: 도로 너비
         mode: 'plan', 'straight', 'curve' 중 하나
         """
+        self.id = Link._id_iter
         self.start = start_node
         self.end = end_node
+        self.path = path
+        self.target_vel = target_vel
+        self.width = width
         self.mode = mode
-        self.width = config['road_width']
-        self.path = PathPlanner.plan(
-            start_node,
-            end_node,
-            obstacles,
-            self.width,
-            mode,
-            config
-        )
-        self.target_vel = PathPlanner.calculate_target_vel(self.path, config["default_speed"], config["min_speed"], config["max_speed"])
         self._sampled_points = None
         self._sample_step = None
+        Link._id_iter += 1
 
     def get_target_vel(self):
         return self.target_vel
@@ -186,7 +182,7 @@ class Link:
             self.start.draw(screen, world_to_screen_func, debug)
             self.end.draw(screen, world_to_screen_func, debug)
             font = pygame.font.SysFont(None, 12)
-            text = font.render(f"{self.start.id}->{self.end.id}", True, (255, 255, 255))
+            text = font.render(f"{self.id}: {self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point_world = self.path[len(self.path)//2]
             mid_point_screen = world_to_screen_func(mid_point_world[0], mid_point_world[1])
             screen.blit(text, (int(mid_point_screen[0]), int(mid_point_screen[1]) - 20))
@@ -196,10 +192,13 @@ class Link:
         Link 객체의 직렬화 상태 반환
         """
         return {
+            "id": self.id,
             "start_id": self.start.id,
             "end_id": self.end.id,
-            "mode": self.mode,
-            "width": self.width
+            "path": self.path,
+            "target_vel": self.target_vel,
+            "width": self.width,
+            "mode": self.mode
         }
 
 class Dubins:
@@ -373,23 +372,46 @@ class PathPlanner:
         2. 비홀로노믹 제약 반영한 경로 계획
     경로 지정(직진, 좌회전, 우회전)시 각각 맞는 함수 사용
     """
+    def __init__(self, config):
+        self.local_planner = Dubins(radius=config["min_radius"], point_separation=config["point_separation"])
+        self.precision = (5, 5, 1)
+        self.width = config["road_width"]
+        self.config = config
 
-    @classmethod
-    def plan(cls, node1, node2, obstacles, width, mode, config):
+        class RRTNode:
+            def __init__(self, position, time, cost, parent_pos=None):
+                self.destination_list = []
+                self.position = position
+                self.time = time
+                self.cost = cost
+                self.parent_pos = parent_pos
+
+        class Edge:
+            def __init__(self, node_from, node_to, path, cost):
+                self.node_from = node_from
+                self.node_to = node_to
+                self.path = deque(path)
+                self.cost = cost
+
+    def plan(self, point1, point2, obstacles, mode):
         """
         경로 계획 메소드
         """
+        nodes_points = [] # node points list, 2D array
+        paths_list = [] # path list, 2D array
         if mode == 'plan':
-            return cls._rrt_with_dubins(node1, node2, obstacles, width, config)
-        elif mode == 'straight':
-            return cls._straight(node1, node2)
+            nodes_points, paths_list = self._rrt_with_dubins(point1, point2, obstacles)
         elif mode == 'curve':
-            return cls._quadratic_bezier_curve(node1, node2)
+            nodes_points.append(point1)
+            nodes_points.append(point2)
+            paths_list.append(self._quadratic_bezier_curve(point1, point2))
         else:
-            return cls._straight(node1, node2)
+            nodes_points.append(point1)
+            nodes_points.append(point2)
+            paths_list.append(self._straight(point1, point2))
+        return nodes_points, paths_list
 
-    @classmethod
-    def calculate_target_vel(cls, path, default_speed=30, min_speed=5, max_speed=50):
+    def calculate_target_vel(self, path, default_speed=30, min_speed=5, max_speed=50):
         """
         경로 곡률에 따른 목표 속도 계산
         최소 속도 5, 최대 속도 50
@@ -458,16 +480,14 @@ class PathPlanner:
 
         return max(min_speed, min(max_speed, velocity))
 
-    @classmethod
-    def _select_options(cls, nodes, sample, nb_options, local_planner):
+    def _select_options(self, nodes, sample, nb_options):
         options = []
         for node in nodes:
-            options.extend([(node, opt) for opt in local_planner.all_options(node, sample)])
+            options.extend([(node, opt) for opt in self.local_planner.all_options(node, sample)])
         options.sort(key=lambda x: x[1])
         return options[:nb_options]
 
-    @classmethod
-    def _is_collision_path(cls, path_points, obstacles, collision_dist):
+    def _is_collision_path(self, path_points, obstacles, collision_dist):
         """Checks if any point in path_points collides with obstacles."""
         if path_points is None or len(path_points) == 0:
             return False
@@ -482,8 +502,7 @@ class PathPlanner:
                     return True
         return False
 
-    @classmethod
-    def _reconstruct_path(cls, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
+    def _reconstruct_path(self, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
         """
         Reconstructs the path from start to goal using parent pointers.
         Returns a list of (x, y, yaw) waypoints.
@@ -529,18 +548,16 @@ class PathPlanner:
                     full_path.extend(segment)
         return full_path
 
-    @classmethod
-    def _is_goal(cls, sample, goal, precision):
+    def _is_goal(self, sample, goal):
         """
         목표 지점에 도달했는지 확인
         """
         for i_dim, val_dim in enumerate(sample):
-            if abs(goal[i_dim] - val_dim) > precision[i_dim]:
+            if abs(goal[i_dim] - val_dim) > self.precision[i_dim]:
                 return False
         return True
 
-    @classmethod
-    def _rrt_with_dubins(cls, start_node, end_node, obstacles, width, config, precision=(5, 5, 1)):
+    def _rrt_with_dubins(self, start_node, end_node, obstacles):
         """
         RRT 알고리즘을 통해 목적지까지의 도로 너비 고려한 장애물 회피 경로 생성
         RRT 알고리즘에 Dubins steer 적용, 비홀로노믹 제약 고려
@@ -548,36 +565,17 @@ class PathPlanner:
         """
         nodes = {}
         edges = {}
-        local_planner = Dubins(radius=config["min_radius"], point_separation=config["point_separation"])
-        goal = (0, 0, 0)
-        root = (0, 0, 0)
-
-        class RRTNode:
-            def __init__(self, position, time, cost, parent_pos=None):
-                self.destination_list = []
-                self.position = position
-                self.time = time
-                self.cost = cost
-                self.parent_pos = parent_pos
-
-        class Edge:
-            def __init__(self, node_from, node_to, path, cost):
-                self.node_from = node_from
-                self.node_to = node_to
-                self.path = deque(path)
-                self.cost = cost
-
         start = (start_node.x, start_node.y, start_node.yaw)
         goal = (end_node.x, end_node.y, end_node.yaw)
         root = start
-        collision_dist = width / 2.0
+        collision_dist = self.width / 2.0
 
         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
 
-        for i_iter in range(config["max_iterations"]):
-            current_iteration_step_size = config["base_step_size"] * random.uniform(config["min_step_factor"], config["max_step_factor"])
+        for i_iter in range(self.config["max_iterations"]):
+            current_iteration_step_size = self.config["base_step_size"] * random.uniform(self.config["min_step_factor"], self.config["max_step_factor"])
 
-            if random.random() < config["goal_sampling_rate"]:
+            if random.random() < self.config["goal_sampling_rate"]:
                 sample = goal
             else:
                 rand_x = random.uniform(min(start[0], goal[0]) - current_iteration_step_size, max(start[0], goal[0]) + current_iteration_step_size)
@@ -585,17 +583,17 @@ class PathPlanner:
                 rand_yaw = random.uniform(-math.pi, math.pi)
                 sample = (rand_x, rand_y, rand_yaw)
 
-            options = cls._select_options(nodes, sample, 10, local_planner)
+            options = self._select_options(nodes, sample, 10)
             for node_from_option, opt_data in options:
                 if opt_data[0] == float('inf'):
                     break
 
-                path_segment_points = local_planner.generate_points(node_from_option,
-                                                                    sample,
-                                                                    opt_data[1],
-                                                                    opt_data[2])
+                path_segment_points = self.local_planner.generate_points(node_from_option,
+                                                                         sample,
+                                                                         opt_data[1],
+                                                                         opt_data[2])
 
-                if cls._is_collision_path(path_segment_points, obstacles, collision_dist):
+                if self._is_collision_path(path_segment_points, obstacles, collision_dist):
                     break
 
                 parent_rrt_node = nodes[node_from_option]
@@ -608,23 +606,23 @@ class PathPlanner:
                     nodes[new_node_pos] = RRTNode(new_node_pos, new_node_time, new_node_cost, parent_pos=node_from_option)
                     edges[(node_from_option, new_node_pos)] = Edge(node_from_option, new_node_pos, path_segment_points, opt_data[0])
 
-                    is_goal_reached = cls._is_goal(new_node_pos, goal, precision)
+                    is_goal_reached = self._is_goal(new_node_pos, goal)
                     if is_goal_reached:
-                        return cls._reconstruct_path(root, new_node_pos, nodes, edges)
+                        return self._reconstruct_path(root, new_node_pos, nodes, edges)
                     else:
                         break
                 break
 
         return []
 
-    @classmethod
-    def _straight(cls, node1, node2):
+    def _straight(self, point1, point2):
         """
-        두 노드간 직선 경로 계획
+        두 지점간 직선 경로 계획
         """
         # 시작점과 끝점
-        start = (node1.x, node1.y, node1.yaw)
-        end = (node2.x, node2.y, node2.yaw)
+        start = (point1[0], point1[1], point1[2])
+        end = (point2[0], point2[1], point2[2])
+        path = []
 
         # 방향 계산
         dx = end[0] - start[0]
@@ -632,7 +630,6 @@ class PathPlanner:
         yaw = math.atan2(dy, dx)
 
         # 5개 지점으로 경로 생성 (부드러운 시각화를 위해)
-        path = []
         for i in range(5):
             t = i / 4  # 0 ~ 1
 
@@ -651,14 +648,13 @@ class PathPlanner:
 
         return path
 
-    @classmethod
-    def _quadratic_bezier_curve(cls, node1, node2):
+    def _quadratic_bezier_curve(self, point1, point2):
         """
         두 노드를 yaw 방향으로 직선을 앞 뒤로 확장했을 때, 수직으로 만나는 지점을 제어점으로 사용하여 베지에 곡선 경로 계획
         """
         # 시작점과 끝점
-        start = (node1.x, node1.y, node1.yaw)
-        end = (node2.x, node2.y, node2.yaw)
+        start = (point1[0], point1[1], point1[2])
+        end = (point2[0], point2[1], point2[2])
 
         # 시작 방향 및 끝 방향의 단위 벡터
         start_dir = (math.cos(start[2]), math.sin(start[2]))
@@ -764,27 +760,45 @@ class RoadNetworkManager:
     장애물 정보: ObstacleManager.get_all_outer_circles()
     """
     def __init__(self, config=None):
+        self.global_planner = PathPlanner(config)
+        self.config = config
+        self.width = self.config['road_width']
         self.nodes = []
         self.links = []
-        self.config = config
 
     def add_node(self, point):
         """노드 추가"""
         for node in self.nodes:
-            if node.get_point() == point:
+            if node == point:
                 return node
 
         new_node = Node(point[0], point[1], point[2])
         self.nodes.append(new_node)
         return new_node
 
-    def add_link(self, node1, node2, obstacles=[], mode='plan'):
-        """링크 추가"""
-        # 링크 생성 및 추가
-        new_link = Link(node1, node2, obstacles, mode, self.config)
-        self.links.append(new_link)
+    def make_link(self, point1, point2, obstacles=[], mode='plan'):
+        """
+        링크 생성
 
-        return new_link
+        Returns:
+            성공 여부(Boolean)
+        """
+        # 링크 생성 및 리스트에 추가
+        nodes_points, paths_list = self.global_planner.plan(point1, point2, obstacles, mode)
+
+        nodes = []
+        links = []
+        for i in range(len(nodes_points)):
+            nodes.append(self.add_node(nodes_points[i]))
+
+        for i in range(len(paths_list)-1):
+            new_link = Link(nodes[i], nodes[i+1], paths_list[i], self.global_planner.calculate_target_vel(paths_list[i]), self.width, mode)
+            links.append(new_link)
+            self.links.append(new_link)
+
+        if len(links) == 0:
+            return False
+        return True
 
     def connect(self, point1=(0,0,0), point2=(100,100,0), obstacles=[], mode='plan'):
         """
@@ -794,12 +808,11 @@ class RoadNetworkManager:
             1. 경로 계획 모드: 장애물과 충돌하지 않는 경로 생성
             2. 직진 모드: 직선 경로 생성
             3. 곡선 모드: 베지에 곡선으로 좌회전, 우회전 경로 생성
-        """
-        node1 = self.add_node(point1)
-        node2 = self.add_node(point2)
 
-        new_link = self.add_link(node1, node2, obstacles, mode)
-        return new_link
+        Returns:
+            성공 여부(Boolean)
+        """
+        return self.make_link(point1, point2, obstacles, mode)
 
     def _get_closest_node(self, x, y):
         """특정 위치와 가장 가까운 노드 찾기"""

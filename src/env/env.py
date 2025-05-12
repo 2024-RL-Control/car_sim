@@ -341,7 +341,7 @@ class CarSimulatorEnv(gym.Env):
             yaw: 도로 방향
 
         Returns:
-            도로 추가 여부
+            도로 추가 여부(Boolean)
         """
         vehicle_id = vehicle.get_id()
         objects = []
@@ -353,12 +353,8 @@ class CarSimulatorEnv(gym.Env):
             for v in vehicles:
                 if v.id != vehicle_id:
                     objects.extend(v.get_outer_circles_world())
-        link = self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
 
-        if link:
-            return True
-        else:
-            return False
+        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
 
     def _get_obs(self):
         """
