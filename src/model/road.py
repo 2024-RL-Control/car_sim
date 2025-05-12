@@ -143,11 +143,13 @@ class Link:
         if not self.path or len(self.path) < 2:
             return
 
-        # 도로 색상 설정 (모드에 따라 다른 색상 사용)
-        if self.mode == 'plan':
-            road_color = (100, 100, 100)  # 회색
-        else:
-            road_color = (80, 80, 80)     # 어두운 회색
+        road_color = (100, 100, 100)  # 회색
+        line_color = (255, 255, 0)  # 노란색
+
+        left = []
+        right = []
+        center = []
+        half_width = self.width / 2
 
         # 도로 그리기
         for i in range(len(self.path) - 1):
@@ -167,35 +169,19 @@ class Link:
             # 수직 방향 벡터 (시계 방향으로 90도 회전)
             perpx, perpy = -dy_norm, dx_norm
 
-            # 도로 너비의 절반
-            half_width = self.width / 2
+            center.append(world_to_screen_func(p1_world[0], p1_world[1]))
+            left.append(world_to_screen_func(p1_world[0] + perpx * half_width, p1_world[1] + perpy * half_width))
+            right.append(world_to_screen_func(p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width))
 
-            # 도로 모서리 4개 점 (월드 좌표)
-            world_points = [
-                (p1_world[0] + perpx * half_width, p1_world[1] + perpy * half_width),
-                (p2_world[0] + perpx * half_width, p2_world[1] + perpy * half_width),
-                (p2_world[0] - perpx * half_width, p2_world[1] - perpy * half_width),
-                (p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width)
-            ]
+        pygame.draw.lines(screen, road_color, False, center, 2)
+        pygame.draw.lines(screen, line_color, False, left, 2)
+        pygame.draw.lines(screen, line_color, False, right, 2)
 
-            # 스크린 좌표로 변환
-            screen_points = [world_to_screen_func(*wp[:2]) for wp in world_points]
-
-            # 사각형 그리기
-            pygame.draw.polygon(screen, road_color, screen_points)
-
-            # 중앙선 그리기 (디버그 모드)
-            if debug:
-                screen_p1 = world_to_screen_func(p1_world[0], p1_world[1])
-                screen_p2 = world_to_screen_func(p2_world[0], p2_world[1])
-                pygame.draw.line(screen, (255, 255, 0), screen_p1, screen_p2, 1)
-
-        # 노드 그리기 (world_to_screen_func 전달)
-        self.start.draw(screen, world_to_screen_func, debug)
-        self.end.draw(screen, world_to_screen_func, debug)
-
-        # 디버그 정보 출력
+        # 디버그 모드 출력
         if debug:
+            # 노드 출력
+            self.start.draw(screen, world_to_screen_func, debug)
+            self.end.draw(screen, world_to_screen_func, debug)
             font = pygame.font.SysFont(None, 12)
             text = font.render(f"{self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point_world = self.path[len(self.path)//2]
@@ -473,22 +459,28 @@ class PathPlanner:
         return max(min_speed, min(max_speed, velocity))
 
     @classmethod
+    def _select_options(cls, nodes, sample, nb_options, local_planner):
+        options = []
+        for node in nodes:
+            options.extend([(node, opt) for opt in local_planner.all_options(node, sample)])
+        options.sort(key=lambda x: x[1])
+        return options[:nb_options]
+
+    @classmethod
     def _is_collision_path(cls, path_points, obstacles, collision_dist):
         """Checks if any point in path_points collides with obstacles."""
-        # Handle None, empty list, or empty NumPy array
         if path_points is None or len(path_points) == 0:
-            return False  # Empty path is not in collision
-        for point in path_points: # Assuming point is (x, y, optional_yaw)
-            point_coords = (point[0], point[1]) # Take only x, y for distance calculation
-            for obstacle in obstacles: # obstacle format: (x_center, y_center, radius)
+            return False
+        for point in path_points:
+            point_coords = (point[0], point[1])
+            for obstacle in obstacles:
                 obs_center = np.array([obstacle[0], obstacle[1]])
-                # collision_dist already includes half width + buffer
                 obs_effective_radius = obstacle[2] + collision_dist
 
                 dist_sq = (point_coords[0] - obs_center[0])**2 + (point_coords[1] - obs_center[1])**2
                 if dist_sq < obs_effective_radius**2:
-                    return True  # Collision detected
-        return False # No collision
+                    return True
+        return False
 
     @classmethod
     def _reconstruct_path(cls, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
@@ -499,7 +491,6 @@ class PathPlanner:
         if goal_reached_pos is None or goal_reached_pos not in rrt_nodes_map:
             return []
 
-        # Handle trivial case: goal is the root
         if goal_reached_pos == root_pos:
             edge_for_start_goal = rrt_edges_map.get((root_pos, root_pos))
             if edge_for_start_goal and edge_for_start_goal.path:
@@ -512,8 +503,6 @@ class PathPlanner:
         while current_pos != root_pos:
             node_data = rrt_nodes_map.get(current_pos)
             if node_data is None or node_data.parent_pos is None:
-                # This case should ideally not be reached if tree is consistent
-                # and current_pos is not root_pos yet.
                 print("Path reconstruction error: Inconsistent tree or orphaned node.")
                 return []
 
@@ -527,10 +516,9 @@ class PathPlanner:
             final_path_waypoints_segments.appendleft(list(edge.path))
             current_pos = parent_pos
 
-        # Concatenate segments
         full_path = []
         for i, segment in enumerate(final_path_waypoints_segments):
-            if not segment: # Should not happen if edge.path was checked
+            if not segment:
                 continue
             if i == 0:
                 full_path.extend(segment)
