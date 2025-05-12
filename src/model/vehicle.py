@@ -685,7 +685,7 @@ class Vehicle:
         target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
 
         # 궤적 예측
-        predicted_trajectory = TrajectoryPredictor.predict_trajectory(
+        predicted_polynomial_trajectory = TrajectoryPredictor.predict_polynomial_trajectory(
             state=self.state,
             target_velocity=target_velocity,
             target_d=target_d,
@@ -694,15 +694,13 @@ class Vehicle:
         )
 
         # 궤적 시각화 (카메라 객체 대신 world_to_screen_func 함수 사용)
-        if len(predicted_trajectory) < 2:
+        if len(predicted_polynomial_trajectory) < 2:
             return
 
         # 궤적 포인트들을 화면 좌표로 변환
-        screen_points = [world_to_screen_func(point.x, point.y) for point in predicted_trajectory]
+        screen_points = [world_to_screen_func(point.x, point.y) for point in predicted_polynomial_trajectory]
 
         # 예측 궤적 그리기 (다른 색상으로 구분)
-        # prediction_color = self.visual_config.get('prediction_color', (0, 255, 255))  # 청록색 기본값
-        # prediction_width = self.visual_config.get('prediction_width', 2)
         width = max(1, int(2 * self.visual_config['camera_zoom']))
         pygame.draw.lines(screen, (0, 255, 255), False, screen_points, width)
 

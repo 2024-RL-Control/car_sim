@@ -27,14 +27,14 @@ class TrajectoryPredictor:
     """물리 모델 기반 차량 궤적 예측기"""
 
     @classmethod
-    def predict_trajectory(cls,
-                          state,
-                          target_velocity: float,
-                          target_d: float,
-                          time_horizon: float = 5.0,
-                          dt: float = 0.1,
-                          jerk_long: float = 1.0,
-                          jerk_lat: float = 1.0) -> List[TrajectoryPoint]:
+    def predict_polynomial_trajectory(cls,
+                                        state,
+                                        target_velocity: float,
+                                        target_d: float,
+                                        time_horizon: float = 5.0,
+                                        dt: float = 0.1,
+                                        jerk_long: float = 1.0,
+                                        jerk_lat: float = 1.0) -> List[TrajectoryPoint]:
         """종/횡 방향 궤적 예측을 결합
 
         Args:
@@ -50,7 +50,7 @@ class TrajectoryPredictor:
             trajectory_points: 예측된 궤적 포인트 리스트
         """
         # 종방향 궤적 예측
-        s_trajectory = cls.predict_longitudinal_trajectory(
+        s_trajectory = cls._predict_longitudinal_polynomial_trajectory(
             init_s=0.0,  # 시작점을 0으로 설정
             init_v=state.vel_long,
             init_a=state.acc_long,
@@ -61,7 +61,7 @@ class TrajectoryPredictor:
         )
 
         # 횡방향 궤적 예측
-        d_trajectory = cls.predict_lateral_trajectory(
+        d_trajectory = cls._predict_lateral_polynomial_trajectory(
             init_d=state.frenet_d if state.frenet_d is not None else 0.0,
             init_d_dot=state.vel_lat,
             init_d_ddot=state.acc_lat,
@@ -123,14 +123,14 @@ class TrajectoryPredictor:
         return trajectory_points
 
     @classmethod
-    def predict_longitudinal_trajectory(cls,
-                                        init_s: float,
-                                        init_v: float,
-                                        init_a: float,
-                                        target_v: float,
-                                        time_horizon: float,
-                                        dt: float,
-                                        max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
+    def _predict_longitudinal_polynomial_trajectory(cls,
+                                                    init_s: float,
+                                                    init_v: float,
+                                                    init_a: float,
+                                                    target_v: float,
+                                                    time_horizon: float,
+                                                    dt: float,
+                                                    max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
         """종방향 궤적 예측
 
         Args:
@@ -175,14 +175,14 @@ class TrajectoryPredictor:
         return trajectory
 
     @classmethod
-    def predict_lateral_trajectory(cls,
-                                  init_d: float,
-                                  init_d_dot: float,
-                                  init_d_ddot: float,
-                                  target_d: float,
-                                  time_horizon: float,
-                                  dt: float,
-                                  max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
+    def _predict_lateral_polynomial_trajectory(cls,
+                                                init_d: float,
+                                                init_d_dot: float,
+                                                init_d_ddot: float,
+                                                target_d: float,
+                                                time_horizon: float,
+                                                dt: float,
+                                                max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
         """횡방향 궤적 예측
 
         Args:
