@@ -519,8 +519,8 @@ class PathPlanner:
                 return [root_pos], [list(edge_for_start_goal.path)]
             return [root_pos], []
 
-        final_path_waypoints_nodes = deque()
-        final_path_waypoints_segments = deque()
+        path_nodes = deque([goal_reached_pos])
+        path_segments = deque()
         current_pos = goal_reached_pos
 
         while current_pos != root_pos:
@@ -536,22 +536,11 @@ class PathPlanner:
                 print(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
                 return [], []
 
-            final_path_waypoints_nodes.appendleft(parent_pos)
-            final_path_waypoints_segments.appendleft(list(edge.path))
+            path_nodes.appendleft(parent_pos)
+            path_segments.appendleft(list(edge.path))
             current_pos = parent_pos
 
-        full_path = []
-        for i, segment in enumerate(final_path_waypoints_segments):
-            if not segment:
-                continue
-            if i == 0:
-                full_path.append(segment)
-            else:
-                if full_path and np.array_equal(full_path[-1], segment[0]):
-                    full_path.append(segment[1:])
-                else:
-                    full_path.append(segment)
-        return list(final_path_waypoints_nodes), full_path
+        return list(path_nodes), list(path_segments)
 
     def _is_goal(self, sample, goal):
         """
@@ -797,7 +786,7 @@ class RoadNetworkManager:
         for i in range(len(nodes_points)):
             nodes.append(self.add_node(nodes_points[i]))
 
-        for i in range(len(paths_list)-1):
+        for i in range(len(paths_list)):
             new_link = Link(nodes[i], nodes[i+1], paths_list[i], self.global_planner.calculate_target_vel(paths_list[i]), self.width, mode)
             links.append(new_link)
             self.links.append(new_link)
@@ -1002,6 +991,7 @@ class RoadNetworkManager:
         self.nodes = []
         self.links = []
         Node._id_iter = 0  # 노드 ID 초기화
+        Link._id_iter = 0  # 링크 ID 초기화
 
     def draw(self, screen, world_to_screen_func, debug=False):
         """네트워크 시각화"""
