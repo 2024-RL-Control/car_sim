@@ -42,6 +42,7 @@ class VehicleState:
     # frenet 좌표
     frenet_d: float = None
     frenet_point: tuple = None
+    target_vel_long: float = None
 
     # 환경 속성
     terrain_type: str = "asphalt"  # 현재 지형 유형
@@ -75,7 +76,7 @@ class VehicleState:
 
         self.frenet_d = None
         self.frenet_point = None
-        self.target_vel_long = 0.0
+        self.target_vel_long = None
 
         self.terrain_type = "asphalt"
 

@@ -869,7 +869,7 @@ class RoadNetworkManager:
         차량이 도로에서 외부에 있는지 확인
         """
         if not self.links:
-            return None, None, 0, False
+            return None, None, None, False
 
         # 차량 위치
         x, y, yaw = vehicle_position
@@ -908,7 +908,7 @@ class RoadNetworkManager:
         #         closest_link = link
 
         if not closest_point:
-            return None, None, 0, False
+            return None, None, None, False
 
         closest_point  # 가장 가까운 포인트 저장
 
