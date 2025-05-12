@@ -131,19 +131,22 @@ class VehicleState:
 
     def update_state_history(self):
         """현재 상태 복사본을 이력에 추가"""
-        # 현재 상태의 중요 필드들을 튜플로 복사
-        state_snapshot = (
-            time.time(),  # 타임스탬프
-            self.x,
-            self.y,
-            self.yaw,
-            self.vel_long,
-            self.acc_long,
-            self.vel_lat,
-            self.acc_lat,
-            self.steer,
-            self.frenet_d
-        )
+        # 현재 상태의 중요 필드들을 딕셔너리로 복사
+        state_snapshot = {
+            'timestamp': time.time(),  # 타임스탬프
+            'x': self.x,
+            'y': self.y,
+            'yaw': self.yaw,
+            'vel_long': self.vel_long,
+            'acc_long': self.acc_long,
+            'vel_lat': self.vel_lat,
+            'acc_lat': self.acc_lat,
+            'steer': self.steer,
+            'throttle_engine': self.throttle_engine,
+            'throttle_brake': self.throttle_brake,
+            'frenet_d': self.frenet_d,
+            'target_vel_long': self.target_vel_long
+        }
         self.state_history.append(state_snapshot)
 
 # ======================
