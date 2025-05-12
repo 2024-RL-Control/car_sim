@@ -5,6 +5,7 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
+import time
 from .physics import PhysicsEngine
 from .trajectory import TrajectoryPredictor
 from .object import RectangleObstacle, GoalManager
