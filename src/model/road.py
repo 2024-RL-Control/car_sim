@@ -91,6 +91,9 @@ class Link:
         self._sampled_points = None
         self._sample_step = None
 
+    def get_target_vel(self):
+        return self.target_vel
+
     def sample(self, step_size=0.5):
         """
         step_size 간격으로 (x,y,yaw) 리스트 반환
@@ -849,12 +852,16 @@ class RoadNetworkManager:
 
         return closest_point, min_dist
 
-    def get_frenet_d(self, vehicle_position=(0,0,0)):
+    def get_vehicle_update_data(self, vehicle_position=(0,0,0)):
         """
-        가장 가까운 포인트와의 거리 계산(Frenet d), 차량의 상태로 활용
+        차량 상태로 활용할 데이터 처리
+        가장 가까운 포인트 찾기
+        가장 가까운 포인트와의 거리 계산
+        링크의 평균 목표 속도 계산
+        차량이 도로에서 외부에 있는지 확인
         """
         if not self.links:
-            return None, None, False
+            return None, None, 0, False
 
         # 차량 위치
         x, y, yaw = vehicle_position
@@ -865,10 +872,11 @@ class RoadNetworkManager:
         # 해당 노드와 연결된 링크 찾기
         links = self._find_link_by_node(closest_node)
 
-        # 가장 가까운 링크와 포인트 찾기
+        # 가장 가까운 링크와 포인트 및 평균 목표 속도 계산
         min_dist = float('inf')
         closest_point = None
         closest_link = None
+        average_target_vel = 0
 
         for link in links:
             point, dist = self._get_closest_point(x, y, link)
@@ -876,20 +884,23 @@ class RoadNetworkManager:
                 min_dist = dist
                 closest_point = point
                 closest_link = link
+            average_target_vel += link.get_target_vel()
 
-        # 추가적으로 근처의 다른 링크도 확인
-        for link in self.links:
-            if link in links:
-                continue
+        average_target_vel /= len(links)
 
-            point, dist = self._get_closest_point(x, y, link)
-            if dist < min_dist:
-                min_dist = dist
-                closest_point = point
-                closest_link = link
+        # # 추가적으로 근처의 다른 링크도 확인
+        # for link in self.links:
+        #     if link in links:
+        #         continue
+
+        #     point, dist = self._get_closest_point(x, y, link)
+        #     if dist < min_dist:
+        #         min_dist = dist
+        #         closest_point = point
+        #         closest_link = link
 
         if not closest_point:
-            return None, None, False
+            return None, None, 0, False
 
         closest_point  # 가장 가까운 포인트 저장
 
@@ -911,7 +922,7 @@ class RoadNetworkManager:
 
         bool_outside_road = abs(d) > self.config['road_width'] / 2.0
 
-        return d, closest_point, bool_outside_road
+        return closest_point, d, average_target_vel, bool_outside_road
 
     def get_serializable_state(self):
         """

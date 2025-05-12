@@ -75,6 +75,7 @@ class VehicleState:
 
         self.frenet_d = None
         self.frenet_point = None
+        self.target_vel_long = 0.0
 
         self.terrain_type = "asphalt"
 
@@ -114,11 +115,11 @@ class VehicleState:
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
         self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
 
-    def update_frenet(self, road_manager):
+    def update_road_data(self, road_manager):
         """
-        차량의 frenet 좌표 업데이트
+        도로 데이터 기반 차량 상태 업데이트
         """
-        self.frenet_d, self.frenet_point, outside_road = road_manager.get_frenet_d((self.x, self.y, self.yaw))
+        self.frenet_point, self.frenet_d, self.target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.x, self.y, self.yaw))
         return outside_road
 
 # ======================
@@ -267,7 +268,7 @@ class Vehicle:
         self.sensor_manager.update(dt, time_elapsed, objects)
 
         # 도로 정보 업데이트
-        outside_road = self._update_frenet(road_manager)
+        outside_road = self._update_road_data(road_manager)
 
         # 충돌 검사
         collision = self._check_collision(objects)
@@ -279,8 +280,8 @@ class Vehicle:
 
         return self.state, collision, outside_road, reached
 
-    def _update_frenet(self, road_manager):
-        return self.state.update_frenet(road_manager)
+    def _update_road_data(self, road_manager):
+        return self.state.update_road_data(road_manager)
 
     def _check_collision(self, objects):
         """
