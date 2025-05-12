@@ -673,7 +673,7 @@ class Vehicle:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
             pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
 
-    def predict_and_draw_trajectory(self, screen, world_to_screen_func, time_horizon=1.0, dt=0.1):
+    def predict_and_draw_trajectory(self, screen, world_to_screen_func, time_horizon=0.5, dt=0.1):
         """미래 궤적 예측 및 시각화
 
         Args:
@@ -695,17 +695,28 @@ class Vehicle:
             time_horizon=time_horizon,
             dt=dt
         )
+        predicted_physics_trajectory = TrajectoryPredictor.predict_physics_based_trajectory(
+            state=self.state,
+            target_velocity=target_velocity,
+            target_d=target_d,
+            time_horizon=time_horizon,
+            dt=dt,
+            physics_config=self.physics_config,
+            vehicle_config=self.vehicle_config
+        )
 
         # 궤적 시각화 (카메라 객체 대신 world_to_screen_func 함수 사용)
         if len(predicted_polynomial_trajectory) < 2:
             return
 
         # 궤적 포인트들을 화면 좌표로 변환
-        screen_points = [world_to_screen_func(point.x, point.y) for point in predicted_polynomial_trajectory]
+        screen_polynomial_points = [world_to_screen_func(point.x, point.y) for point in predicted_polynomial_trajectory]
+        screen_physics_points = [world_to_screen_func(point.x, point.y) for point in predicted_physics_trajectory]
 
         # 예측 궤적 그리기 (다른 색상으로 구분)
         width = max(1, int(2 * self.visual_config['camera_zoom']))
-        pygame.draw.lines(screen, (0, 255, 255), False, screen_points, width)
+        pygame.draw.lines(screen, (0, 255, 255), False, screen_polynomial_points, width)
+        pygame.draw.lines(screen, (255, 0, 0), False, screen_physics_points, width)
 
     def get_serializable_state(self):
         """
