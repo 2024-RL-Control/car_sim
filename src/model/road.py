@@ -533,7 +533,6 @@ class PathPlanner:
         RRT 알고리즘에 Dubins steer 적용, 비홀로노믹 제약 고려
         RRT 알고리즘의 트리 노드들은 Node 클래스 사용하지 않고 내부적으로 노드 처리
         """
-
         nodes = {}
         edges = {}
         local_planner = Dubins(radius=config["min_radius"], point_separation=config["point_separation"])
@@ -559,28 +558,6 @@ class PathPlanner:
         goal = (end_node.x, end_node.y, end_node.yaw)
         root = start
         collision_dist = width / 2.0
-
-        is_already_at_goal = True
-        for i_dim in range(len(goal)):
-            if abs(goal[i_dim] - start[i_dim]) > precision[i_dim] / 2.0:
-                is_already_at_goal = False
-                break
-        if is_already_at_goal:
-            direct_options = local_planner.all_options(start, goal)
-            if direct_options:
-                valid_options = [opt for opt in direct_options if opt[0] != float('inf')]
-                if valid_options:
-                    best_option_cost, best_option_type, best_option_params = min(valid_options, key=lambda opt: opt[0])
-                    direct_path_points = local_planner.generate_points(start, goal, best_option_type, best_option_params)
-                    if not cls._is_collision_path(direct_path_points, obstacles, collision_dist):
-                        nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
-                        if start != goal:
-                             nodes[goal] = RRTNode(goal, best_option_cost, best_option_cost, parent_pos=start)
-                             edges[(start, goal)] = Edge(start, goal, direct_path_points, best_option_cost)
-                             return cls._reconstruct_path(root, goal, nodes, edges)
-                        else:
-                             return [start]
-            return [start]
 
         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
 

@@ -87,7 +87,7 @@ def multi_vehicle_test():
         for i in range(env.num_vehicles):
             if info['reached_targets'].get(i, False):
                 # 목적지 도달 시 새 목적지 생성
-                create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
+                create_random_goal(env, i, min_distance=30.0, max_distance=50.0)
 
         # 렌더링
         env.render()
