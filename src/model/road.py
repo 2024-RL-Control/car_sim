@@ -204,6 +204,17 @@ class Link:
             "mode": self.mode
         }
 
+    def load_from_serialized(self, data, nodes_dict):
+        self.id = data["id"]
+        self.start = nodes_dict[data["start_id"]]
+        self.end = nodes_dict[data["end_id"]]
+        self.path = data["path"]
+        self.target_vel = data["target_vel"]
+        self.width = data["width"]
+        self.mode = data["mode"]
+        self._sampled_points = None
+        self._sample_step = None
+
 class Dubins:
     def __init__(self, radius, point_separation):
         assert radius > 0 and point_separation > 0
@@ -988,7 +999,8 @@ class RoadNetworkManager:
         return {
             "nodes": nodes_data,
             "links": links_data,
-            "node_id_iter": Node._id_iter
+            "node_id_iter": Node._id_iter,
+            "link_id_iter": Link._id_iter
         }
 
     def load_from_serialized(self, data, obstacles):
@@ -1008,24 +1020,15 @@ class RoadNetworkManager:
             node.load_from_serialized(node_data)
             self.nodes.append(node)
             nodes_dict[node.id] = node
-
         # 노드 ID 이터레이터 복원
         Node._id_iter = data.get("node_id_iter", 0)
 
         # 링크 복원
         for link_data in data["links"]:
-            # 링크의 시작 및 끝 노드 가져오기
-            start_id = link_data["start_id"]
-            end_id = link_data["end_id"]
-
-            # 이미 복원된 노드들에서 해당 노드들 찾기
-            start_node = nodes_dict[start_id]
-            end_node = nodes_dict[end_id]
-
-            # 새 링크 생성
-            link = Link(start_node, end_node, obstacles, link_data["mode"], self.config)
-
+            link = Link(None, None, [], 0, self.width, "plan") # 임시 값으로 생성
+            link.load_from_serialized(link_data, nodes_dict)
             self.links.append(link)
+        Link._id_iter = data.get("link_id_iter", 0)
 
     def reset(self):
         """노드와 링크 초기화"""
