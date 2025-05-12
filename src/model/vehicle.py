@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
 from typing import List
 from collections import deque
@@ -6,6 +6,7 @@ from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
 from .physics import PhysicsEngine
+from .trajectory import TrajectoryPredictor
 from .object import RectangleObstacle, GoalManager
 from .sensor import SensorManager
 
@@ -39,11 +40,19 @@ class VehicleState:
     distance_to_target: float = 0.0  # 목표까지의 거리
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
 
+    # frenet 좌표
+    frenet_d: float = None
+    frenet_point: tuple = None
+    target_vel_long: float = None
+
     # 환경 속성
     terrain_type: str = "asphalt"  # 현재 지형 유형
 
-    # 차량 궤적
-    trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
+    # 차량 과거 궤적
+    history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
+
+    # 상태 이력 (최근 N개 상태 기록)
+    state_history: deque = field(default_factory=lambda: deque(maxlen=100))
 
     def reset(self):
         """차량 상태 초기화"""
@@ -69,9 +78,14 @@ class VehicleState:
         self.distance_to_target = 0.0
         self.yaw_diff_to_target = 0.0
 
+        self.frenet_d = None
+        self.frenet_point = None
+        self.target_vel_long = None
+
         self.terrain_type = "asphalt"
 
-        self.trajectory.clear()
+        self.history_trajectory.clear()
+        self.state_history.clear()
 
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
@@ -81,9 +95,9 @@ class VehicleState:
         """cos/sin 인코딩을 통한 각도 표현"""
         return cos(angle), sin(angle)
 
-    def update_trajectory(self):
+    def update_history_trajectory(self):
         """현재 위치를 궤적에 추가"""
-        self.trajectory.append((self.x, self.y))
+        self.history_trajectory.append((self.x, self.y))
 
     def set_position(self, x, y, yaw=None):
         """차량 위치 및 방향 설정"""
@@ -106,6 +120,30 @@ class VehicleState:
         """뒷바퀴 축 위치에서 heading 방향으로 이동, 차량 중심점 위치 업데이트"""
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
         self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
+
+    def update_road_data(self, road_manager):
+        """
+        도로 데이터 기반 차량 상태 업데이트
+        """
+        self.frenet_point, self.frenet_d, self.target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.x, self.y, self.yaw))
+        return outside_road
+
+    def update_state_history(self):
+        """현재 상태 복사본을 이력에 추가"""
+        # 현재 상태의 중요 필드들을 튜플로 복사
+        state_snapshot = (
+            time.time(),  # 타임스탬프
+            self.x,
+            self.y,
+            self.yaw,
+            self.vel_long,
+            self.acc_long,
+            self.vel_lat,
+            self.acc_lat,
+            self.steer,
+            self.frenet_d
+        )
+        self.state_history.append(state_snapshot)
 
 # ======================
 # Vehicle Model
@@ -149,6 +187,10 @@ class Vehicle:
         """차량 위치 및 방향 설정"""
         self.state.set_position(x, y, yaw)
         self._update_collision_body()
+
+    def get_position(self):
+        """차량 위치 반환"""
+        return (self.state.x, self.state.y, self.state.yaw)
 
     def get_current_goal(self):
         """현재 목표 반환"""
@@ -227,7 +269,7 @@ class Vehicle:
         self._load_graphics()
         self._update_collision_body()
 
-    def step(self, action, dt, time_elapsed, obstacles=[], vehicles=[]):
+    def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
         """차량 상태 업데이트"""
 
         # 물리 모델 적용
@@ -243,10 +285,13 @@ class Vehicle:
         if vehicles:
             for vehicle in vehicles:
                 if vehicle.id != self.id:  # 자기 자신이 아닌 차량만 추가
-                    objects.extend(vehicle._get_outer_circles_world())
+                    objects.extend(vehicle.get_outer_circles_world())
 
         # 차량 센서 업데이트
         self.sensor_manager.update(dt, time_elapsed, objects)
+
+        # 도로 정보 업데이트
+        outside_road = self._update_road_data(road_manager)
 
         # 충돌 검사
         collision = self._check_collision(objects)
@@ -256,7 +301,16 @@ class Vehicle:
         if self.goal_manager.has_goals():
             reached = self._check_target_reached()
 
-        return self.state, collision, reached
+        # 상태 이력 업데이트
+        self._update_state_history()
+
+        return self.state, collision, outside_road, reached
+
+    def _update_road_data(self, road_manager):
+        return self.state.update_road_data(road_manager)
+
+    def _update_state_history(self):
+        self.state.update_state_history()
 
     def _check_collision(self, objects):
         """
@@ -275,9 +329,9 @@ class Vehicle:
             return False
 
         # 다른 객체들과의 외접원 수준의 충돌 검사
-        return self._circles_collision(self._get_outer_circles_world(), objects)
+        return self._circles_collision(self.get_outer_circles_world(), objects)
 
-    def _get_outer_circles_world(self):
+    def get_outer_circles_world(self):
         """차량 외접원들의 월드 좌표와 반지름 반환 [(x, y, radius), ...]"""
         return self.collision_body.get_outer_circles_world()
 
@@ -398,17 +452,27 @@ class Vehicle:
                 # 차량 센서 그리기
                 self.sensor_manager.draw(screen, world_to_screen_func, debug)
 
+                # frenet 좌표 시각화
+                self._draw_frenet_point(screen, world_to_screen_func)
+
             # 충돌 바디의 경계 원 그리기 메서드 활용
             self.collision_body._draw_bounding_circles(screen, world_to_screen_func)
 
             # 궤적 그리기
-            self._draw_trajectory(screen, world_to_screen_func)
+            self._draw_history_trajectory(screen, world_to_screen_func)
+
+        self.predict_and_draw_trajectory(screen, world_to_screen_func)
 
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)
 
         # 차체 그리기
         self._draw_body(screen, world_to_screen_func)
+
+    def _draw_frenet_point(self, screen, world_to_screen_func):
+        """frenet 좌표 시각화"""
+        if self.state.frenet_point is not None:
+            pygame.draw.circle(screen, (0, 255, 255), world_to_screen_func(self.state.frenet_point[0], self.state.frenet_point[1]), 5)
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
@@ -589,13 +653,13 @@ class Vehicle:
 
         return result
 
-    def _draw_trajectory(self, screen, world_to_screen_func):
+    def _draw_history_trajectory(self, screen, world_to_screen_func):
         """차량 궤적 그리기"""
-        if len(self.state.trajectory) < 2:
+        if len(self.state.history_trajectory) < 2:
             return
 
         # 지난 궤적을 점선으로 표시
-        trajectory_points = [world_to_screen_func(x, y) for x, y in self.state.trajectory]
+        trajectory_points = [world_to_screen_func(x, y) for x, y in self.state.history_trajectory]
 
         # 줌 레벨에 맞게 선 너비 조정
         width = max(1, int(2 * self.visual_config['camera_zoom']))
@@ -604,6 +668,42 @@ class Vehicle:
         if len(trajectory_points) > 1:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
             pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
+
+    def predict_and_draw_trajectory(self, screen, world_to_screen_func, time_horizon=1.0, dt=0.1):
+        """미래 궤적 예측 및 시각화
+
+        Args:
+            screen: Pygame 화면 객체
+            world_to_screen_func: 월드 좌표를 화면 좌표로 변환하는 함수
+            time_horizon: 궤적 예측 시간 범위 [s]
+            dt: 시간 간격 [s]
+        """
+
+        # 목표 속도와 횡방향 위치 설정
+        target_velocity = self.state.target_vel_long if self.state.target_vel_long is not None else self.state.vel_long
+        target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
+
+        # 궤적 예측
+        predicted_trajectory = TrajectoryPredictor.predict_trajectory(
+            state=self.state,
+            target_velocity=target_velocity,
+            target_d=target_d,
+            time_horizon=time_horizon,
+            dt=dt
+        )
+
+        # 궤적 시각화 (카메라 객체 대신 world_to_screen_func 함수 사용)
+        if len(predicted_trajectory) < 2:
+            return
+
+        # 궤적 포인트들을 화면 좌표로 변환
+        screen_points = [world_to_screen_func(point.x, point.y) for point in predicted_trajectory]
+
+        # 예측 궤적 그리기 (다른 색상으로 구분)
+        # prediction_color = self.visual_config.get('prediction_color', (0, 255, 255))  # 청록색 기본값
+        # prediction_width = self.visual_config.get('prediction_width', 2)
+        width = max(1, int(2 * self.visual_config['camera_zoom']))
+        pygame.draw.lines(screen, (0, 255, 255), False, screen_points, width)
 
     def get_serializable_state(self):
         """
@@ -615,7 +715,7 @@ class Vehicle:
         state_dict = self.state.__dict__.copy()
 
         # 직렬화할 수 없는 trajectory 필드 처리
-        state_dict['trajectory'] = list(self.state.trajectory)
+        state_dict['history_trajectory'] = list(self.state.history_trajectory)
 
         return {
             'id': self.id,
@@ -635,8 +735,8 @@ class Vehicle:
             state_dict = serialized_data['state']
             for key, value in state_dict.items():
                 if hasattr(self.state, key):
-                    if key == 'trajectory':
-                        self.state.trajectory = deque(value, maxlen=3000)
+                    if key == 'history_trajectory':
+                        self.state.history_trajectory = deque(value, maxlen=3000)
                     else:
                         setattr(self.state, key, value)
 
@@ -655,7 +755,7 @@ class Vehicle:
 class VehicleManager:
     """차량들을 관리하는 클래스"""
 
-    def __init__(self, vehicle_config=None, physics_config=None, visual_config=None):
+    def __init__(self, road_manager, vehicle_config=None, physics_config=None, visual_config=None):
         """
         차량 관리자 초기화
 
@@ -668,6 +768,8 @@ class VehicleManager:
         self.vehicle_map = {}  # {vehicle_id: vehicle} 매핑
         self.active_vehicle_idx = 0  # 현재 활성화된 차량 인덱스
         self.next_vehicle_id = 0  # 다음 차량 ID (자동 생성용)
+
+        self.road_manager = road_manager  # 도로 관리자
 
         # 설정 저장
         self.vehicle_config = vehicle_config
@@ -921,25 +1023,27 @@ class VehicleManager:
             obstacles = []
 
         collisions = {}
+        outside_roads = {}
         reached_targets = {}
 
         # 단일 액션인 경우 (단일 차량 모드)
         if not isinstance(actions, list):
             if len(self.vehicles) > 0:
                 vehicle = self.vehicles[0]
-                _, collision, reached = vehicle.step(actions, dt, time_elapsed, obstacles, self.vehicles)
+                _, collision, outside_road, reached = vehicle.step(actions, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
                 collisions[vehicle.id] = collision
+                outside_roads[vehicle.id] = outside_road
                 reached_targets[vehicle.id] = reached
         else:
             # 다중 차량 모드
             for i, vehicle in enumerate(self.vehicles):
                 if i < len(actions):
                     vehicle_action = actions[i]
-                    _, collision, reached = vehicle.step(vehicle_action, dt, time_elapsed, obstacles, self.vehicles)
+                    _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
                     collisions[vehicle.id] = collision
+                    outside_roads[vehicle.id] = outside_road
                     reached_targets[vehicle.id] = reached
-
-        return collisions, reached_targets
+        return collisions, outside_roads, reached_targets
 
     def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
         """

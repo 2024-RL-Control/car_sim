@@ -111,7 +111,7 @@ class ForceCalculator:
         acc_long = acc_engine - acc_brake
 
         # 저항력 계산
-        rolling_acc = cls._calculate_rolling_resistance(vel_long, state.throttle_engine, vehicle_config, physics_config, dt)
+        rolling_acc = cls._calculate_rolling_resistance(vel_long, state.throttle_engine, state.throttle_brake, vehicle_config, physics_config, dt)
         drag_acc = cls._calculate_drag(vel_long, vehicle_config, physics_config)
 
         # 최종 종방향 가속도
@@ -123,20 +123,26 @@ class ForceCalculator:
         return acc_long, acc_lat, yaw_rate
 
     @classmethod
-    def _calculate_rolling_resistance(cls, vel_long, throttle_engine, vehicle_config, physics_config, dt):
+    def _calculate_rolling_resistance(cls, vel_long, throttle_engine, throttle_brake, vehicle_config, physics_config, dt):
         """구름 저항 계산"""
         # 구름 저항 (Cr * m * g)
         rolling_resistance = physics_config['roll_resist'] * vehicle_config['mass'] * physics_config['gravity']
 
         # 방향에 따라 저항 방향 결정
         if abs(vel_long) > physics_config['min_speed_threshold']:
+            # 이미 움직이는 상태라면 현재 속도의 반대 방향으로 저항
             rolling_acc = (rolling_resistance / vehicle_config['mass']) * (-1 if vel_long > 0 else 1)
         else:
-            # 정지 상태에 가까우면 속도를 0으로 설정
-            if throttle_engine < rolling_resistance / vehicle_config['mass']:
-                rolling_acc = -vel_long / dt  # 완전히 정지하도록
+            # 거의 정지 상태일 때
+            if throttle_brake > 0.1:
+                # 브레이크 입력이 있으면 전진 방향의 저항 생성
+                rolling_acc = (rolling_resistance / vehicle_config['mass'])
+            elif throttle_engine > 0.1:
+                # 가속 페달 입력이 있으면 후진 방향의 저항 생성
+                rolling_acc = -(rolling_resistance / vehicle_config['mass'])
             else:
-                rolling_acc = 0
+                # 둘 다 입력이 없으면 완전 정지
+                rolling_acc = -vel_long / dt  # 완전히 정지하도록
 
         return rolling_acc
 
@@ -285,5 +291,5 @@ class PhysicsEngine:
                 state, acc_long, acc_lat, yaw_rate, substep_dt, vehicle_config, physics_config
             )
 
-        # 궤적 업데이트
-        state.update_trajectory()
+        # 과거 궤적 업데이트
+        state.update_history_trajectory()

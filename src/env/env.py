@@ -10,6 +10,7 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 from ..model.vehicle import VehicleManager
 from ..model.object import ObstacleManager
+from ..model.road import RoadNetworkManager
 from ..utils.config_utils import load_config
 from ..ui.camera import Camera
 from ..ui.keyboard import KeyboardHandler
@@ -39,8 +40,15 @@ class CarSimulatorEnv(gym.Env):
         self.num_vehicles = self.config['simulation']['num_vehicles']
         self.multi_vehicle = (self.num_vehicles > 1)
 
+        # 장애물 매니저 초기화
+        self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
+
+        # 도로 시스템 초기화
+        self.road_manager = RoadNetworkManager(self.config['simulation']['path_planning'])
+
         # 차량 관리자 초기화
         self.vehicle_manager = VehicleManager(
+            road_manager=self.road_manager,
             vehicle_config=self.config['vehicle'],
             physics_config=self.config['physics'],
             visual_config=self.config['visualization']
@@ -49,9 +57,6 @@ class CarSimulatorEnv(gym.Env):
         # 초기 차량들 생성
         for i in range(self.num_vehicles):
             self.vehicle_manager.create_vehicle(x=i*100, y=0, vehicle_id=i)
-
-        # 장애물 매니저 초기화
-        self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
 
         # UI 모듈 초기화
         self.camera = Camera(self.config)
@@ -78,10 +83,10 @@ class CarSimulatorEnv(gym.Env):
                 dtype=np.float32
             )
 
-            # 관측 공간: [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
+            # 관측 공간: [cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target, frenet_d]
             self.observation_space = spaces.Box(
-                low=np.array([-np.inf, -np.inf, -1, -1, -20, -25, 0, -np.pi]),
-                high=np.array([np.inf, np.inf, 1, 1, 65, 25, np.inf, np.pi]),
+                low=np.array([-1, -1, -20, -25, 0, -np.pi, -np.inf]),
+                high=np.array([1, 1, 65, 25, np.inf, np.pi, np.inf]),
                 dtype=np.float32
             )
         else:
@@ -97,8 +102,8 @@ class CarSimulatorEnv(gym.Env):
             # 다중 차량 관측 공간 - 각 차량마다 별도 관측
             self.observation_space = spaces.Tuple([
                 spaces.Box(
-                    low=np.array([-np.inf, -np.inf, -1, -1, -20, -25, 0, -np.pi]),
-                    high=np.array([np.inf, np.inf, 1, 1, 65, 25, np.inf, np.pi]),
+                    low=np.array([-1, -1, -20, -25, 0, -np.pi, -np.inf]),
+                    high=np.array([1, 1, 65, 25, np.inf, np.pi, np.inf]),
                     dtype=np.float32
                 ) for _ in range(self.num_vehicles)
             ])
@@ -131,6 +136,9 @@ class CarSimulatorEnv(gym.Env):
 
             # 장애물 매니저 관련 데이터
             'obstacles': self.obstacle_manager.get_serializable_obstacles(),
+
+            # 도로 네트워크 관련 데이터
+            'road_network': self.road_manager.get_serializable_state(),
 
             # 카메라 설정
             'camera': self.camera.get_serializable_camera(),
@@ -172,6 +180,13 @@ class CarSimulatorEnv(gym.Env):
             self.obstacle_manager.clear_obstacles()  # 기존 장애물 제거
             if 'obstacles' in save_data:
                 self.obstacle_manager.load_obstacles_from_serialized(save_data['obstacles'])
+
+            # 장애물 정보 복원
+            obstacles = self.obstacle_manager.get_all_outer_circles()
+
+            # 도로 네트워크 정보 복원
+            if 'road_network' in save_data:
+                self.road_manager.load_from_serialized(save_data['road_network'], obstacles)
 
             # 카메라 설정 복원
             if 'camera' in save_data:
@@ -216,13 +231,13 @@ class CarSimulatorEnv(gym.Env):
         self._time_elapsed += dt
 
         # 차량 업데이트 및 충돌 감지
-        collisions, reached_targets = self.vehicle_manager.step(
+        collisions, outside_roads, reached_targets = self.vehicle_manager.step(
             action, dt, self._time_elapsed, obstacles
         )
 
         # 관측값 및 보상 계산
         obs = self._get_obs()
-        reward = self._calculate_rewards(collisions, reached_targets)
+        reward = self._calculate_rewards(collisions, outside_roads, reached_targets)
 
         # 물리 시뮬레이션 시간 측정
         physics_time = time.time() - physics_start
@@ -232,13 +247,18 @@ class CarSimulatorEnv(gym.Env):
         # 충돌 여부 확인
         any_collision = any(collisions.values())
 
+        # 도로 이탈 여부 확인
+        any_outside_road = any(outside_roads.values())
+
         # 종료 여부 결정
-        done = any_collision
+        done = any_collision or any_outside_road
 
         info = {
             'collisions': collisions,
+            'outside_roads': outside_roads,
             'reached_targets': reached_targets,
-            'collision': any_collision
+            'collision': any_collision,
+            'outside_road': any_outside_road
         }
 
         # 상태 기록 (리플레이용)
@@ -273,6 +293,9 @@ class CarSimulatorEnv(gym.Env):
         # 장애물 관리자 초기화 (모든 장애물 제거)
         self.obstacle_manager.clear_obstacles()
 
+        # 도로 시스템 초기화
+        self.road_manager.reset()
+
         return self._get_obs()
 
     def render(self, mode='human'):
@@ -299,7 +322,39 @@ class CarSimulatorEnv(gym.Env):
         Returns:
             추가된 목적지 ID
         """
-        return self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
+        goal_id = self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
+        if goal_id is not None:
+            vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
+            road = self.add_road(vehicle, x, y, yaw)
+            return road
+        else:
+            return goal_id
+
+    def add_road(self, vehicle, x, y, yaw):
+        """
+        차량에 도로 추가
+
+        Args:
+            vehicle: 차량 객체
+            x: 도로 X 좌표
+            y: 도로 Y 좌표
+            yaw: 도로 방향
+
+        Returns:
+            도로 추가 여부(Boolean)
+        """
+        vehicle_id = vehicle.get_id()
+        objects = []
+        obstacles = self.obstacle_manager.get_all_outer_circles()
+        if obstacles:
+            objects.extend(obstacles)
+        if self.vehicle_manager.get_vehicle_count() > 0:
+            vehicles = self.vehicle_manager.get_all_vehicles()
+            for v in vehicles:
+                if v.id != vehicle_id:
+                    objects.extend(v.get_outer_circles_world())
+
+        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
 
     def _get_obs(self):
         """
@@ -332,24 +387,24 @@ class CarSimulatorEnv(gym.Env):
 
         # 기본 차량 상태
         obs = np.array([
-            state.x,
-            state.y,
             cos_yaw,
             sin_yaw,
             state.vel_long,
             state.vel_lat,
             state.distance_to_target,
-            state.yaw_diff_to_target
+            state.yaw_diff_to_target,
+            state.frenet_d
         ], dtype=np.float32)
 
         return obs
 
-    def _calculate_rewards(self, collisions, reached_targets):
+    def _calculate_rewards(self, collisions, outside_roads, reached_targets):
         """
         모든 차량의 보상 계산
 
         Args:
             collisions: 차량별 충돌 여부 {vehicle_id: bool}
+            outside_roads: 차량별 도로 이탈 여부 {vehicle_id: bool}
             reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
 
         Returns:
@@ -362,6 +417,7 @@ class CarSimulatorEnv(gym.Env):
                 return self._calculate_vehicle_reward(
                     vehicle,
                     collisions.get(vehicle.id, False),
+                    outside_roads.get(vehicle.id, False),
                     reached_targets.get(vehicle.id, False)
                 )
             return 0.0
@@ -371,48 +427,53 @@ class CarSimulatorEnv(gym.Env):
                 self._calculate_vehicle_reward(
                     vehicle,
                     collisions.get(vehicle.id, False),
+                    outside_roads.get(vehicle.id, False),
                     reached_targets.get(vehicle.id, False)
                 )
                 for vehicle in self.vehicle_manager.get_all_vehicles()
             ]
 
-    def _calculate_vehicle_reward(self, vehicle, collision, reached_target):
+    def _calculate_vehicle_reward(self, vehicle, collision, outside_road, reached_target):
         """
         단일 차량 보상 계산
 
         Args:
             vehicle: 차량 객체
             collision: 충돌 여부
+            outside_road: 도로 이탈 여부
             reached_target: 목표 도달 여부
 
         Returns:
             계산된 보상값
         """
         state = vehicle.get_state()
+        rewards = self.config['simulation']['rewards']
+
+        reward = 0
 
         # 속도 보상 (최대 속도에 가까울수록 높은 보상)
-        speed_reward = state.vel_long / self.config['vehicle']['max_speed'] * 0.2
+        speed_reward = (state.vel_long / self.config['vehicle']['max_speed']) * rewards['speed_reward_factor']
+        reward += speed_reward
 
-        # 목표 관련 보상
-        goal_reward = 0
         # 목표 거리에 따른 보상 (가까울수록 높은 보상)
         if state.distance_to_target > 0:
-            proximity_reward = 1.0 / (1.0 + state.distance_to_target) * 0.1
-            goal_reward += proximity_reward
+            proximity_reward = 1.0 / (1.0 + state.distance_to_target) * rewards['distance_reward_factor']
+            reward += proximity_reward
 
         # 방향 일치 보상 (차량이 목표를 바라볼수록 높은 보상)
-        direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * 0.2
-        goal_reward += direction_reward
-
-        # 목표 도달 보상
-        if reached_target:
-            goal_reward += 1.0
-
-        # 종합 보상
-        reward = speed_reward + goal_reward
+        direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * rewards['orientation_reward_factor']
+        reward += direction_reward
 
         # 충돌 패널티
         if collision:
-            reward -= 2.0
+            reward -= rewards['collision_penalty']
+
+        # 도로 이탈 패널티
+        if outside_road:
+            reward -= rewards['outside_road_penalty']
+
+        # 목표 도달 보상
+        if reached_target:
+            reward += rewards['goal_reached_reward']
 
         return reward

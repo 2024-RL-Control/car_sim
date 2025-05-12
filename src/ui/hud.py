@@ -71,7 +71,11 @@ class HUD:
 
         # 디버그 정보 추가
         if self.config['visualization']['debug_mode']:
+            frenet_d = state.frenet_d if state.frenet_d is not None else -float('inf')
+            target_vel_long = state.target_vel_long if state.target_vel_long is not None else -float('inf')
             hud.extend([
+                f"Frenet D: {frenet_d:.2f}",
+                f"Target Vel Long: {target_vel_long:.2f}",
                 f"Throttling Engine: {state.throttle_engine:.2f}",
                 f"Throttling Brake: {state.throttle_brake:.2f}",
                 f"Steering: {np.degrees(state.steer):.1f}°",

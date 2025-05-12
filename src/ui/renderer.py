@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 import pygame
 import numpy as np
 import time
@@ -177,6 +177,9 @@ class Renderer:
             # 고정 그리드 그리기
             self.draw_grid(camera, active_vehicle)
 
+            # 도로 네트워크 그리기
+            env.road_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
+
             # 장애물 그리기
             env.obstacle_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
 
@@ -190,8 +193,9 @@ class Renderer:
 
             hud.draw_hud(self.screen, active_vehicle, active_vehicle_idx, vehicle_count, self._performance_metrics)
 
-            # 차량 목표 방향 화살표 그리기
-            hud.draw_target_direction_arrows(self.screen, env.vehicle_manager.get_all_vehicles(), active_vehicle_idx, world_to_screen)
+            if self.config['visualization']['debug_mode']:
+                # 차량 목표 방향 화살표 그리기
+                hud.draw_target_direction_arrows(self.screen, env.vehicle_manager.get_all_vehicles(), active_vehicle_idx, world_to_screen)
 
         # 렌더링 시간 측정
         self._performance_metrics['render_time'] = time.time() - render_start
