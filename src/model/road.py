@@ -311,19 +311,16 @@ class Dubins:
         center_0 = self.find_center(start, 'L' if path[0] > 0 else 'R')
         center_2 = self.find_center(end, 'L' if path[1] > 0 else 'R')
 
-        # We first need to find the points where the straight segment starts
         if abs(path[0]) > 0:
             angle = start[2]+(abs(path[0])-np.pi/2)*np.sign(path[0])
             ini = center_0+self.radius*np.array([np.cos(angle), np.sin(angle)])
         else: ini = np.array(start[:2])
-        # We then identify its end
         if abs(path[1]) > 0:
             angle = end[2]+(-abs(path[1])-np.pi/2)*np.sign(path[1])
             fin = center_2+self.radius*np.array([np.cos(angle), np.sin(angle)])
         else: fin = np.array(end[:2])
         dist_straight = dist(ini, fin)
 
-        # We can now generate all the points with the desired precision
         points = []
         for x in np.arange(0, total, self.point_separation):
             if x < abs(path[0])*self.radius: # First turn
@@ -606,37 +603,39 @@ class PathPlanner:
                     min_dist_sq = dist_sq
                     nearest_node_pos = existing_node_pos
 
-            if nearest_node_pos is None: continue
+            if nearest_node_pos is None:
+                continue
 
-            dubins_options_from_nearest = local_planner.all_options(nearest_node_pos, sample)
+            options = cls._select_options([nearest_node_pos], sample, 10, local_planner)
+            for node_from_option, opt_data in options:
+                if opt_data[0] == float('inf'):
+                    break
 
-            for dubins_opt_data in dubins_options_from_nearest:
-                if dubins_opt_data[0] == float('inf'):
-                    continue
-
-                path_segment_points = local_planner.generate_points(nearest_node_pos,
+                path_segment_points = local_planner.generate_points(node_from_option,
                                                                     sample,
-                                                                    dubins_opt_data[1],
-                                                                    dubins_opt_data[2])
+                                                                    opt_data[1],
+                                                                    opt_data[2])
 
                 if cls._is_collision_path(path_segment_points, obstacles, collision_dist):
-                    continue
+                    break
 
-                parent_rrt_node = nodes[nearest_node_pos]
-                new_node_time = parent_rrt_node.time + dubins_opt_data[0]
-                new_node_cost = parent_rrt_node.cost + dubins_opt_data[0]
+                parent_rrt_node = nodes[node_from_option]
+                new_node_time = parent_rrt_node.time + opt_data[0] # total_len
+                new_node_cost = parent_rrt_node.cost + opt_data[0] # total_len
 
-                if sample not in nodes or new_node_cost < nodes[sample].cost:
-                    nodes[sample] = RRTNode(sample, new_node_time, new_node_cost, parent_pos=nearest_node_pos)
-                    edges[(nearest_node_pos, sample)] = Edge(nearest_node_pos, sample, path_segment_points, dubins_opt_data[0])
+                new_node_pos = sample
+
+                if new_node_pos not in nodes or new_node_cost < nodes[new_node_pos].cost:
+                    nodes[new_node_pos] = RRTNode(new_node_pos, new_node_time, new_node_cost, parent_pos=node_from_option)
+                    edges[(node_from_option, new_node_pos)] = Edge(node_from_option, new_node_pos, path_segment_points, opt_data[0])
 
                     is_goal_reached = True
-                    for i_dim, val_dim in enumerate(sample):
+                    for i_dim, val_dim in enumerate(new_node_pos):
                         if abs(goal[i_dim] - val_dim) > precision[i_dim]:
                             is_goal_reached = False
                             break
                     if is_goal_reached:
-                        return cls._reconstruct_path(root, sample, nodes, edges)
+                        return cls._reconstruct_path(root, new_node_pos, nodes, edges)
                 break
 
         return []
