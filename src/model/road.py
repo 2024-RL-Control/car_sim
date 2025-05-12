@@ -617,7 +617,8 @@ class PathPlanner:
                         break
                 break
 
-        return []
+        # 경로를 찾지 못한 경우, 직선 경로로 대체
+        return self._straight(start, goal)
 
     def _straight(self, point1, point2):
         """
