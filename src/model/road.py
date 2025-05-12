@@ -527,6 +527,16 @@ class PathPlanner:
         return full_path
 
     @classmethod
+    def _is_goal(cls, sample, goal, precision):
+        """
+        목표 지점에 도달했는지 확인
+        """
+        for i_dim, val_dim in enumerate(sample):
+            if abs(goal[i_dim] - val_dim) > precision[i_dim]:
+                return False
+        return True
+
+    @classmethod
     def _rrt_with_dubins(cls, start_node, end_node, obstacles, width, config, precision=(5, 5, 1)):
         """
         RRT 알고리즘을 통해 목적지까지의 도로 너비 고려한 장애물 회피 경로 생성
@@ -572,18 +582,7 @@ class PathPlanner:
                 rand_yaw = random.uniform(-math.pi, math.pi)
                 sample = (rand_x, rand_y, rand_yaw)
 
-            nearest_node_pos = None
-            min_dist_sq = float('inf')
-            for existing_node_pos in nodes:
-                dist_sq = (sample[0] - existing_node_pos[0])**2 + (sample[1] - existing_node_pos[1])**2 # Simple Euclidean for nearest
-                if dist_sq < min_dist_sq:
-                    min_dist_sq = dist_sq
-                    nearest_node_pos = existing_node_pos
-
-            if nearest_node_pos is None:
-                continue
-
-            options = cls._select_options([nearest_node_pos], sample, 10, local_planner)
+            options = cls._select_options(nodes, sample, 10, local_planner)
             for node_from_option, opt_data in options:
                 if opt_data[0] == float('inf'):
                     break
@@ -606,13 +605,11 @@ class PathPlanner:
                     nodes[new_node_pos] = RRTNode(new_node_pos, new_node_time, new_node_cost, parent_pos=node_from_option)
                     edges[(node_from_option, new_node_pos)] = Edge(node_from_option, new_node_pos, path_segment_points, opt_data[0])
 
-                    is_goal_reached = True
-                    for i_dim, val_dim in enumerate(new_node_pos):
-                        if abs(goal[i_dim] - val_dim) > precision[i_dim]:
-                            is_goal_reached = False
-                            break
+                    is_goal_reached = cls._is_goal(new_node_pos, goal, precision)
                     if is_goal_reached:
                         return cls._reconstruct_path(root, new_node_pos, nodes, edges)
+                    else:
+                        break
                 break
 
         return []
