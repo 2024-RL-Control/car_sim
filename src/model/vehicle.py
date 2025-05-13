@@ -143,9 +143,7 @@ class VehicleState:
             'acc_lat': self.acc_lat,
             'steer': self.steer,
             'throttle_engine': self.throttle_engine,
-            'throttle_brake': self.throttle_brake,
-            'frenet_d': self.frenet_d,
-            'target_vel_long': self.target_vel_long
+            'throttle_brake': self.throttle_brake
         }
         self.state_history.append(state_snapshot)
 
@@ -697,8 +695,6 @@ class Vehicle:
         )
         predicted_physics_trajectory = TrajectoryPredictor.predict_physics_based_trajectory(
             state=self.state,
-            target_velocity=target_velocity,
-            target_d=target_d,
             time_horizon=time_horizon,
             dt=dt,
             physics_config=self.physics_config,
@@ -709,14 +705,30 @@ class Vehicle:
         if len(predicted_polynomial_trajectory) < 2 or len(predicted_physics_trajectory) < 2:
             return
 
-        # 궤적 포인트들을 화면 좌표로 변환
-        screen_polynomial_points = [world_to_screen_func(point.x, point.y) for point in predicted_polynomial_trajectory]
-        screen_physics_points = [world_to_screen_func(point.x, point.y) for point in predicted_physics_trajectory]
+        self._draw_predicted_trajectory(screen, world_to_screen_func, predicted_polynomial_trajectory, color=(0, 255, 255))
+        self._draw_predicted_trajectory(screen, world_to_screen_func, predicted_physics_trajectory, color=(255, 0, 0))
 
-        # 예측 궤적 그리기 (다른 색상으로 구분)
+    def _draw_predicted_trajectory(self, screen, world_to_screen, trajectory_points, color=(255, 0, 0)):
+        """예측 궤적 시각화
+
+        Args:
+            screen: Pygame 화면 객체
+            world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
+            trajectory_points: 예측된 궤적 포인트 리스트
+            color: 궤적 색상 (RGB)
+            width: 선 두께
+        """
+        # 궤적 포인트가 2개 이상인 경우에만 그리기
+        if len(trajectory_points) < 2:
+            return
+
         width = max(1, int(2 * self.visual_config['camera_zoom']))
-        pygame.draw.lines(screen, (0, 255, 255), False, screen_polynomial_points, width)
-        pygame.draw.lines(screen, (255, 0, 0), False, screen_physics_points, width)
+
+        # 궤적 포인트들을 화면 좌표로 변환
+        screen_points = [world_to_screen(point.x, point.y) for point in trajectory_points]
+
+        # 라인으로 연결하여 궤적 그리기
+        pygame.draw.lines(screen, color, False, screen_points, width)
 
     def get_serializable_state(self):
         """

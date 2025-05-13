@@ -19,12 +19,11 @@ class TrajectoryPoint:
     a_long: float = 0.0  # 종방향 가속도 [m/s²]
     v_lat: float = 0.0   # 횡방향 속도 [m/s]
     a_lat: float = 0.0   # 횡방향 가속도 [m/s²]
-    s: float = 0.0       # Frenet s 좌표 [m]
-    d: float = 0.0       # Frenet d 좌표 [m]
-
+    s: Optional[float] = None       # Frenet s 좌표 [m]
+    d: Optional[float] = None       # Frenet d 좌표 [m]
 
 class TrajectoryPredictor:
-    """물리 모델 기반 차량 궤적 예측기"""
+    """차량 궤적 예측기"""
 
     @classmethod
     def predict_polynomial_trajectory(cls,
@@ -350,20 +349,16 @@ class TrajectoryPredictor:
     @classmethod
     def predict_physics_based_trajectory(cls,
                                         state,
-                                        target_velocity: float,
-                                        target_d: float,
                                         time_horizon: float = 5.0,
                                         dt: float = 0.1,
                                         physics_config=None,
                                         vehicle_config=None) -> List[TrajectoryPoint]:
         """
         물리 모델 기반 차량 궤적 예측
-        state_history의 패턴을 분석하여 물리 모델을 통한 궤적 예측 수행
+        state_history만을 사용하여 물리 모델을 통한 궤적 예측 수행
 
         Args:
             state: 차량 상태 객체 (state_history 포함)
-            target_velocity: 목표 종방향 속도 [m/s]
-            target_d: 목표 횡방향 위치(Frenet d 좌표) [m]
             time_horizon: 궤적 예측 시간 범위 [s]
             dt: 시간 간격 [s]
             physics_config: 물리 설정, None이면 state_history 기반으로 추정
@@ -380,26 +375,15 @@ class TrajectoryPredictor:
 
         # state_history가 충분히 있는지 확인
         if not hasattr(state, 'state_history') or len(state.state_history) < 2:
-            # 이력이 부족한 경우 다항식 기반 궤적으로 대체
-            return cls.predict_polynomial_trajectory(
-                state, target_velocity, target_d, time_horizon, dt
-            )
-
-        # 물리 파라미터 추정 또는 기본값 사용
-        if physics_config is None:
-            physics_config = cls._estimate_physics_params(state.state_history)
-
-        if vehicle_config is None:
-            vehicle_config = cls._estimate_vehicle_params(state.state_history)
+            # 이력이 부족한 경우 간단한 유지 궤적으로 대체
+            return cls._create_simple_continuation_trajectory(state, time_horizon, dt)
 
         # 초기 상태 복사 및 시뮬레이션용 임시 상태 생성
         sim_state = deepcopy(state)
 
         # 시뮬레이션을 위한 제어 입력 패턴 추정 (최근 state_history 사용)
-        control_patterns = cls._estimate_control_pattern(
+        control_patterns = cls._estimate_control_pattern_from_history(
             state.state_history,
-            target_velocity,
-            target_d,
             time_horizon,
             dt
         )
@@ -413,9 +397,7 @@ class TrajectoryPredictor:
             v_long=state.vel_long,
             a_long=state.acc_long,
             v_lat=state.vel_lat,
-            a_lat=state.acc_lat,
-            s=0.0,  # 시작점 기준
-            d=state.frenet_d if state.frenet_d is not None else 0.0
+            a_lat=state.acc_lat
         )
         trajectory_points.append(init_point)
 
@@ -432,14 +414,6 @@ class TrajectoryPredictor:
                 sim_state, action, dt, physics_config, vehicle_config
             )
 
-            # 업데이트된 상태에서 궤적 포인트 생성
-            s = 0.0  # Frenet s 좌표는 현재 위치에서의 상대 거리
-            if len(trajectory_points) > 0:
-                prev_point = trajectory_points[-1]
-                dx = sim_state.x - prev_point.x
-                dy = sim_state.y - prev_point.y
-                s = prev_point.s + np.sqrt(dx**2 + dy**2)  # 이전 포인트로부터의 거리 누적
-
             # 새 궤적 포인트 생성 및 추가
             new_point = TrajectoryPoint(
                 t=t,
@@ -449,23 +423,73 @@ class TrajectoryPredictor:
                 v_long=sim_state.vel_long,
                 a_long=sim_state.acc_long,
                 v_lat=sim_state.vel_lat,
-                a_lat=sim_state.acc_lat,
-                s=s,
-                d=sim_state.frenet_d if sim_state.frenet_d is not None else 0.0
+                a_lat=sim_state.acc_lat
             )
             trajectory_points.append(new_point)
 
         return trajectory_points
 
     @classmethod
-    def _estimate_control_pattern(cls, state_history, target_velocity, target_d, time_horizon, dt):
+    def _create_simple_continuation_trajectory(cls, state, time_horizon, dt):
         """
-        state_history를 분석하여 제어 입력 패턴 추정
+        state_history가 부족할 때 간단히 현재 속도와 방향을 유지하는 궤적 생성
+
+        Args:
+            state: 차량 상태 객체
+            time_horizon: 궤적 예측 시간 범위 [s]
+            dt: 시간 간격 [s]
+
+        Returns:
+            간단한 궤적 포인트 리스트
+        """
+        trajectory_points = []
+
+        # 첫 번째 포인트는 현재 상태
+        trajectory_points.append(TrajectoryPoint(
+            t=0.0,
+            x=state.x,
+            y=state.y,
+            yaw=state.yaw,
+            v_long=state.vel_long,
+            a_long=0.0,  # 가속도는 0으로 가정
+            v_lat=state.vel_lat,
+            a_lat=0.0
+        ))
+
+        # 현재 속도와 방향으로 직진하는 궤적 생성
+        num_steps = int(time_horizon / dt)
+        for i in range(num_steps):
+            t = (i + 1) * dt
+
+            # 이전 포인트
+            prev_point = trajectory_points[-1]
+
+            # 단순 직선 이동
+            distance = prev_point.v_long * dt
+            dx = distance * np.cos(prev_point.yaw)
+            dy = distance * np.sin(prev_point.yaw)
+
+            new_point = TrajectoryPoint(
+                t=t,
+                x=prev_point.x + dx,
+                y=prev_point.y + dy,
+                yaw=prev_point.yaw,
+                v_long=prev_point.v_long,
+                a_long=0.0,
+                v_lat=0.0,
+                a_lat=0.0
+            )
+            trajectory_points.append(new_point)
+
+        return trajectory_points
+
+    @classmethod
+    def _estimate_control_pattern_from_history(cls, state_history, time_horizon, dt):
+        """
+        state_history만을 사용하여 제어 입력 패턴 추정
 
         Args:
             state_history: 차량 상태 이력
-            target_velocity: 목표 속도
-            target_d: 목표 횡방향 위치
             time_horizon: 시간 범위
             dt: 시간 간격
 
@@ -482,201 +506,47 @@ class TrajectoryPredictor:
         control_patterns = []
         num_steps = int(time_horizon / dt)
 
-        # 최근 상태 이력에서 제어 입력 추출
-        recent_history = list(state_history)[-min(10, len(state_history)):]
+        # 최근 상태 이력에서 제어 입력 추출 (가장 최근 30개 데이터 사용)
+        recent_history = list(state_history)[-min(30, len(state_history)):]
 
-        # 목표 속도에 도달하기 위한 스로틀/브레이크 패턴 추정
-        last_state = recent_history[-1]
-        current_vel = last_state['vel_long']
+        # 최근 스로틀, 브레이크, 조향 값 추출
+        recent_throttle_engine = [state['throttle_engine'] for state in recent_history]
+        recent_throttle_brake = [state['throttle_brake'] for state in recent_history]
+        recent_steer = [state['steer'] for state in recent_history]
 
-        # 목표 속도와 현재 속도를 비교하여 제어 패턴 결정
-        if target_velocity > current_vel + 0.5:  # 가속 필요
-            throttle_engine = min(1.0, 0.5 + (target_velocity - current_vel) * 0.1)
-            throttle_brake = 0.0
-        elif target_velocity < current_vel - 0.5:  # 감속 필요
-            throttle_engine = 0.0
-            throttle_brake = min(1.0, 0.3 + (current_vel - target_velocity) * 0.1)
-        else:  # 현재 속도 유지
-            throttle_engine = 0.3  # 가벼운 가속으로 속도 유지
-            throttle_brake = 0.0
+        # 평균 제어 입력 계산
+        avg_throttle_engine = sum(recent_throttle_engine) / len(recent_throttle_engine)
+        avg_throttle_brake = sum(recent_throttle_brake) / len(recent_throttle_brake)
+        avg_steer = sum(recent_steer) / len(recent_steer)
 
-        # 최근 조향 패턴 분석
-        recent_steers = [state['steer'] for state in recent_history]
-        avg_steer_rate = 0.0
+        # 변화 추세 계산 (선형 추세)
+        throttle_engine_trend = 0.0
+        throttle_brake_trend = 0.0
+        steer_trend = 0.0
 
-        # 조향각 변화율 계산
-        if len(recent_steers) >= 2:
-            steer_diffs = [recent_steers[i] - recent_steers[i-1] for i in range(1, len(recent_steers))]
-            avg_steer_rate = sum(steer_diffs) / len(steer_diffs) if steer_diffs else 0.0
-
-        # 목표 횡방향 위치(d)로 가기 위한 조향각 추정
-        current_d = last_state['frenet_d'] if last_state['frenet_d'] is not None else 0.0
-        d_diff = target_d - current_d
-
-        # 횡방향 차이에 따른 조향각 추정 (단순 PD 제어)
-        steering_p = d_diff * 0.3  # 비례 항
-        steering_d = avg_steer_rate * 0.5  # 미분 항
-        target_steer = np.clip(steering_p + steering_d, -1.0, 1.0)
-
-        # 기본 제어 입력 패턴 생성
-        base_action = [throttle_engine, throttle_brake, target_steer]
+        if len(recent_history) >= 3:
+            # 간단한 추세 계산 (최근 3개 포인트 사용)
+            throttle_engine_trend = (recent_throttle_engine[-1] - recent_throttle_engine[-3]) / 2
+            throttle_brake_trend = (recent_throttle_brake[-1] - recent_throttle_brake[-3]) / 2
+            steer_trend = (recent_steer[-1] - recent_steer[-3]) / 2
 
         # 제어 입력 패턴을 시간 범위 동안 확장
-        for _ in range(num_steps):
-            # 여기서는 간단하게 동일한 제어 입력 패턴을 사용
-            # 더 정교한 모델은 시간에 따라 패턴을 변화시킬 수 있음
-            control_patterns.append(base_action)
+        for i in range(num_steps):
+            # 시간에 따른 추세 반영
+            trend_factor = min(i * dt, 1.0)  # 최대 1초까지만 추세 반영
+
+            # 추세를 반영한 제어 입력 계산
+            throttle_engine = np.clip(avg_throttle_engine + throttle_engine_trend * trend_factor, 0.0, 1.0)
+            throttle_brake = np.clip(avg_throttle_brake + throttle_brake_trend * trend_factor, 0.0, 1.0)
+            steer = np.clip(avg_steer + steer_trend * trend_factor, -1.0, 1.0)
+
+            # 동시에 가속과 제동은 불가능
+            if throttle_engine > 0.1 and throttle_brake > 0.1:
+                if throttle_engine > throttle_brake:
+                    throttle_brake = 0.0
+                else:
+                    throttle_engine = 0.0
+
+            control_patterns.append([throttle_engine, throttle_brake, steer])
 
         return control_patterns
-
-    @classmethod
-    def _estimate_physics_params(cls, state_history):
-        """
-        상태 이력을 기반으로 물리 파라미터 추정
-
-        Args:
-            state_history: 차량 상태 이력
-
-        Returns:
-            추정된 물리 파라미터 딕셔너리
-        """
-        # 기본 물리 설정
-        physics_config = {
-            'physics_substeps': 5,
-            'throttle_response_rate': 3.0,
-            'steering_response_rate': 3.0,
-            'min_speed_threshold': 0.5,
-            'steer_speed_threshold': 10.0,
-            'min_steer_speed_factor': 1.0,
-            'max_steer_speed_factor': 0.3,
-            'air_drag_coefficient': 0.3,
-            'rolling_resistance_coefficient': 0.01,
-            'cornering_stiffness_front': 7.0,
-            'cornering_stiffness_rear': 7.2
-        }
-
-        # state_history로부터 차량 반응성 추정
-        if len(state_history) >= 3:
-            # 최근 데이터 사용
-            recent_history = list(state_history)[-min(10, len(state_history)):]
-
-            # 종방향 반응성 추정 (throttle과 가속도 관계)
-            throttle_diffs = []
-            acc_diffs = []
-
-            for i in range(1, len(recent_history)):
-                throttle_diff = recent_history[i]['throttle_engine'] - recent_history[i-1]['throttle_engine']
-                acc_diff = recent_history[i]['acc_long'] - recent_history[i-1]['acc_long']
-
-                if abs(throttle_diff) > 0.01:  # 충분한 변화가 있는 경우만 고려
-                    throttle_diffs.append(throttle_diff)
-                    acc_diffs.append(acc_diff)
-
-            # 충분한 데이터가 있으면 response_rate 조정
-            if throttle_diffs and acc_diffs:
-                avg_response = sum(acc_diffs) / sum(throttle_diffs) if sum(throttle_diffs) != 0 else 3.0
-                # 비정상적인 값 필터링
-                if 1.0 <= avg_response <= 10.0:
-                    physics_config['throttle_response_rate'] = avg_response
-
-            # 조향 반응성 추정 (steer 변화와 yaw_rate 변화 관계)
-            steer_changes = []
-            yaw_changes = []
-
-            # 조향 반응성 계산에 필요한 데이터 수집
-            for i in range(1, len(recent_history)):
-                if 'yaw' in recent_history[i] and 'yaw' in recent_history[i-1]:
-                    yaw_change = recent_history[i]['yaw'] - recent_history[i-1]['yaw']
-                    steer_change = recent_history[i]['steer'] - recent_history[i-1]['steer']
-
-                    if abs(steer_change) > 0.01:  # 충분한 변화가 있는 경우만 고려
-                        steer_changes.append(steer_change)
-                        yaw_changes.append(yaw_change)
-
-            # 충분한 데이터가 있으면 cornering_stiffness 조정
-            if steer_changes and yaw_changes:
-                avg_cornering = sum(yaw_changes) / sum(steer_changes) if sum(steer_changes) != 0 else 7.0
-                # 비정상적인 값 필터링
-                if 3.0 <= avg_cornering <= 15.0:
-                    physics_config['cornering_stiffness_front'] = avg_cornering
-                    physics_config['cornering_stiffness_rear'] = avg_cornering + 0.2  # 뒷바퀴 약간 더 크게
-
-        return physics_config
-
-    @classmethod
-    def _estimate_vehicle_params(cls, state_history):
-        """
-        상태 이력을 기반으로 차량 파라미터 추정
-
-        Args:
-            state_history: 차량 상태 이력
-
-        Returns:
-            추정된 차량 파라미터 딕셔너리
-        """
-        # 기본 차량 설정
-        vehicle_config = {
-            'width': 1.8,
-            'length': 4.5,
-            'wheelbase': 2.8,
-            'mass': 1500.0,
-            'max_speed': 40.0,
-            'min_speed': -20.0,
-            'max_steer': 30.0,
-            'engine_power': 200.0,
-            'brake_power': 100.0
-        }
-
-        # state_history로부터 차량 성능 추정
-        if len(state_history) >= 3:
-            # 최근 데이터 사용
-            recent_history = list(state_history)[-min(20, len(state_history)):]
-
-            # 최대 종방향 속도/가속도 분석
-            max_vel = max([state['vel_long'] for state in recent_history])
-            max_acc = max([state['acc_long'] for state in recent_history])
-            min_acc = min([state['acc_long'] for state in recent_history])  # 감속도(제동)
-
-            # 차량 성능 파라미터 조정
-            if max_vel > 5.0:
-                # 최대 속도 추정 (여유 추가)
-                vehicle_config['max_speed'] = max(vehicle_config['max_speed'], max_vel * 1.2)
-
-            if max_acc > 0.5:
-                # 엔진 출력 추정
-                estimated_power = vehicle_config['mass'] * max_acc
-                vehicle_config['engine_power'] = max(vehicle_config['engine_power'], estimated_power * 1.3)
-
-            if min_acc < -0.5:
-                # 제동 출력 추정
-                estimated_brake = vehicle_config['mass'] * abs(min_acc)
-                vehicle_config['brake_power'] = max(vehicle_config['brake_power'], estimated_brake * 1.3)
-
-        return vehicle_config
-
-    @classmethod
-    def visualize_trajectory(cls, screen, world_to_screen, trajectory_points, color=(255, 0, 0), width=2):
-        """예측 궤적 시각화
-
-        Args:
-            screen: Pygame 화면 객체
-            world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
-            trajectory_points: 예측된 궤적 포인트 리스트
-            color: 궤적 색상 (RGB)
-            width: 선 두께
-        """
-        import pygame
-
-        if len(trajectory_points) < 2:
-            return
-
-        # 궤적 포인트들을 화면 좌표로 변환
-        screen_points = [world_to_screen(point.x, point.y) for point in trajectory_points]
-
-        # 라인으로 연결하여 궤적 그리기
-        pygame.draw.lines(screen, color, False, screen_points, width)
-
-        # 일부 키 포인트에 마커 표시 (가시성을 위해)
-        for i in range(0, len(trajectory_points), 5):  # 5점마다 마커 표시
-            if i < len(screen_points):
-                pygame.draw.circle(screen, color, screen_points[i], 3)
