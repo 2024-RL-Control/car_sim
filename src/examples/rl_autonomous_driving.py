@@ -353,8 +353,3 @@ def train_autonomous_agent():
         print("Training terminated by user.")
 
     return episode_rewards
-
-# 메인 함수 (직접 실행 시)
-if __name__ == "__main__":
-    # 자율주행 에이전트 학습 실행
-    train_autonomous_agent()
