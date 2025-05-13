@@ -7,16 +7,16 @@ simulation:
   num_episodes: 1000
   max_steps: 1000   # maximum steps per episode
   num_vehicles: 1   # number of vehicles on the environment, if num_vehicles = 1: single vehicle, else multi-vehicle
-  boundary:
+  boundary:         # [m]
     x_min: -300
     x_max: 300
     y_min: -300
     y_max: 300
   obstacle:
     num_static_obstacles: 10
-    num_dynamic_obstacles: 5
-    buffer_distance: 10
-    boundary:
+    num_dynamic_obstacles: 10
+    buffer_distance: 10 # [m]
+    boundary:         # [m]
       x_min: -280
       x_max: 280
       y_min: -280

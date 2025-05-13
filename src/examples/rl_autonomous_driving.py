@@ -158,6 +158,7 @@ class RLAutonomousDrivingEnv:
 
             # 새 차량 생성
             self.env.vehicle_manager.create_vehicle(x=x, y=y, yaw=yaw, vehicle_id=i)
+            print(f"Vehicle {i} created at ({x}, {y}) with yaw {yaw}, placement {placement_area}")
 
             # 차량 시작 위치 저장 (목적지 설정에 사용)
             self.vehicle_start_position.append({
