@@ -9,8 +9,8 @@ from typing import List, Tuple, Optional
 # ======================
 
 @dataclass
-class TrajectoryPoint:
-    """경로 점 데이터 클래스"""
+class TrajectoryData:
+    """궤적 데이터 클래스"""
     t: float = 0.0       # 시간 [s]
     x: float = 0.0       # x 좌표 [m]
     y: float = 0.0       # y 좌표 [m]
@@ -19,22 +19,41 @@ class TrajectoryPoint:
     a_long: float = 0.0  # 종방향 가속도 [m/s²]
     v_lat: float = 0.0   # 횡방향 속도 [m/s]
     a_lat: float = 0.0   # 횡방향 가속도 [m/s²]
-    s: float = 0.0       # Frenet s 좌표 [m]
-    d: float = 0.0       # Frenet d 좌표 [m]
+    s: Optional[float] = None       # Frenet s 좌표 [m]
+    d: Optional[float] = None       # Frenet d 좌표 [m]
 
+    def encoding_angle(self, angle):
+        """cos/sin 인코딩을 통한 각도 표현"""
+        return cos(angle), sin(angle)
+
+    def get_data(self, x, y):
+        rel_x = x - self.x
+        rel_y = y - self.y
+        cos_yaw, sin_yaw = self.encoding_angle(self.yaw)
+        data = np.array([
+            rel_x,
+            rel_y,
+            cos_yaw,
+            sin_yaw,
+            self.v_long,
+            self.a_long,
+            self.v_lat,
+            self.a_lat
+        ])
+        return data
 
 class TrajectoryPredictor:
-    """물리 모델 기반 차량 궤적 예측기"""
+    """차량 궤적 예측기"""
 
     @classmethod
-    def predict_trajectory(cls,
-                          state,
-                          target_velocity: float,
-                          target_d: float,
-                          time_horizon: float = 5.0,
-                          dt: float = 0.1,
-                          jerk_long: float = 1.0,
-                          jerk_lat: float = 1.0) -> List[TrajectoryPoint]:
+    def predict_polynomial_trajectory(cls,
+                                        state,
+                                        target_velocity: float,
+                                        target_d: float,
+                                        time_horizon: float = 5.0,
+                                        dt: float = 0.1,
+                                        jerk_long: float = 1.0,
+                                        jerk_lat: float = 1.0) -> List[TrajectoryData]:
         """종/횡 방향 궤적 예측을 결합
 
         Args:
@@ -47,10 +66,10 @@ class TrajectoryPredictor:
             jerk_lat: 횡방향 저크(가속도 변화율) 제한 [m/s³]
 
         Returns:
-            trajectory_points: 예측된 궤적 포인트 리스트
+            trajectory_data_list: 예측된 궤적 데이터 리스트
         """
         # 종방향 궤적 예측
-        s_trajectory = cls.predict_longitudinal_trajectory(
+        s_trajectory = cls._predict_longitudinal_polynomial_trajectory(
             init_s=0.0,  # 시작점을 0으로 설정
             init_v=state.vel_long,
             init_a=state.acc_long,
@@ -61,7 +80,7 @@ class TrajectoryPredictor:
         )
 
         # 횡방향 궤적 예측
-        d_trajectory = cls.predict_lateral_trajectory(
+        d_trajectory = cls._predict_lateral_polynomial_trajectory(
             init_d=state.frenet_d if state.frenet_d is not None else 0.0,
             init_d_dot=state.vel_lat,
             init_d_ddot=state.acc_lat,
@@ -72,7 +91,7 @@ class TrajectoryPredictor:
         )
 
         # 결합된 궤적 생성
-        trajectory_points = []
+        trajectory_data_list = []
 
         # 각 시간 단계에 대해 종/횡 방향 궤적을 결합
         for i in range(len(s_trajectory)):
@@ -106,7 +125,7 @@ class TrajectoryPredictor:
             v_lat = d_dot
 
             # 궤적 포인트 추가
-            point = TrajectoryPoint(
+            trajectory_data = TrajectoryData(
                 t=t,
                 x=x,
                 y=y,
@@ -118,19 +137,19 @@ class TrajectoryPredictor:
                 s=s,
                 d=d
             )
-            trajectory_points.append(point)
+            trajectory_data_list.append(trajectory_data)
 
-        return trajectory_points
+        return trajectory_data_list
 
     @classmethod
-    def predict_longitudinal_trajectory(cls,
-                                        init_s: float,
-                                        init_v: float,
-                                        init_a: float,
-                                        target_v: float,
-                                        time_horizon: float,
-                                        dt: float,
-                                        max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
+    def _predict_longitudinal_polynomial_trajectory(cls,
+                                                    init_s: float,
+                                                    init_v: float,
+                                                    init_a: float,
+                                                    target_v: float,
+                                                    time_horizon: float,
+                                                    dt: float,
+                                                    max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
         """종방향 궤적 예측
 
         Args:
@@ -175,14 +194,14 @@ class TrajectoryPredictor:
         return trajectory
 
     @classmethod
-    def predict_lateral_trajectory(cls,
-                                  init_d: float,
-                                  init_d_dot: float,
-                                  init_d_ddot: float,
-                                  target_d: float,
-                                  time_horizon: float,
-                                  dt: float,
-                                  max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
+    def _predict_lateral_polynomial_trajectory(cls,
+                                                init_d: float,
+                                                init_d_dot: float,
+                                                init_d_ddot: float,
+                                                target_d: float,
+                                                time_horizon: float,
+                                                dt: float,
+                                                max_jerk: float = 1.0) -> List[Tuple[float, float, float]]:
         """횡방향 궤적 예측
 
         Args:
@@ -347,30 +366,207 @@ class TrajectoryPredictor:
         else:
             raise ValueError(f"도함수 차수 {derivative}는 지원되지 않습니다.")
 
-
     @classmethod
-    def visualize_trajectory(cls, screen, world_to_screen, trajectory_points, color=(255, 0, 0), width=2):
-        """예측 궤적 시각화
+    def predict_physics_based_trajectory(cls,
+                                        state,
+                                        time_horizon: float = 5.0,
+                                        dt: float = 0.1,
+                                        physics_config=None,
+                                        vehicle_config=None) -> List[TrajectoryData]:
+        """
+        물리 모델 기반 차량 궤적 예측
+        state_history만을 사용하여 물리 모델을 통한 궤적 예측 수행
 
         Args:
-            screen: Pygame 화면 객체
-            world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
-            trajectory_points: 예측된 궤적 포인트 리스트
-            color: 궤적 색상 (RGB)
-            width: 선 두께
+            state: 차량 상태 객체 (state_history 포함)
+            time_horizon: 궤적 예측 시간 범위 [s]
+            dt: 시간 간격 [s]
+            physics_config: 물리 설정, None이면 state_history 기반으로 추정
+            vehicle_config: 차량 설정, None이면 state_history 기반으로 추정
+
+        Returns:
+            trajectory_data_list: 예측된 궤적 데이터 리스트
         """
-        import pygame
+        from copy import deepcopy
+        from .physics import PhysicsEngine
 
-        if len(trajectory_points) < 2:
-            return
+        # 결과를 저장할 궤적 리스트
+        trajectory_data_list = []
 
-        # 궤적 포인트들을 화면 좌표로 변환
-        screen_points = [world_to_screen(point.x, point.y) for point in trajectory_points]
+        # state_history가 충분히 있는지 확인
+        if not hasattr(state, 'state_history') or len(state.state_history) < 2:
+            # 이력이 부족한 경우 간단한 유지 궤적으로 대체
+            return cls._create_simple_continuation_trajectory(state, time_horizon, dt)
 
-        # 라인으로 연결하여 궤적 그리기
-        pygame.draw.lines(screen, color, False, screen_points, width)
+        # 초기 상태 복사 및 시뮬레이션용 임시 상태 생성
+        sim_state = deepcopy(state)
 
-        # 일부 키 포인트에 마커 표시 (가시성을 위해)
-        for i in range(0, len(trajectory_points), 5):  # 5점마다 마커 표시
-            if i < len(screen_points):
-                pygame.draw.circle(screen, color, screen_points[i], 3)
+        # 시뮬레이션을 위한 제어 입력 패턴 추정 (최근 state_history 사용)
+        control_patterns = cls._estimate_control_pattern_from_history(
+            state.state_history,
+            time_horizon,
+            dt
+        )
+
+        # 첫 번째 포인트는 현재 상태
+        init_trajectory_data = TrajectoryData(
+            t=0.0,
+            x=state.rear_axle_x,
+            y=state.rear_axle_y,
+            yaw=state.yaw,
+            v_long=state.vel_long,
+            a_long=state.acc_long,
+            v_lat=state.vel_lat,
+            a_lat=state.acc_lat
+        )
+        trajectory_data_list.append(init_trajectory_data)
+
+        # 각 시간 스텝마다 물리 엔진으로 시뮬레이션
+        num_steps = int(time_horizon / dt)
+        for i in range(num_steps):
+            t = (i + 1) * dt
+
+            # 현재 시간 스텝에 대한 제어 입력 가져오기
+            action = control_patterns[min(i, len(control_patterns) - 1)]
+
+            # 물리 엔진으로 상태 업데이트, deepcopy된 상태 사용
+            PhysicsEngine.update(
+                sim_state, action, dt, physics_config, vehicle_config
+            )
+
+            # 새 궤적 포인트 생성 및 추가
+            new_trajectory_data = TrajectoryData(
+                t=t,
+                x=sim_state.rear_axle_x,
+                y=sim_state.rear_axle_y,
+                yaw=sim_state.yaw,
+                v_long=sim_state.vel_long,
+                a_long=sim_state.acc_long,
+                v_lat=sim_state.vel_lat,
+                a_lat=sim_state.acc_lat
+            )
+            trajectory_data_list.append(new_trajectory_data)
+
+        return trajectory_data_list
+
+    @classmethod
+    def _create_simple_continuation_trajectory(cls, state, time_horizon, dt):
+        """
+        state_history가 부족할 때 간단히 현재 속도와 방향을 유지하는 궤적 생성
+
+        Args:
+            state: 차량 상태 객체
+            time_horizon: 궤적 예측 시간 범위 [s]
+            dt: 시간 간격 [s]
+
+        Returns:
+            간단한 궤적 데이터 리스트
+        """
+        trajectory_data_list = []
+
+        # 첫 번째 포인트는 현재 상태
+        trajectory_data_list.append(TrajectoryData(
+            t=0.0,
+            x=state.rear_axle_x,
+            y=state.rear_axle_y,
+            yaw=state.yaw,
+            v_long=state.vel_long,
+            a_long=0.0,  # 가속도는 0으로 가정
+            v_lat=state.vel_lat,
+            a_lat=0.0
+        ))
+
+        # 현재 속도와 방향으로 직진하는 궤적 생성
+        num_steps = int(time_horizon / dt)
+        for i in range(num_steps):
+            t = (i + 1) * dt
+
+            # 이전 포인트
+            prev_trajectory_data = trajectory_data_list[-1]
+
+            # 단순 직선 이동
+            distance = prev_trajectory_data.v_long * dt
+            dx = distance * np.cos(prev_trajectory_data.yaw)
+            dy = distance * np.sin(prev_trajectory_data.yaw)
+
+            new_trajectory_data = TrajectoryData(
+                t=t,
+                x=prev_trajectory_data.x + dx,
+                y=prev_trajectory_data.y + dy,
+                yaw=prev_trajectory_data.yaw,
+                v_long=prev_trajectory_data.v_long,
+                a_long=0.0,
+                v_lat=0.0,
+                a_lat=0.0
+            )
+            trajectory_data_list.append(new_trajectory_data)
+
+        return trajectory_data_list
+
+    @classmethod
+    def _estimate_control_pattern_from_history(cls, state_history, time_horizon, dt):
+        """
+        state_history만을 사용하여 제어 입력 패턴 추정
+
+        Args:
+            state_history: 차량 상태 이력
+            time_horizon: 시간 범위
+            dt: 시간 간격
+
+        Returns:
+            제어 입력 패턴의 리스트 [action1, action2, ...]
+            각 action은 [throttle_engine, throttle_brake, steering] 형태
+        """
+        # 상태 이력이 없으면 빈 패턴 반환
+        if len(state_history) < 2:
+            num_steps = int(time_horizon / dt)
+            return [[0.0, 0.0, 0.0]] * num_steps
+
+        # 패턴을 저장할 리스트
+        control_patterns = []
+        num_steps = int(time_horizon / dt)
+
+        # 최근 상태 이력에서 제어 입력 추출 (가장 최근 30개 데이터 사용)
+        recent_history = list(state_history)[-min(30, len(state_history)):]
+
+        # 최근 스로틀, 브레이크, 조향 값 추출
+        recent_throttle_engine = [state['throttle_engine'] for state in recent_history]
+        recent_throttle_brake = [state['throttle_brake'] for state in recent_history]
+        recent_steer = [state['steer'] for state in recent_history]
+
+        # 평균 제어 입력 계산
+        avg_throttle_engine = sum(recent_throttle_engine) / len(recent_throttle_engine)
+        avg_throttle_brake = sum(recent_throttle_brake) / len(recent_throttle_brake)
+        avg_steer = sum(recent_steer) / len(recent_steer)
+
+        # 변화 추세 계산 (선형 추세)
+        throttle_engine_trend = 0.0
+        throttle_brake_trend = 0.0
+        steer_trend = 0.0
+
+        if len(recent_history) >= 3:
+            # 간단한 추세 계산 (최근 3개 포인트 사용)
+            throttle_engine_trend = (recent_throttle_engine[-1] - recent_throttle_engine[-3]) / 2
+            throttle_brake_trend = (recent_throttle_brake[-1] - recent_throttle_brake[-3]) / 2
+            steer_trend = (recent_steer[-1] - recent_steer[-3]) / 2
+
+        # 제어 입력 패턴을 시간 범위 동안 확장
+        for i in range(num_steps):
+            # 시간에 따른 추세 반영
+            trend_factor = min(i * dt, 1.0)  # 최대 1초까지만 추세 반영
+
+            # 추세를 반영한 제어 입력 계산
+            throttle_engine = np.clip(avg_throttle_engine + throttle_engine_trend * trend_factor, 0.0, 1.0)
+            throttle_brake = np.clip(avg_throttle_brake + throttle_brake_trend * trend_factor, 0.0, 1.0)
+            steer = np.clip(avg_steer + steer_trend * trend_factor, -1.0, 1.0)
+
+            # 동시에 가속과 제동은 불가능
+            if throttle_engine > 0.1 and throttle_brake > 0.1:
+                if throttle_engine > throttle_brake:
+                    throttle_brake = 0.0
+                else:
+                    throttle_engine = 0.0
+
+            control_patterns.append([throttle_engine, throttle_brake, steer])
+
+        return control_patterns

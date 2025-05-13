@@ -5,8 +5,9 @@ from collections import deque
 from math import radians, degrees, pi, cos, sin
 import pygame
 import numpy as np
+import time
 from .physics import PhysicsEngine
-from .trajectory import TrajectoryPredictor
+from .trajectory import TrajectoryPredictor, TrajectoryData
 from .object import RectangleObstacle, GoalManager
 from .sensor import SensorManager
 
@@ -25,13 +26,15 @@ class VehicleState:
     acc_long: float = 0.0          # 종방향 가속도 [m/s²]
     vel_lat: float = 0.0           # 횡방향 속도 [m/s]
     acc_lat: float = 0.0           # 횡방향 가속도 [m/s²]
-    throttle_engine: float = 0.0   # 파워 엔진의 요청 정도 [0,1]
-    throttle_brake:  float = 0.0   # 브레이크 요청 정도[0,1]
-    steer: float = 0.0             # 조향각 [rad]
 
     rear_axle_x: float = 0.0       # 뒷바퀴 축 X 좌표 [m]
     rear_axle_y: float = 0.0       # 뒷바퀴 축 Y 좌표 [m]
     half_wheelbase: float = None    # 차량 축간거리의 절반 [m]
+
+    # 제어 상태
+    steer: float = 0.0             # 조향각 [rad]
+    throttle_engine: float = 0.0   # 파워 엔진의 요청 정도 [0,1]
+    throttle_brake:  float = 0.0   # 브레이크 요청 정도[0,1]
 
     # 목적지 관련 속성
     target_x: float = 0.0         # 목표 X 좌표
@@ -45,14 +48,21 @@ class VehicleState:
     frenet_point: tuple = None
     target_vel_long: float = None
 
-    # 환경 속성
-    terrain_type: str = "asphalt"  # 현재 지형 유형
+    # 라이다 센서 데이터, 거리 배열
+    lidar_data: List = field(default_factory=list)
 
     # 차량 과거 궤적
     history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
+    # 궤적 데이터
+    polynomial_trajectory: List[TrajectoryData] = field(default_factory=list)
+    physics_trajectory: List[TrajectoryData] = field(default_factory=list)
+
     # 상태 이력 (최근 N개 상태 기록)
     state_history: deque = field(default_factory=lambda: deque(maxlen=100))
+
+    # 환경 속성
+    terrain_type: str = "asphalt"  # 현재 지형 유형
 
     def reset(self):
         """차량 상태 초기화"""
@@ -64,13 +74,14 @@ class VehicleState:
         self.acc_long = 0.0
         self.vel_lat = 0.0
         self.acc_lat = 0.0
-        self.throttle_engine = 0.0
-        self.throttle_brake = 0.0
-        self.steer = 0.0
 
         self.rear_axle_x = 0.0
         self.rear_axle_y = 0.0
         self.update_rear_axle_position()
+
+        self.steer = 0.0
+        self.throttle_engine = 0.0
+        self.throttle_brake = 0.0
 
         self.target_x = 0.0
         self.target_y = 0.0
@@ -82,10 +93,15 @@ class VehicleState:
         self.frenet_point = None
         self.target_vel_long = None
 
-        self.terrain_type = "asphalt"
+        self.lidar_data.clear()
 
         self.history_trajectory.clear()
+        self.polynomial_trajectory.clear()
+        self.physics_trajectory.clear()
+
         self.state_history.clear()
+
+        self.terrain_type = "asphalt"
 
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
@@ -130,20 +146,88 @@ class VehicleState:
 
     def update_state_history(self):
         """현재 상태 복사본을 이력에 추가"""
-        # 현재 상태의 중요 필드들을 튜플로 복사
-        state_snapshot = (
-            time.time(),  # 타임스탬프
-            self.x,
-            self.y,
-            self.yaw,
-            self.vel_long,
-            self.acc_long,
-            self.vel_lat,
-            self.acc_lat,
-            self.steer,
-            self.frenet_d
-        )
+        # 현재 상태의 중요 필드들을 딕셔너리로 복사
+        state_snapshot = {
+            'timestamp': time.time(),  # 타임스탬프
+            'x': self.rear_axle_x,
+            'y': self.rear_axle_y,
+            'yaw': self.yaw,
+            'vel_long': self.vel_long,
+            'acc_long': self.acc_long,
+            'vel_lat': self.vel_lat,
+            'acc_lat': self.acc_lat,
+            'steer': self.steer,
+            'throttle_engine': self.throttle_engine,
+            'throttle_brake': self.throttle_brake
+        }
         self.state_history.append(state_snapshot)
+
+    def update_trajectory(self, polynomial_trajectory, physics_trajectory):
+        """궤적 업데이트"""
+        self.polynomial_trajectory = polynomial_trajectory
+        self.physics_trajectory = physics_trajectory
+
+    def get_trajectory_data(self):
+        """차량 궤적 데이터 반환, 각 지점의 상대적 위치로 변환
+
+        각 궤적에서 시작, 중간, 마지막 데이터만 추출
+        """
+        polynomial_trajectory = self.polynomial_trajectory
+        physics_trajectory = self.physics_trajectory
+
+        data_list = []
+
+        # 다항식 궤적에서 초반, 중반, 마지막 데이터 추출
+        if polynomial_trajectory:
+            traj_len = len(polynomial_trajectory)
+            # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
+            start_idx = 0
+            mid_idx = traj_len // 2
+            end_idx = traj_len - 1
+
+            # 선택된 지점의 데이터만 추가
+            if start_idx < traj_len:
+                data = polynomial_trajectory[start_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if mid_idx < traj_len and mid_idx != start_idx:
+                data = polynomial_trajectory[mid_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
+                data = polynomial_trajectory[end_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+        # 물리 기반 궤적에서 초반, 중반, 마지막 데이터 추출
+        if physics_trajectory:
+            traj_len = len(physics_trajectory)
+            # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
+            start_idx = 0
+            mid_idx = traj_len // 2
+            end_idx = traj_len - 1
+
+            # 선택된 지점의 데이터만 추가
+            if start_idx < traj_len:
+                data = physics_trajectory[start_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if mid_idx < traj_len and mid_idx != start_idx:
+                data = physics_trajectory[mid_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
+                data = physics_trajectory[end_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+        return np.array(data_list)
+
+    def update_lidar_data(self, distances):
+        """라이다 센서 데이터 업데이트"""
+        self.lidar_data = distances
+
+    def get_lidar_data(self):
+        """라이다 센서 데이터 반환"""
+        return np.array(self.lidar_data)
 
 # ======================
 # Vehicle Model
@@ -289,6 +373,7 @@ class Vehicle:
 
         # 차량 센서 업데이트
         self.sensor_manager.update(dt, time_elapsed, objects)
+        self._update_lidar_data()
 
         # 도로 정보 업데이트
         outside_road = self._update_road_data(road_manager)
@@ -303,6 +388,8 @@ class Vehicle:
 
         # 상태 이력 업데이트
         self._update_state_history()
+        # 차량 궤적 업데이트
+        self._predict_trajectory(self.physics_config['trajectory']['time_horizon'], self.physics_config['trajectory']['dt'])
 
         return self.state, collision, outside_road, reached
 
@@ -461,7 +548,8 @@ class Vehicle:
             # 궤적 그리기
             self._draw_history_trajectory(screen, world_to_screen_func)
 
-        self.predict_and_draw_trajectory(screen, world_to_screen_func)
+            # 예측 궤적 그리기
+            self._draw_predicted_trajectory(screen, world_to_screen_func)
 
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)
@@ -472,7 +560,8 @@ class Vehicle:
     def _draw_frenet_point(self, screen, world_to_screen_func):
         """frenet 좌표 시각화"""
         if self.state.frenet_point is not None:
-            pygame.draw.circle(screen, (0, 255, 255), world_to_screen_func(self.state.frenet_point[0], self.state.frenet_point[1]), 5)
+            radius = max(1, int(2 * self.visual_config['camera_zoom']))
+            pygame.draw.circle(screen, (0, 255, 255), world_to_screen_func(self.state.frenet_point[0], self.state.frenet_point[1]), radius)
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
@@ -579,7 +668,7 @@ class Vehicle:
 
     def _calculate_tire_positions(self):
         """각 타이어의 위치 및 각도 계산"""
-        # 상대 위치 및 각도 캐싱 - yaw와 steer가 변하지 않으면 재사용
+        # 상대 위치 및 각도 캐싱 - yaw 또는 steer가 변하지 않으면 재사용
         recalculate_angles = (self._tire_positions is None or
                               self._last_yaw != self.state.yaw or
                               self._last_steer != self.state.steer)
@@ -653,6 +742,22 @@ class Vehicle:
 
         return result
 
+    def _update_lidar_data(self):
+        """
+        라이다 센서의 noisy_distances 값을 차량 상태에 업데이트
+        """
+        # 센서 매니저에서 모든 센서 가져오기
+        sensors = self.sensor_manager.get_all_sensors()
+
+        # 라이다 센서 찾기
+        for sensor_id, sensor in sensors.items():
+            if sensor.sensor_type == 'LidarSensor':
+                # 라이다 데이터 가져오기
+                lidar_data = sensor.get_data()
+                if lidar_data:
+                    # noisy_distances 추출하여 상태에 저장
+                    self.state.update_lidar_data(lidar_data)
+
     def _draw_history_trajectory(self, screen, world_to_screen_func):
         """차량 궤적 그리기"""
         if len(self.state.history_trajectory) < 2:
@@ -669,41 +774,59 @@ class Vehicle:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
             pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
 
-    def predict_and_draw_trajectory(self, screen, world_to_screen_func, time_horizon=1.0, dt=0.1):
+    def _predict_trajectory(self, time_horizon=1.0, dt=0.05):
         """미래 궤적 예측 및 시각화
-
         Args:
-            screen: Pygame 화면 객체
-            world_to_screen_func: 월드 좌표를 화면 좌표로 변환하는 함수
             time_horizon: 궤적 예측 시간 범위 [s]
             dt: 시간 간격 [s]
         """
+        predicted_polynomial_trajectory = []
+        predicted_physics_trajectory = []
 
-        # 목표 속도와 횡방향 위치 설정
-        target_velocity = self.state.target_vel_long if self.state.target_vel_long is not None else self.state.vel_long
-        target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
+        if self.goal_manager.has_goals():
+            # 목표 속도와 횡방향 위치 설정
+            target_velocity = self.state.target_vel_long if self.state.target_vel_long is not None else self.state.vel_long
+            target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
 
-        # 궤적 예측
-        predicted_trajectory = TrajectoryPredictor.predict_trajectory(
+            # 궤적 예측
+            predicted_polynomial_trajectory = TrajectoryPredictor.predict_polynomial_trajectory(
+                state=self.state,
+                target_velocity=target_velocity,
+                target_d=target_d,
+                time_horizon=time_horizon,
+                dt=dt
+            )
+
+        predicted_physics_trajectory = TrajectoryPredictor.predict_physics_based_trajectory(
             state=self.state,
-            target_velocity=target_velocity,
-            target_d=target_d,
             time_horizon=time_horizon,
-            dt=dt
+            dt=dt,
+            physics_config=self.physics_config,
+            vehicle_config=self.vehicle_config
         )
 
-        # 궤적 시각화 (카메라 객체 대신 world_to_screen_func 함수 사용)
-        if len(predicted_trajectory) < 2:
-            return
+        self.state.update_trajectory(predicted_polynomial_trajectory, predicted_physics_trajectory)
+
+    def _draw_predicted_trajectory(self, screen, world_to_screen):
+        """예측 궤적 시각화
+
+        Args:
+            screen: Pygame 화면 객체
+            world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
+            color: 궤적 색상 (RGB)
+            width: 선 두께
+        """
+        width = max(1, int(2 * self.visual_config['camera_zoom']))
 
         # 궤적 포인트들을 화면 좌표로 변환
-        screen_points = [world_to_screen_func(point.x, point.y) for point in predicted_trajectory]
+        polynomial_screen_points = [world_to_screen(point.x, point.y) for point in self.state.polynomial_trajectory]
+        physics_screen_points = [world_to_screen(point.x, point.y) for point in self.state.physics_trajectory]
 
-        # 예측 궤적 그리기 (다른 색상으로 구분)
-        # prediction_color = self.visual_config.get('prediction_color', (0, 255, 255))  # 청록색 기본값
-        # prediction_width = self.visual_config.get('prediction_width', 2)
-        width = max(1, int(2 * self.visual_config['camera_zoom']))
-        pygame.draw.lines(screen, (0, 255, 255), False, screen_points, width)
+        # 라인으로 연결하여 궤적 그리기
+        if len(polynomial_screen_points) > 0:
+            pygame.draw.lines(screen, (0, 255, 255), False, polynomial_screen_points, width)
+        if len(physics_screen_points) > 0:
+            pygame.draw.lines(screen, (255, 0, 0), False, physics_screen_points, width)
 
     def get_serializable_state(self):
         """

@@ -253,16 +253,15 @@ class LidarSensor(BaseSensor):
         """
         # 스캔 주기에 따른 업데이트 수행
         if time_elapsed - self.last_scan_time >= self.scan_interval:
-            if len(objects) > 0:
-                # 스캔 수행
-                self.current_data = self._perform_scan(time_elapsed, objects)
+            # 스캔 수행
+            self.current_data = self._perform_scan(time_elapsed, objects)
 
-                # 스캔 결과 히스토리 저장
-                if self.scan_history is not None:
-                    self.scan_history.append(self.current_data)
+            # 스캔 결과 히스토리 저장
+            if self.scan_history is not None:
+                self.scan_history.append(self.current_data)
 
-                self.last_scan_time = time_elapsed
-                return True
+            self.last_scan_time = time_elapsed
+            return True
 
         return False
 
@@ -466,9 +465,13 @@ class LidarSensor(BaseSensor):
         최신 스캔 데이터 반환
 
         Returns:
-            LidarData: 최신 라이다 스캔 데이터 또는 None
+            List[float]: 정규화된 최신 라이다 스캔 거리 데이터 또는 None
         """
-        return self.current_data
+        if not self.current_data:
+            return None
+        ranges = self.current_data.ranges
+        distances = [measurement.distance / self.max_range for measurement in ranges]
+        return distances
 
     def get_point_cloud(self):
         """
