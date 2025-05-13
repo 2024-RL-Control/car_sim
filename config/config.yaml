@@ -127,3 +127,6 @@ physics:
     C: 1.9    # shape factor
     D: 1.0    # peak value
     E: 0.97   # curvature factor
+  trajectory:
+    time_horizon: 1.0
+    dt: 0.05

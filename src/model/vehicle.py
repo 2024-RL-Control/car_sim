@@ -350,7 +350,7 @@ class Vehicle:
         # 상태 이력 업데이트
         self._update_state_history()
         # 차량 궤적 업데이트
-        self._predict_trajectory()
+        self._predict_trajectory(self.physics_config['trajectory']['time_horizon'], self.physics_config['trajectory']['dt'])
 
         return self.state, collision, outside_road, reached
 
@@ -735,12 +735,9 @@ class Vehicle:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
             pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
 
-    def _predict_trajectory(self, time_horizon=0.5, dt=0.05):
+    def _predict_trajectory(self, time_horizon=1.0, dt=0.05):
         """미래 궤적 예측 및 시각화
-
         Args:
-            screen: Pygame 화면 객체
-            world_to_screen_func: 월드 좌표를 화면 좌표로 변환하는 함수
             time_horizon: 궤적 예측 시간 범위 [s]
             dt: 시간 간격 [s]
         """
