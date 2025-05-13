@@ -53,8 +53,8 @@ class VehicleState:
     history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
     # 궤적 데이터
-    polynomial_trajectory: List[TrajectoryData] = []
-    physics_trajectory: List[TrajectoryData] = []
+    polynomial_trajectory: List[TrajectoryData] = field(default_factory=list)
+    physics_trajectory: List[TrajectoryData] = field(default_factory=list)
 
     # 상태 이력 (최근 N개 상태 기록)
     state_history: deque = field(default_factory=lambda: deque(maxlen=100))
@@ -153,10 +153,29 @@ class VehicleState:
         }
         self.state_history.append(state_snapshot)
 
+    def update_trajectory(self, polynomial_trajectory, physics_trajectory):
+        """궤적 업데이트"""
+        self.polynomial_trajectory = polynomial_trajectory
+        self.physics_trajectory = physics_trajectory
+
     def get_trajectory_data(self):
-        """차량 궤적 데이터 반환"""
-        
-        return self.polynomial_trajectory, self.physics_trajectory
+        """차량 궤적 데이터 반환, 각 지점의 상대적 위치로 변환"""
+        polynomial_trajectory = self.polynomial_trajectory
+        physics_trajectory = self.physics_trajectory
+
+        data_list = np.array([])
+        for trajectory in polynomial_trajectory:
+            data = trajectory.get_data(self.x, self.y)
+            print(f"polynomial_trajectory: {data.shape}")
+            np.append(data_list, data)
+        for trajectory in physics_trajectory:
+            data = trajectory.get_data(self.x, self.y)
+            print(f"physics_trajectory: {data.shape}")
+            np.append(data_list, data)
+
+        print("trajectory data_list shape: ", data_list.shape)
+
+        return data_list
 
 # ======================
 # Vehicle Model
@@ -316,6 +335,8 @@ class Vehicle:
 
         # 상태 이력 업데이트
         self._update_state_history()
+        # 차량 궤적 업데이트
+        self._predict_trajectory()
 
         return self.state, collision, outside_road, reached
 
@@ -474,7 +495,8 @@ class Vehicle:
             # 궤적 그리기
             self._draw_history_trajectory(screen, world_to_screen_func)
 
-        self.predict_and_draw_trajectory(screen, world_to_screen_func)
+            # 예측 궤적 그리기
+            self._draw_predicted_trajectory(screen, world_to_screen_func)
 
         # 타이어 그리기
         self._draw_tires(screen, world_to_screen_func)
@@ -592,7 +614,7 @@ class Vehicle:
 
     def _calculate_tire_positions(self):
         """각 타이어의 위치 및 각도 계산"""
-        # 상대 위치 및 각도 캐싱 - yaw와 steer가 변하지 않으면 재사용
+        # 상대 위치 및 각도 캐싱 - yaw 또는 steer가 변하지 않으면 재사용
         recalculate_angles = (self._tire_positions is None or
                               self._last_yaw != self.state.yaw or
                               self._last_steer != self.state.steer)
@@ -682,7 +704,7 @@ class Vehicle:
             trajectory_color = (0, 150, 255, 100)  # 반투명 파란색
             pygame.draw.lines(screen, trajectory_color, False, trajectory_points, width)
 
-    def predict_and_draw_trajectory(self, screen, world_to_screen_func, time_horizon=0.5, dt=0.1):
+    def _predict_trajectory(self, time_horizon=0.5, dt=0.05):
         """미래 궤적 예측 및 시각화
 
         Args:
@@ -712,34 +734,30 @@ class Vehicle:
             vehicle_config=self.vehicle_config
         )
 
-        # 궤적 시각화 (카메라 객체 대신 world_to_screen_func 함수 사용)
-        if len(predicted_polynomial_trajectory) < 2 or len(predicted_physics_trajectory) < 2:
-            return
+        self.state.update_trajectory(predicted_polynomial_trajectory, predicted_physics_trajectory)
 
-        self._draw_predicted_trajectory(screen, world_to_screen_func, predicted_polynomial_trajectory, color=(0, 255, 255))
-        self._draw_predicted_trajectory(screen, world_to_screen_func, predicted_physics_trajectory, color=(255, 0, 0))
-
-    def _draw_predicted_trajectory(self, screen, world_to_screen, trajectory_data_list, color=(255, 0, 0)):
+    def _draw_predicted_trajectory(self, screen, world_to_screen):
         """예측 궤적 시각화
 
         Args:
             screen: Pygame 화면 객체
             world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
-            trajectory_data_list: 예측된 궤적 데이터 리스트
             color: 궤적 색상 (RGB)
             width: 선 두께
         """
         # 궤적 포인트가 2개 이상인 경우에만 그리기
-        if len(trajectory_data_list) < 2:
+        if len(self.state.physics_trajectory) < 2 or len(self.state.polynomial_trajectory) < 2:
             return
 
         width = max(1, int(2 * self.visual_config['camera_zoom']))
 
         # 궤적 포인트들을 화면 좌표로 변환
-        screen_points = [world_to_screen(point.x, point.y) for point in trajectory_data_list]
+        polynomial_screen_points = [world_to_screen(point.x, point.y) for point in self.state.polynomial_trajectory]
+        physics_screen_points = [world_to_screen(point.x, point.y) for point in self.state.physics_trajectory]
 
         # 라인으로 연결하여 궤적 그리기
-        pygame.draw.lines(screen, color, False, screen_points, width)
+        pygame.draw.lines(screen, (0, 255, 255), False, polynomial_screen_points, width)
+        pygame.draw.lines(screen, (255, 0, 0), False, physics_screen_points, width)
 
     def get_serializable_state(self):
         """

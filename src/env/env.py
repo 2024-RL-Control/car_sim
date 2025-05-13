@@ -385,6 +385,8 @@ class CarSimulatorEnv(gym.Env):
         state = vehicle.get_state()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
 
+        print(state.get_trajectory_data().shape)
+
         # 기본 차량 상태
         obs = np.array([
             cos_yaw,
