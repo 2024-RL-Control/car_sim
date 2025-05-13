@@ -207,7 +207,7 @@ class RLAutonomousDrivingEnv:
             초기 관측값
         """
         # 환경 초기화
-        self.env.reset()
+        obs = self.env.reset()
 
         # 장애물, 차량, 목적지 다시 설정
         self.setup_environment()
@@ -219,7 +219,7 @@ class RLAutonomousDrivingEnv:
         self.episode_count += 1
 
         # 초기 관측값 반환
-        return self._get_obs()
+        return obs
 
     def step(self, action):
         """
@@ -235,7 +235,7 @@ class RLAutonomousDrivingEnv:
             info: 추가 정보
         """
         # 환경에서 스텝 진행
-        _, reward, done, info = self.env.step(action)
+        obs, reward, done, info = self.env.step(action)
 
         # 스텝 카운터 증가
         self.steps += 1
@@ -245,20 +245,7 @@ class RLAutonomousDrivingEnv:
             done = True
             info['timeout'] = True
 
-        # 관측값 반환
-        obs = self._get_obs()
-
         return obs, reward, done, info
-
-    def _get_obs(self):
-        """
-        현재 관측값 생성
-
-        Returns:
-            관측값
-        """
-        # 기본 환경의 관측값 사용
-        return self.env._get_obs()
 
     def render(self, mode='human'):
         """
@@ -305,19 +292,18 @@ def train_autonomous_agent():
     episode_rewards = []
     terminated = False
 
-    for episode in range(env.num_episodes):
+    for _ in range(env.num_episodes):
         if terminated:
             break
 
         # 환경 초기화
-        obs = env.reset()
+        obs_array = env.reset()
 
         # 에피소드 정보
         total_reward = 0
         done = False
-        step = 0
 
-        print(f"Episode {episode+1}/{env.num_episodes}")
+        print(f"Episode {env.episode_count}/{env.num_episodes}")
 
         while not done and not terminated:
             # 키보드 입력 처리
@@ -335,7 +321,6 @@ def train_autonomous_agent():
             # 보상 누적
             for reward in reward_array:
                 total_reward += reward
-            step += 1
 
             # info 속 collisions, outside_roads, reached_targets(id, value) 활용, 충돌 or 도착 or 도로 벗어날 시 에이전트 조작 및 학습 사용 X
 
@@ -353,7 +338,7 @@ def train_autonomous_agent():
 
             # 종료 확인
             if done:
-                print(f"  Step: {step}, Total Reward: {total_reward:.2f}")
+                print(f"  Step: {env.steps}, Total Reward: {total_reward:.2f}")
                 episode_rewards.append(total_reward)
                 break
 

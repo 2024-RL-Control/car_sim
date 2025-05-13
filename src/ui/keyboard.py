@@ -58,7 +58,6 @@ class KeyboardHandler:
         if env.multi_vehicle and pressed[pygame.K_TAB] and not self._keys_state[pygame.K_TAB]:
             # 다음 차량으로 전환
             env.vehicle_manager.cycle_active_vehicle()
-            print(f"현재 차량: {env.vehicle_manager.get_active_vehicle_index() + 1}/{env.vehicle_manager.get_vehicle_count()}")
         self._keys_state[pygame.K_TAB] = pressed[pygame.K_TAB]
 
         # 카메라 컨트롤 처리
@@ -68,25 +67,21 @@ class KeyboardHandler:
         # F1: 학습 모드 토글
         if pressed[pygame.K_F1] and not self._keys_state[pygame.K_F1]:
             env.config['visualization']['training_mode'] = not env.config['visualization']['training_mode']
-            print(f"학습 모드: {'켜짐' if env.config['visualization']['training_mode'] else '꺼짐'}")
         self._keys_state[pygame.K_F1] = pressed[pygame.K_F1]
 
         # F2: 전체 렌더링 토글
         if pressed[pygame.K_F2] and not self._keys_state[pygame.K_F2]:
             env.config['visualization']['visualize'] = not env.config['visualization']['visualize']
-            print(f"전체 렌더링: {'켜짐' if env.config['visualization']['visualize'] else '꺼짐'}")
         self._keys_state[pygame.K_F2] = pressed[pygame.K_F2]
 
         # F3: HUD 렌더링 토글
         if pressed[pygame.K_F3] and not self._keys_state[pygame.K_F3]:
             env.config['visualization']['visualize_hud'] = not env.config['visualization']['visualize_hud']
-            print(f"HUD 렌더링: {'켜짐' if env.config['visualization']['visualize_hud'] else '꺼짐'}")
         self._keys_state[pygame.K_F3] = pressed[pygame.K_F3]
 
         # F4: 디버그 모드 토글
         if pressed[pygame.K_F4] and not self._keys_state[pygame.K_F4]:
             env.config['visualization']['debug_mode'] = not env.config['visualization']['debug_mode']
-            print(f"디버그 모드: {'켜짐' if env.config['visualization']['debug_mode'] else '꺼짐'}")
         self._keys_state[pygame.K_F4] = pressed[pygame.K_F4]
 
         # 저장 및 로드
