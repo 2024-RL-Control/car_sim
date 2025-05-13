@@ -706,7 +706,7 @@ class Vehicle:
         )
 
         # 궤적 시각화 (카메라 객체 대신 world_to_screen_func 함수 사용)
-        if len(predicted_polynomial_trajectory) < 2:
+        if len(predicted_polynomial_trajectory) < 2 or len(predicted_physics_trajectory) < 2:
             return
 
         # 궤적 포인트들을 화면 좌표로 변환
