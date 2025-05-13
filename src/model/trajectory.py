@@ -22,6 +22,26 @@ class TrajectoryData:
     s: Optional[float] = None       # Frenet s 좌표 [m]
     d: Optional[float] = None       # Frenet d 좌표 [m]
 
+    def encoding_angle(self, angle):
+        """cos/sin 인코딩을 통한 각도 표현"""
+        return cos(angle), sin(angle)
+
+    def get_data(self, x, y):
+        rel_x = x - self.x
+        rel_y = y - self.y
+        cos_yaw, sin_yaw = self.encoding_angle(self.yaw)
+        data = np.array([
+            rel_x,
+            rel_y,
+            cos_yaw,
+            sin_yaw,
+            self.v_long,
+            self.a_long,
+            self.v_lat,
+            self.a_lat
+        ])
+        return data
+
 class TrajectoryPredictor:
     """차량 궤적 예측기"""
 

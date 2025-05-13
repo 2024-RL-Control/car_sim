@@ -7,7 +7,7 @@ import pygame
 import numpy as np
 import time
 from .physics import PhysicsEngine
-from .trajectory import TrajectoryPredictor
+from .trajectory import TrajectoryPredictor, TrajectoryData
 from .object import RectangleObstacle, GoalManager
 from .sensor import SensorManager
 
@@ -52,6 +52,10 @@ class VehicleState:
     # 차량 과거 궤적
     history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
 
+    # 궤적 데이터
+    polynomial_trajectory: List[TrajectoryData] = []
+    physics_trajectory: List[TrajectoryData] = []
+
     # 상태 이력 (최근 N개 상태 기록)
     state_history: deque = field(default_factory=lambda: deque(maxlen=100))
 
@@ -86,6 +90,8 @@ class VehicleState:
         self.terrain_type = "asphalt"
 
         self.history_trajectory.clear()
+        self.polynomial_trajectory.clear()
+        self.physics_trajectory.clear()
         self.state_history.clear()
 
     def normalize_angle(self, angle):
@@ -146,6 +152,11 @@ class VehicleState:
             'throttle_brake': self.throttle_brake
         }
         self.state_history.append(state_snapshot)
+
+    def get_trajectory_data(self):
+        """차량 궤적 데이터 반환"""
+        
+        return self.polynomial_trajectory, self.physics_trajectory
 
 # ======================
 # Vehicle Model
