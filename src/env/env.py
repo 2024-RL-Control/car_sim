@@ -429,6 +429,7 @@ class CarSimulatorEnv(gym.Env):
         state = vehicle.get_state()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
 
+        lidar_data = state.get_lidar_data()
         trajectory_data = state.get_trajectory_data()
 
         # 기본 차량 상태

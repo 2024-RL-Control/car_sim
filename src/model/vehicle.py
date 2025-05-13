@@ -48,8 +48,8 @@ class VehicleState:
     frenet_point: tuple = None
     target_vel_long: float = None
 
-    # 환경 속성
-    terrain_type: str = "asphalt"  # 현재 지형 유형
+    # 라이다 센서 데이터, 거리 배열
+    lidar_data: List = field(default_factory=list)
 
     # 차량 과거 궤적
     history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
@@ -60,6 +60,9 @@ class VehicleState:
 
     # 상태 이력 (최근 N개 상태 기록)
     state_history: deque = field(default_factory=lambda: deque(maxlen=100))
+
+    # 환경 속성
+    terrain_type: str = "asphalt"  # 현재 지형 유형
 
     def reset(self):
         """차량 상태 초기화"""
@@ -90,12 +93,15 @@ class VehicleState:
         self.frenet_point = None
         self.target_vel_long = None
 
-        self.terrain_type = "asphalt"
+        self.lidar_data.clear()
 
         self.history_trajectory.clear()
         self.polynomial_trajectory.clear()
         self.physics_trajectory.clear()
+
         self.state_history.clear()
+
+        self.terrain_type = "asphalt"
 
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
@@ -175,6 +181,14 @@ class VehicleState:
             data_list.append(data)
 
         return np.array(data_list)
+
+    def update_lidar_data(self, distances):
+        """라이다 센서 데이터 업데이트"""
+        self.lidar_data = distances
+
+    def get_lidar_data(self):
+        """라이다 센서 데이터 반환"""
+        return np.array(self.lidar_data)
 
 # ======================
 # Vehicle Model
@@ -320,6 +334,7 @@ class Vehicle:
 
         # 차량 센서 업데이트
         self.sensor_manager.update(dt, time_elapsed, objects)
+        self._update_lidar_data()
 
         # 도로 정보 업데이트
         outside_road = self._update_road_data(road_manager)
@@ -687,6 +702,22 @@ class Vehicle:
         self._tire_positions = result
 
         return result
+
+    def _update_lidar_data(self):
+        """
+        라이다 센서의 noisy_distances 값을 차량 상태에 업데이트
+        """
+        # 센서 매니저에서 모든 센서 가져오기
+        sensors = self.sensor_manager.get_all_sensors()
+
+        # 라이다 센서 찾기
+        for sensor_id, sensor in sensors.items():
+            if sensor.sensor_type == 'LidarSensor':
+                # 라이다 데이터 가져오기
+                lidar_data = sensor.get_data()
+                if lidar_data:
+                    # noisy_distances 추출하여 상태에 저장
+                    self.state.update_lidar_data(lidar_data)
 
     def _draw_history_trajectory(self, screen, world_to_screen_func):
         """차량 궤적 그리기"""
