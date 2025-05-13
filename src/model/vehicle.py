@@ -168,17 +168,56 @@ class VehicleState:
         self.physics_trajectory = physics_trajectory
 
     def get_trajectory_data(self):
-        """차량 궤적 데이터 반환, 각 지점의 상대적 위치로 변환"""
+        """차량 궤적 데이터 반환, 각 지점의 상대적 위치로 변환
+
+        각 궤적에서 시작, 중간, 마지막 데이터만 추출
+        """
         polynomial_trajectory = self.polynomial_trajectory
         physics_trajectory = self.physics_trajectory
 
         data_list = []
-        for trajectory in polynomial_trajectory:
-            data = trajectory.get_data(self.x, self.y)
-            data_list.append(data)
-        for trajectory in physics_trajectory:
-            data = trajectory.get_data(self.x, self.y)
-            data_list.append(data)
+
+        # 다항식 궤적에서 초반, 중반, 마지막 데이터 추출
+        if polynomial_trajectory:
+            traj_len = len(polynomial_trajectory)
+            # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
+            start_idx = 0
+            mid_idx = traj_len // 2
+            end_idx = traj_len - 1
+
+            # 선택된 지점의 데이터만 추가
+            if start_idx < traj_len:
+                data = polynomial_trajectory[start_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if mid_idx < traj_len and mid_idx != start_idx:
+                data = polynomial_trajectory[mid_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
+                data = polynomial_trajectory[end_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+        # 물리 기반 궤적에서 초반, 중반, 마지막 데이터 추출
+        if physics_trajectory:
+            traj_len = len(physics_trajectory)
+            # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
+            start_idx = 0
+            mid_idx = traj_len // 2
+            end_idx = traj_len - 1
+
+            # 선택된 지점의 데이터만 추가
+            if start_idx < traj_len:
+                data = physics_trajectory[start_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if mid_idx < traj_len and mid_idx != start_idx:
+                data = physics_trajectory[mid_idx].get_data(self.x, self.y)
+                data_list.append(data)
+
+            if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
+                data = physics_trajectory[end_idx].get_data(self.x, self.y)
+                data_list.append(data)
 
         return np.array(data_list)
 
