@@ -78,22 +78,44 @@ class CarSimulatorEnv(gym.Env):
         if not self.multi_vehicle:
             # 단일 차량 모드
             self.action_space = spaces.Box(
-                low=np.array([ 0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
+                low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
                 high=np.array([1.0, 1.0,  1.0]),
                 dtype=np.float32
             )
 
-            # 관측 공간: [cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target, frenet_d]
+            # 관측 공간: [cos(yaw), sin(yaw), vel_long, acc_long, vel_lat, acc_lat, steer, throttle_engine, throttle_brake, distance_to_target, yaw_diff_to_target, frenet_d]
             self.observation_space = spaces.Box(
-                low=np.array([-1, -1, -20, -25, 0, -np.pi, -np.inf]),
-                high=np.array([1, 1, 65, 25, np.inf, np.pi, np.inf]),
+                low=np.array([-1,   # cos(yaw)
+                              -1,   # sin(yaw)
+                              -20,  # vel_long
+                              -4,   # acc_long
+                              -25,  # vel_lat
+                              -np.inf,  # acc_lat
+                              -np.pi,  # steer
+                              0,  # throttle_engine
+                              0,  # throttle_brake
+                              0,  # distance_to_target
+                              -np.pi,  # yaw_diff_to_target
+                              -np.inf]),  # frenet_d
+                high=np.array([1,   # cos(yaw)
+                               1,   # sin(yaw)
+                               65,  # vel_long
+                               4,   # acc_long
+                               25,  # vel_lat
+                               np.inf,  # acc_lat
+                               np.pi,  # steer
+                               1,  # throttle_engine
+                               1,  # throttle_brake
+                               np.inf,  # distance_to_target
+                               np.pi,  # yaw_diff_to_target
+                               np.inf]),  # frenet_d
                 dtype=np.float32
             )
         else:
             # 다중 차량 모드 - 각 차량마다 별도 액션
             self.action_space = spaces.Tuple([
                 spaces.Box(
-                    low=np.array([ 0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
+                    low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
                     high=np.array([1.0, 1.0,  1.0]),
                     dtype=np.float32
                 ) for _ in range(self.num_vehicles)
@@ -102,8 +124,30 @@ class CarSimulatorEnv(gym.Env):
             # 다중 차량 관측 공간 - 각 차량마다 별도 관측
             self.observation_space = spaces.Tuple([
                 spaces.Box(
-                    low=np.array([-1, -1, -20, -25, 0, -np.pi, -np.inf]),
-                    high=np.array([1, 1, 65, 25, np.inf, np.pi, np.inf]),
+                    low=np.array([-1,   # cos(yaw)
+                                -1,   # sin(yaw)
+                                -20,  # vel_long
+                                -4,   # acc_long
+                                -25,  # vel_lat
+                                -np.inf,  # acc_lat
+                                -np.pi,  # steer
+                                0,  # throttle_engine
+                                0,  # throttle_brake
+                                0,  # distance_to_target
+                                -np.pi,  # yaw_diff_to_target
+                                -np.inf]),  # frenet_d
+                    high=np.array([1,   # cos(yaw)
+                                1,   # sin(yaw)
+                                65,  # vel_long
+                                4,   # acc_long
+                                25,  # vel_lat
+                                np.inf,  # acc_lat
+                                np.pi,  # steer
+                                1,  # throttle_engine
+                                1,  # throttle_brake
+                                np.inf,  # distance_to_target
+                                np.pi,  # yaw_diff_to_target
+                                np.inf]),  # frenet_d
                     dtype=np.float32
                 ) for _ in range(self.num_vehicles)
             ])
@@ -385,14 +429,19 @@ class CarSimulatorEnv(gym.Env):
         state = vehicle.get_state()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
 
-        print(state.get_trajectory_data().shape)
+        trajectory_data = state.get_trajectory_data()
 
         # 기본 차량 상태
         obs = np.array([
             cos_yaw,
             sin_yaw,
             state.vel_long,
+            state.acc_long,
             state.vel_lat,
+            state.acc_lat,
+            state.steer,
+            state.throttle_engine,
+            state.throttle_brake,
             state.distance_to_target,
             state.yaw_diff_to_target,
             state.frenet_d

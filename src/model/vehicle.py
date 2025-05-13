@@ -26,13 +26,15 @@ class VehicleState:
     acc_long: float = 0.0          # 종방향 가속도 [m/s²]
     vel_lat: float = 0.0           # 횡방향 속도 [m/s]
     acc_lat: float = 0.0           # 횡방향 가속도 [m/s²]
-    throttle_engine: float = 0.0   # 파워 엔진의 요청 정도 [0,1]
-    throttle_brake:  float = 0.0   # 브레이크 요청 정도[0,1]
-    steer: float = 0.0             # 조향각 [rad]
 
     rear_axle_x: float = 0.0       # 뒷바퀴 축 X 좌표 [m]
     rear_axle_y: float = 0.0       # 뒷바퀴 축 Y 좌표 [m]
     half_wheelbase: float = None    # 차량 축간거리의 절반 [m]
+
+    # 제어 상태
+    steer: float = 0.0             # 조향각 [rad]
+    throttle_engine: float = 0.0   # 파워 엔진의 요청 정도 [0,1]
+    throttle_brake:  float = 0.0   # 브레이크 요청 정도[0,1]
 
     # 목적지 관련 속성
     target_x: float = 0.0         # 목표 X 좌표
@@ -69,13 +71,14 @@ class VehicleState:
         self.acc_long = 0.0
         self.vel_lat = 0.0
         self.acc_lat = 0.0
-        self.throttle_engine = 0.0
-        self.throttle_brake = 0.0
-        self.steer = 0.0
 
         self.rear_axle_x = 0.0
         self.rear_axle_y = 0.0
         self.update_rear_axle_position()
+
+        self.steer = 0.0
+        self.throttle_engine = 0.0
+        self.throttle_brake = 0.0
 
         self.target_x = 0.0
         self.target_y = 0.0
@@ -163,15 +166,15 @@ class VehicleState:
         polynomial_trajectory = self.polynomial_trajectory
         physics_trajectory = self.physics_trajectory
 
-        data_list = np.array([])
+        data_list = []
         for trajectory in polynomial_trajectory:
             data = trajectory.get_data(self.x, self.y)
-            data_list = np.append(data_list, data)
+            data_list.append(data)
         for trajectory in physics_trajectory:
             data = trajectory.get_data(self.x, self.y)
-            data_list = np.append(data_list, data)
+            data_list.append(data)
 
-        return data_list
+        return np.array(data_list)
 
 # ======================
 # Vehicle Model
