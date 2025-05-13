@@ -9,8 +9,8 @@ from typing import List, Tuple, Optional
 # ======================
 
 @dataclass
-class TrajectoryPoint:
-    """경로 점 데이터 클래스"""
+class TrajectoryData:
+    """궤적 데이터 클래스"""
     t: float = 0.0       # 시간 [s]
     x: float = 0.0       # x 좌표 [m]
     y: float = 0.0       # y 좌표 [m]
@@ -33,7 +33,7 @@ class TrajectoryPredictor:
                                         time_horizon: float = 5.0,
                                         dt: float = 0.1,
                                         jerk_long: float = 1.0,
-                                        jerk_lat: float = 1.0) -> List[TrajectoryPoint]:
+                                        jerk_lat: float = 1.0) -> List[TrajectoryData]:
         """종/횡 방향 궤적 예측을 결합
 
         Args:
@@ -46,7 +46,7 @@ class TrajectoryPredictor:
             jerk_lat: 횡방향 저크(가속도 변화율) 제한 [m/s³]
 
         Returns:
-            trajectory_points: 예측된 궤적 포인트 리스트
+            trajectory_data_list: 예측된 궤적 데이터 리스트
         """
         # 종방향 궤적 예측
         s_trajectory = cls._predict_longitudinal_polynomial_trajectory(
@@ -71,7 +71,7 @@ class TrajectoryPredictor:
         )
 
         # 결합된 궤적 생성
-        trajectory_points = []
+        trajectory_data_list = []
 
         # 각 시간 단계에 대해 종/횡 방향 궤적을 결합
         for i in range(len(s_trajectory)):
@@ -105,7 +105,7 @@ class TrajectoryPredictor:
             v_lat = d_dot
 
             # 궤적 포인트 추가
-            point = TrajectoryPoint(
+            trajectory_data = TrajectoryData(
                 t=t,
                 x=x,
                 y=y,
@@ -117,9 +117,9 @@ class TrajectoryPredictor:
                 s=s,
                 d=d
             )
-            trajectory_points.append(point)
+            trajectory_data_list.append(trajectory_data)
 
-        return trajectory_points
+        return trajectory_data_list
 
     @classmethod
     def _predict_longitudinal_polynomial_trajectory(cls,
@@ -352,7 +352,7 @@ class TrajectoryPredictor:
                                         time_horizon: float = 5.0,
                                         dt: float = 0.1,
                                         physics_config=None,
-                                        vehicle_config=None) -> List[TrajectoryPoint]:
+                                        vehicle_config=None) -> List[TrajectoryData]:
         """
         물리 모델 기반 차량 궤적 예측
         state_history만을 사용하여 물리 모델을 통한 궤적 예측 수행
@@ -365,13 +365,13 @@ class TrajectoryPredictor:
             vehicle_config: 차량 설정, None이면 state_history 기반으로 추정
 
         Returns:
-            trajectory_points: 예측된 궤적 포인트 리스트
+            trajectory_data_list: 예측된 궤적 데이터 리스트
         """
         from copy import deepcopy
         from .physics import PhysicsEngine
 
         # 결과를 저장할 궤적 리스트
-        trajectory_points = []
+        trajectory_data_list = []
 
         # state_history가 충분히 있는지 확인
         if not hasattr(state, 'state_history') or len(state.state_history) < 2:
@@ -389,7 +389,7 @@ class TrajectoryPredictor:
         )
 
         # 첫 번째 포인트는 현재 상태
-        init_point = TrajectoryPoint(
+        init_trajectory_data = TrajectoryData(
             t=0.0,
             x=state.x,
             y=state.y,
@@ -399,7 +399,7 @@ class TrajectoryPredictor:
             v_lat=state.vel_lat,
             a_lat=state.acc_lat
         )
-        trajectory_points.append(init_point)
+        trajectory_data_list.append(init_trajectory_data)
 
         # 각 시간 스텝마다 물리 엔진으로 시뮬레이션
         num_steps = int(time_horizon / dt)
@@ -409,13 +409,13 @@ class TrajectoryPredictor:
             # 현재 시간 스텝에 대한 제어 입력 가져오기
             action = control_patterns[min(i, len(control_patterns) - 1)]
 
-            # 물리 엔진으로 상태 업데이트 (deepcopy를 피하기 위해 직접 업데이트)
+            # 물리 엔진으로 상태 업데이트, deepcopy된 상태 사용
             PhysicsEngine.update(
                 sim_state, action, dt, physics_config, vehicle_config
             )
 
             # 새 궤적 포인트 생성 및 추가
-            new_point = TrajectoryPoint(
+            new_trajectory_data = TrajectoryData(
                 t=t,
                 x=sim_state.x,
                 y=sim_state.y,
@@ -425,9 +425,9 @@ class TrajectoryPredictor:
                 v_lat=sim_state.vel_lat,
                 a_lat=sim_state.acc_lat
             )
-            trajectory_points.append(new_point)
+            trajectory_data_list.append(new_trajectory_data)
 
-        return trajectory_points
+        return trajectory_data_list
 
     @classmethod
     def _create_simple_continuation_trajectory(cls, state, time_horizon, dt):
@@ -440,12 +440,12 @@ class TrajectoryPredictor:
             dt: 시간 간격 [s]
 
         Returns:
-            간단한 궤적 포인트 리스트
+            간단한 궤적 데이터 리스트
         """
-        trajectory_points = []
+        trajectory_data_list = []
 
         # 첫 번째 포인트는 현재 상태
-        trajectory_points.append(TrajectoryPoint(
+        trajectory_data_list.append(TrajectoryData(
             t=0.0,
             x=state.x,
             y=state.y,
@@ -462,26 +462,26 @@ class TrajectoryPredictor:
             t = (i + 1) * dt
 
             # 이전 포인트
-            prev_point = trajectory_points[-1]
+            prev_trajectory_data = trajectory_data_list[-1]
 
             # 단순 직선 이동
-            distance = prev_point.v_long * dt
-            dx = distance * np.cos(prev_point.yaw)
-            dy = distance * np.sin(prev_point.yaw)
+            distance = prev_trajectory_data.v_long * dt
+            dx = distance * np.cos(prev_trajectory_data.yaw)
+            dy = distance * np.sin(prev_trajectory_data.yaw)
 
-            new_point = TrajectoryPoint(
+            new_trajectory_data = TrajectoryData(
                 t=t,
-                x=prev_point.x + dx,
-                y=prev_point.y + dy,
-                yaw=prev_point.yaw,
-                v_long=prev_point.v_long,
+                x=prev_trajectory_data.x + dx,
+                y=prev_trajectory_data.y + dy,
+                yaw=prev_trajectory_data.yaw,
+                v_long=prev_trajectory_data.v_long,
                 a_long=0.0,
                 v_lat=0.0,
                 a_lat=0.0
             )
-            trajectory_points.append(new_point)
+            trajectory_data_list.append(new_trajectory_data)
 
-        return trajectory_points
+        return trajectory_data_list
 
     @classmethod
     def _estimate_control_pattern_from_history(cls, state_history, time_horizon, dt):

@@ -708,24 +708,24 @@ class Vehicle:
         self._draw_predicted_trajectory(screen, world_to_screen_func, predicted_polynomial_trajectory, color=(0, 255, 255))
         self._draw_predicted_trajectory(screen, world_to_screen_func, predicted_physics_trajectory, color=(255, 0, 0))
 
-    def _draw_predicted_trajectory(self, screen, world_to_screen, trajectory_points, color=(255, 0, 0)):
+    def _draw_predicted_trajectory(self, screen, world_to_screen, trajectory_data_list, color=(255, 0, 0)):
         """예측 궤적 시각화
 
         Args:
             screen: Pygame 화면 객체
             world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
-            trajectory_points: 예측된 궤적 포인트 리스트
+            trajectory_data_list: 예측된 궤적 데이터 리스트
             color: 궤적 색상 (RGB)
             width: 선 두께
         """
         # 궤적 포인트가 2개 이상인 경우에만 그리기
-        if len(trajectory_points) < 2:
+        if len(trajectory_data_list) < 2:
             return
 
         width = max(1, int(2 * self.visual_config['camera_zoom']))
 
         # 궤적 포인트들을 화면 좌표로 변환
-        screen_points = [world_to_screen(point.x, point.y) for point in trajectory_points]
+        screen_points = [world_to_screen(point.x, point.y) for point in trajectory_data_list]
 
         # 라인으로 연결하여 궤적 그리기
         pygame.draw.lines(screen, color, False, screen_points, width)
