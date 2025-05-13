@@ -24,7 +24,7 @@ class CarSimulatorEnv(gym.Env):
     """2D Top-Down 시점 차량 시뮬레이터(Gym) 환경"""
     metadata = {'render.modes': ['human', 'rgb_array'],}
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, setup: bool = True):
         """
         시뮬레이터 환경 초기화
 
@@ -55,8 +55,9 @@ class CarSimulatorEnv(gym.Env):
         )
 
         # 초기 차량들 생성
-        for i in range(self.num_vehicles):
-            self.vehicle_manager.create_vehicle(x=i*100, y=0, vehicle_id=i)
+        if setup:
+            for i in range(self.num_vehicles):
+                self.vehicle_manager.create_vehicle(x=i*100, y=0, vehicle_id=i)
 
         # UI 모듈 초기화
         self.camera = Camera(self.config)
@@ -251,8 +252,8 @@ class CarSimulatorEnv(gym.Env):
         환경 스텝 실행
 
         Args:
-            action: 단일 차량 모드: [가속도, 조향] 명령 [-1, 1]
-                    다중 차량 모드: 차량별 [가속도, 조향] 명령 리스트
+            action: 단일 차량 모드: [엔진, 브레이크, 조향] 명령
+                    다중 차량 모드: 차량별 [엔진, 브레이크, 조향] 명령 리스트
 
         Returns:
             obs: 관측 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
@@ -289,20 +290,24 @@ class CarSimulatorEnv(gym.Env):
             self.renderer.set_physics_time(physics_time)
 
         # 충돌 여부 확인
-        any_collision = any(collisions.values())
+        all_collision = all(collisions.values())
 
         # 도로 이탈 여부 확인
-        any_outside_road = any(outside_roads.values())
+        all_outside_road = all(outside_roads.values())
 
-        # 종료 여부 결정
-        done = any_collision or any_outside_road
+        # 목표 도달 여부 확인
+        all_reached_target = all(reached_targets.values())
+
+        # 종료 여부 결정, 모든 차량이 충돌 or 도로 벗어남 or 목표 도달 시 종료
+        done = all_collision or all_outside_road or all_reached_target
 
         info = {
             'collisions': collisions,
             'outside_roads': outside_roads,
             'reached_targets': reached_targets,
-            'collision': any_collision,
-            'outside_road': any_outside_road
+            'all_collision': all_collision,
+            'all_outside_road': all_outside_road,
+            'all_reached_target': all_reached_target
         }
 
         # 상태 기록 (리플레이용)
@@ -405,16 +410,16 @@ class CarSimulatorEnv(gym.Env):
         모든 차량의 관측값 반환
 
         Returns:
-            관측값 리스트 (단일 차량이면 단일 관측값)
+            관측값 리스트
         """
         if not self.multi_vehicle:
             # 단일 차량 모드
             if len(self.vehicle_manager.get_all_vehicles()) > 0:
-                return self._get_vehicle_observation(self.vehicle_manager.get_all_vehicles()[0])
-            return np.zeros(self.observation_space.shape)
+                return np.array([self._get_vehicle_observation(self.vehicle_manager.get_all_vehicles()[0])])
+            return np.array(np.zeros(self.observation_space.shape))
         else:
             # 다중 차량 모드
-            return [self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()]
+            return np.array([self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()])
 
     def _get_vehicle_observation(self, vehicle):
         """
@@ -460,22 +465,24 @@ class CarSimulatorEnv(gym.Env):
             reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
 
         Returns:
-            보상 리스트 (단일 차량이면 단일 보상)
+            보상 리스트
         """
         if not self.multi_vehicle:
             # 단일 차량 모드
             if len(self.vehicle_manager.get_all_vehicles()) > 0:
                 vehicle = self.vehicle_manager.get_all_vehicles()[0]
-                return self._calculate_vehicle_reward(
-                    vehicle,
-                    collisions.get(vehicle.id, False),
-                    outside_roads.get(vehicle.id, False),
-                    reached_targets.get(vehicle.id, False)
-                )
-            return 0.0
+                return np.array([
+                    self._calculate_vehicle_reward(
+                        vehicle,
+                        collisions.get(vehicle.id, False),
+                        outside_roads.get(vehicle.id, False),
+                        reached_targets.get(vehicle.id, False)
+                    )
+                ])
+            return np.array([0.0])
         else:
             # 다중 차량 모드
-            return [
+            return np.array([
                 self._calculate_vehicle_reward(
                     vehicle,
                     collisions.get(vehicle.id, False),
@@ -483,7 +490,7 @@ class CarSimulatorEnv(gym.Env):
                     reached_targets.get(vehicle.id, False)
                 )
                 for vehicle in self.vehicle_manager.get_all_vehicles()
-            ]
+            ])
 
     def _calculate_vehicle_reward(self, vehicle, collision, outside_road, reached_target):
         """

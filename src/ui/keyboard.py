@@ -99,7 +99,7 @@ class KeyboardHandler:
         self._keys_state[pygame.K_F9] = pressed[pygame.K_F9]
 
         # 입력에서 액션 결정
-        action = np.zeros(3)  # [가속, 조향, 브레이크]
+        action = np.array([0.0, 0.0, 0.0])  # [가속, 조향, 브레이크]
 
         # 학습 모드 아닐 때, 차량 제어 (조작 모드)
         if not env.config['visualization']['training_mode']:
@@ -124,9 +124,10 @@ class KeyboardHandler:
             actions = [np.zeros(3) for _ in range(env.vehicle_manager.get_vehicle_count())]
             active_idx = env.vehicle_manager.get_active_vehicle_index()
             actions[active_idx] = action
-            return actions
+            return np.array(actions)
         else:
-            return action
+            actions = [action]
+            return np.array(actions)
 
     def reset(self):
         """키보드 상태 초기화"""

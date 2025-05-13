@@ -4,8 +4,23 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
+  num_episodes: 1000
   max_steps: 1000   # maximum steps per episode
   num_vehicles: 1   # number of vehicles on the environment, if num_vehicles = 1: single vehicle, else multi-vehicle
+  boundary:
+    x_min: -300
+    x_max: 300
+    y_min: -300
+    y_max: 300
+  obstacle:
+    num_static_obstacles: 10
+    num_dynamic_obstacles: 5
+    buffer_distance: 10
+    boundary:
+      x_min: -280
+      x_max: 280
+      y_min: -280
+      y_max: 280
   path_planning:
     max_iterations: 5000       # maximum iterations for path planning
     base_step_size: 0.1         # Base for variable RRT step [m]

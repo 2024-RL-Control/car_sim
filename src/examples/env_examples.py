@@ -131,12 +131,6 @@ def manual_control_with_goal():
         # 환경 스텝
         _, _, done, info = env.step(action)
 
-        # 목적지 도달 확인 및 새 목적지 생성
-        for i in range(env.num_vehicles):
-            if info['reached_targets'].get(i, False):
-                # 목적지 도달 시 새 목적지 생성
-                create_random_goal(env, i, min_distance=30.0, max_distance=50.0)
-
         # 렌더링
         env.render()
 
@@ -148,9 +142,9 @@ def manual_control_with_goal():
                 if event.key == pygame.K_ESCAPE:
                     running = False
 
-        # 충돌로 인한 종료 시 잠시 대기 후 재시작
+        # 종료 시 잠시 대기 후 재시작
         if done:
-            if info.get('collision', False):
+            if info.get('all_collision', False) or info.get('all_reached_target', False):
                 pygame.time.wait(1000)  # 1초 대기
                 env.reset()
                 # 초기 목적지 다시 생성
@@ -267,7 +261,7 @@ def manual_control_with_obstacles():
 
         # 충돌로 인한 종료 시 잠시 대기 후 재시작
         if done:
-            if info.get('collision', False):
+            if info.get('all_collision', False):
                 pygame.time.wait(1000)  # 1초 대기
                 env.reset()
                 create_test_course(env.get_obstacle_manager(), current_course)
@@ -349,7 +343,7 @@ def dynamic_obstacles_test():
 
         # 충돌로 인한 종료 시 잠시 대기 후 재시작
         if done:
-            if info.get('collision', False):
+            if info.get('all_collision', False):
                 pygame.time.wait(1000)  # 1초 대기
                 env.reset()
                 create_dynamic_obstacle_course(env.get_obstacle_manager(), current_course)

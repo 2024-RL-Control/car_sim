@@ -894,6 +894,10 @@ class VehicleManager:
 
         self.road_manager = road_manager  # 도로 관리자
 
+        self.collisions = {}
+        self.outside_roads = {}
+        self.reached_targets = {}
+
         # 설정 저장
         self.vehicle_config = vehicle_config
         self.physics_config = physics_config
@@ -941,11 +945,27 @@ class VehicleManager:
         self.vehicles.append(vehicle)
         self.vehicle_map[vehicle_id] = vehicle
 
+        self.collisions[vehicle_id] = False
+        self.outside_roads[vehicle_id] = False
+        self.reached_targets[vehicle_id] = False
+
         # 첫 번째 차량이면 활성화
         if len(self.vehicles) == 1:
             self.active_vehicle_idx = 0
 
         return vehicle
+
+    def clear_all_vehicles(self):
+        """
+        모든 차량 제거
+        """
+        self.vehicles.clear()
+        self.vehicle_map.clear()
+        self.collisions = {}
+        self.outside_roads = {}
+        self.reached_targets = {}
+        self.active_vehicle_idx = 0
+        self.next_vehicle_id = 0
 
     def remove_vehicle(self, vehicle_id):
         """
@@ -966,6 +986,9 @@ class VehicleManager:
         # 차량 목록과 맵에서 제거
         self.vehicles.remove(vehicle)
         del self.vehicle_map[vehicle_id]
+        del self.collisions[vehicle_id]
+        del self.outside_roads[vehicle_id]
+        del self.reached_targets[vehicle_id]
 
         # 활성 차량 인덱스 조정
         if len(self.vehicles) > 0:
@@ -989,12 +1012,18 @@ class VehicleManager:
             # 특정 차량만 초기화
             if vehicle_id in self.vehicle_map:
                 self.vehicle_map[vehicle_id].reset()
+                self.collisions[vehicle_id] = False
+                self.outside_roads[vehicle_id] = False
+                self.reached_targets[vehicle_id] = False
                 return True
             return False
         else:
             # 모든 차량 초기화
             for vehicle in self.vehicles:
                 vehicle.reset()
+                self.collisions[vehicle.id] = False
+                self.outside_roads[vehicle.id] = False
+                self.reached_targets[vehicle.id] = False
             return True
 
     def get_vehicle_by_id(self, vehicle_id):
@@ -1132,41 +1161,31 @@ class VehicleManager:
         모든 차량 상태 업데이트
 
         Args:
-            actions: 차량별 액션 (단일 차량이면 단일 액션, 다중 차량이면 액션 리스트)
+            actions: 차량별 액션 (액션 리스트, 2차원 배열)
             dt: 시간 간격
             time_elapsed: 총 경과 시간
             obstacles: 장애물 목록
 
         Returns:
             collisions: 차량별 충돌 여부 {vehicle_id: bool}
+            outside_roads: 차량별 도로 외부 여부 {vehicle_id: bool}
             reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
         """
         # 빈 장애물 리스트 초기화
         if obstacles is None:
             obstacles = []
 
-        collisions = {}
-        outside_roads = {}
-        reached_targets = {}
-
-        # 단일 액션인 경우 (단일 차량 모드)
-        if not isinstance(actions, list):
-            if len(self.vehicles) > 0:
-                vehicle = self.vehicles[0]
-                _, collision, outside_road, reached = vehicle.step(actions, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
-                collisions[vehicle.id] = collision
-                outside_roads[vehicle.id] = outside_road
-                reached_targets[vehicle.id] = reached
-        else:
-            # 다중 차량 모드
-            for i, vehicle in enumerate(self.vehicles):
-                if i < len(actions):
-                    vehicle_action = actions[i]
-                    _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
-                    collisions[vehicle.id] = collision
-                    outside_roads[vehicle.id] = outside_road
-                    reached_targets[vehicle.id] = reached
-        return collisions, outside_roads, reached_targets
+        for i, vehicle in enumerate(self.vehicles):
+            if i < len(actions):
+                vehicle_action = actions[i]
+                _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
+                if collision:
+                    self.collisions[vehicle.id] = True
+                if outside_road:
+                    self.outside_roads[vehicle.id] = True
+                if reached:
+                    self.reached_targets[vehicle.id] = True
+        return self.collisions, self.outside_roads, self.reached_targets
 
     def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
         """
@@ -1207,7 +1226,10 @@ class VehicleManager:
             vehicle_data.update({
                 'vehicle_config': vehicle.vehicle_config,
                 'physics_config': vehicle.physics_config,
-                'visual_config': vehicle.visual_config
+                'visual_config': vehicle.visual_config,
+                'collision': self.collisions.get(vehicle.id, False),
+                'outside_road': self.outside_roads.get(vehicle.id, False),
+                'reached_target': self.reached_targets.get(vehicle.id, False)
             })
             vehicles_data.append(vehicle_data)
 
@@ -1231,6 +1253,11 @@ class VehicleManager:
         self.vehicles = []
         self.vehicle_map = {}
 
+        # 충돌, 도로 이탈, 목표 도달 여부 초기화
+        self.collisions = {}
+        self.outside_roads = {}
+        self.reached_targets = {}
+
         # 차량 정보 복원
         if 'vehicles' in serialized_data:
             for vehicle_data in serialized_data['vehicles']:
@@ -1253,6 +1280,11 @@ class VehicleManager:
                 # 차량 목록 및 맵에 추가
                 self.vehicles.append(vehicle)
                 self.vehicle_map[vehicle_id] = vehicle
+
+                # 충돌, 도로 이탈, 목표 도달 여부 복원
+                self.collisions[vehicle_id] = vehicle_data.get('collision', False)
+                self.outside_roads[vehicle_id] = vehicle_data.get('outside_road', False)
+                self.reached_targets[vehicle_id] = vehicle_data.get('reached_target', False)
 
         # 활성 차량 인덱스 복원
         if 'active_vehicle_idx' in serialized_data:
