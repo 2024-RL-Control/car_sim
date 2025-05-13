@@ -391,8 +391,8 @@ class TrajectoryPredictor:
         # 첫 번째 포인트는 현재 상태
         init_trajectory_data = TrajectoryData(
             t=0.0,
-            x=state.x,
-            y=state.y,
+            x=state.rear_axle_x,
+            y=state.rear_axle_y,
             yaw=state.yaw,
             v_long=state.vel_long,
             a_long=state.acc_long,
@@ -417,8 +417,8 @@ class TrajectoryPredictor:
             # 새 궤적 포인트 생성 및 추가
             new_trajectory_data = TrajectoryData(
                 t=t,
-                x=sim_state.x,
-                y=sim_state.y,
+                x=sim_state.rear_axle_x,
+                y=sim_state.rear_axle_y,
                 yaw=sim_state.yaw,
                 v_long=sim_state.vel_long,
                 a_long=sim_state.acc_long,
@@ -447,8 +447,8 @@ class TrajectoryPredictor:
         # 첫 번째 포인트는 현재 상태
         trajectory_data_list.append(TrajectoryData(
             t=0.0,
-            x=state.x,
-            y=state.y,
+            x=state.rear_axle_x,
+            y=state.rear_axle_y,
             yaw=state.yaw,
             v_long=state.vel_long,
             a_long=0.0,  # 가속도는 0으로 가정

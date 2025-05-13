@@ -134,8 +134,8 @@ class VehicleState:
         # 현재 상태의 중요 필드들을 딕셔너리로 복사
         state_snapshot = {
             'timestamp': time.time(),  # 타임스탬프
-            'x': self.x,
-            'y': self.y,
+            'x': self.rear_axle_x,
+            'y': self.rear_axle_y,
             'yaw': self.yaw,
             'vel_long': self.vel_long,
             'acc_long': self.acc_long,
