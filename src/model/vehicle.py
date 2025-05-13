@@ -166,14 +166,10 @@ class VehicleState:
         data_list = np.array([])
         for trajectory in polynomial_trajectory:
             data = trajectory.get_data(self.x, self.y)
-            print(f"polynomial_trajectory: {data.shape}")
-            np.append(data_list, data)
+            data_list = np.append(data_list, data)
         for trajectory in physics_trajectory:
             data = trajectory.get_data(self.x, self.y)
-            print(f"physics_trajectory: {data.shape}")
-            np.append(data_list, data)
-
-        print("trajectory data_list shape: ", data_list.shape)
+            data_list = np.append(data_list, data)
 
         return data_list
 
