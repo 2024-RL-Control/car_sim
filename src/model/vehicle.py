@@ -713,19 +713,23 @@ class Vehicle:
             time_horizon: 궤적 예측 시간 범위 [s]
             dt: 시간 간격 [s]
         """
+        predicted_polynomial_trajectory = []
+        predicted_physics_trajectory = []
 
-        # 목표 속도와 횡방향 위치 설정
-        target_velocity = self.state.target_vel_long if self.state.target_vel_long is not None else self.state.vel_long
-        target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
+        if self.goal_manager.has_goals():
+            # 목표 속도와 횡방향 위치 설정
+            target_velocity = self.state.target_vel_long if self.state.target_vel_long is not None else self.state.vel_long
+            target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
 
-        # 궤적 예측
-        predicted_polynomial_trajectory = TrajectoryPredictor.predict_polynomial_trajectory(
-            state=self.state,
-            target_velocity=target_velocity,
-            target_d=target_d,
-            time_horizon=time_horizon,
-            dt=dt
-        )
+            # 궤적 예측
+            predicted_polynomial_trajectory = TrajectoryPredictor.predict_polynomial_trajectory(
+                state=self.state,
+                target_velocity=target_velocity,
+                target_d=target_d,
+                time_horizon=time_horizon,
+                dt=dt
+            )
+
         predicted_physics_trajectory = TrajectoryPredictor.predict_physics_based_trajectory(
             state=self.state,
             time_horizon=time_horizon,
@@ -745,10 +749,6 @@ class Vehicle:
             color: 궤적 색상 (RGB)
             width: 선 두께
         """
-        # 궤적 포인트가 2개 이상인 경우에만 그리기
-        if len(self.state.physics_trajectory) < 2 or len(self.state.polynomial_trajectory) < 2:
-            return
-
         width = max(1, int(2 * self.visual_config['camera_zoom']))
 
         # 궤적 포인트들을 화면 좌표로 변환
@@ -756,8 +756,10 @@ class Vehicle:
         physics_screen_points = [world_to_screen(point.x, point.y) for point in self.state.physics_trajectory]
 
         # 라인으로 연결하여 궤적 그리기
-        pygame.draw.lines(screen, (0, 255, 255), False, polynomial_screen_points, width)
-        pygame.draw.lines(screen, (255, 0, 0), False, physics_screen_points, width)
+        if len(polynomial_screen_points) > 0:
+            pygame.draw.lines(screen, (0, 255, 255), False, polynomial_screen_points, width)
+        if len(physics_screen_points) > 0:
+            pygame.draw.lines(screen, (255, 0, 0), False, physics_screen_points, width)
 
     def get_serializable_state(self):
         """
