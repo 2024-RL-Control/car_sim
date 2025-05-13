@@ -58,60 +58,6 @@ def manual_control():
     # 환경 종료
     env.close()
 
-# ==============
-# Multi-Vehicle Test
-# ==============
-def multi_vehicle_test():
-    """다중 차량 테스트 모드"""
-    # 환경 초기화
-    env = CarSimulatorEnv()
-    env.reset()
-
-    # 안내 메시지 출력
-    print_basic_controls("Multi-Vehicle Test")
-    print("  Tab: Switch between vehicles")
-
-    # 초기 목적지 생성 (각 차량마다)
-    for i in range(env.num_vehicles):
-        create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
-
-    running = True
-    while running:
-        # 키보드 입력 처리 및 액션 생성
-        action = env.handle_keyboard_input()
-
-        # 환경 스텝
-        _, _, done, info = env.step(action)
-
-        # 목적지 도달 확인 및 새 목적지 생성
-        for i in range(env.num_vehicles):
-            if info['reached_targets'].get(i, False):
-                # 목적지 도달 시 새 목적지 생성
-                create_random_goal(env, i, min_distance=30.0, max_distance=50.0)
-
-        # 렌더링
-        env.render()
-
-        # 이벤트 처리
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    running = False
-
-        # 충돌로 인한 종료 시 잠시 대기 후 재시작
-        if done:
-            if info.get('collision', False):
-                pygame.time.wait(1000)  # 1초 대기
-                env.reset()
-                # 초기 목적지 다시 생성
-                for i in range(env.num_vehicles):
-                    create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
-
-    # 환경 종료
-    env.close()
-
 def create_random_goal(env, vehicle_id, min_distance=15.0, max_distance=30.0):
     """
     지정된 차량에 대한 랜덤 목적지 생성
@@ -162,140 +108,57 @@ def create_random_goal(env, vehicle_id, min_distance=15.0, max_distance=30.0):
             break
 
 # ==============
-# Waypoint Navigation Test
+# Manual Control With Goal
 # ==============
-def waypoint_navigation_test():
-    """웨이포인트 주행 테스트 모드"""
+def manual_control_with_goal():
+    """목표가 있는 차량 수동 제어"""
     # 환경 초기화
     env = CarSimulatorEnv()
     env.reset()
 
     # 안내 메시지 출력
-    print_basic_controls("Waypoint Navigation Test")
-    print("  N: Generate new waypoints")
-    print("  Tab: Switch between vehicles")
+    print_basic_controls("Manual Control With Goal")
 
-    # 차량별 웨이포인트 시퀀스와 상태 초기화
-    vehicle_waypoints = {}
-    for vid in range(env.num_vehicles):
-        # 기존 목표 제거 후 새 시퀀스 생성
-        vehicle = env.vehicle_manager.get_vehicle_by_id(vid)
-        vehicle_waypoints[vid] = create_waypoint_sequence(env, vid)
+    # 초기 목적지 생성 (각 차량마다)
+    for i in range(env.num_vehicles):
+        create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
 
     running = True
-    generate_new = False
-    target_vid = None
-
     while running:
-        # 입력 처리
+        # 키보드 입력 처리 및 액션 생성
         action = env.handle_keyboard_input()
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
-                running = False
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_n:
-                # 특정 차량에 대해 즉시 새 웨이포인트 시퀀스 생성 요청
-                active = env.vehicle_manager.get_active_vehicle()
-                if active:
-                    target_vid = active.id
-                    generate_new = True
 
         # 환경 스텝
         _, _, done, info = env.step(action)
 
-        # 도달한 차량에 대해 next_goal 호출
-        for vid, reached in info['reached_targets'].items():
-            if reached:
-                vehicle = env.vehicle_manager.get_vehicle_by_id(vid)
-                # 다음 목표가 있으면 인덱스 자동 증가
-                if not vehicle.next_goal():
-                    # 모든 목표 소진 시 새 시퀀스 생성
-                    vehicle_waypoints[vid] = create_waypoint_sequence(env, vid)
-
-        # 'N' 키를 눌러 새 시퀀스 요청한 경우
-        if generate_new and target_vid is not None:
-            veh = env.vehicle_manager.get_vehicle_by_id(target_vid)
-            veh.clear_goals()
-            vehicle_waypoints[target_vid] = create_waypoint_sequence(env, target_vid)
-            generate_new = False
-            target_vid = None
+        # 목적지 도달 확인 및 새 목적지 생성
+        for i in range(env.num_vehicles):
+            if info['reached_targets'].get(i, False):
+                # 목적지 도달 시 새 목적지 생성
+                create_random_goal(env, i, min_distance=30.0, max_distance=50.0)
 
         # 렌더링
         env.render()
 
-        # 충돌 시 재시작
-        if done and info.get('collision', False):
-            pygame.time.wait(1000)
-            env.reset()
-            # 모든 차량에 새 시퀀스 생성
-            for vid in range(env.num_vehicles):
-                v = env.vehicle_manager.get_vehicle_by_id(vid)
-                v.clear_goals()
-                vehicle_waypoints[vid] = create_waypoint_sequence(env, vid)
+        # 이벤트 처리
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    running = False
 
+        # 충돌로 인한 종료 시 잠시 대기 후 재시작
+        if done:
+            if info.get('collision', False):
+                pygame.time.wait(1000)  # 1초 대기
+                env.reset()
+                # 초기 목적지 다시 생성
+                for i in range(env.num_vehicles):
+                    create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
+
+    # 환경 종료
     env.close()
-
-def create_waypoint_sequence(env, vehicle_id=0, num_waypoints=5, min_distance=10.0, max_distance=25.0):
-    """
-    웨이포인트 시퀀스 생성
-
-    Args:
-        env: CarSimulatorEnv 객체
-        vehicle_id: 차량 ID
-        num_waypoints: 생성할 웨이포인트 수
-        min_distance: 웨이포인트 간 최소 거리 (m)
-        max_distance: 웨이포인트 간 최대 거리 (m)
-
-    Returns:
-        웨이포인트 리스트: [(x, y, yaw), ...]
-    """
-    vehicle = env.vehicle_manager.get_vehicle_by_id(vehicle_id)
-    vehicle.clear_goals()
-    waypoints = []
-
-    # 시작점 (현재 차량 위치)
-    current_x = vehicle.state.x
-    current_y = vehicle.state.y
-
-    for i in range(num_waypoints):
-        # 랜덤 방향 (이전 방향에서 ±90도 이내로 제한하여 자연스러운 경로 생성)
-        if i == 0:
-            # 첫 웨이포인트는 현재 차량 방향 기준 ±45도 내에서 생성
-            base_angle = vehicle.state.yaw
-            angle = base_angle + (np.random.random() - 0.5) * np.pi/2
-        else:
-            # 이전 웨이포인트 방향 기준 ±90도 내에서 생성
-            dx = current_x - waypoints[-1][0]
-            dy = current_y - waypoints[-1][1]
-            base_angle = np.arctan2(dy, dx)
-            angle = base_angle + (np.random.random() - 0.5) * np.pi
-
-        # 랜덤 거리
-        distance = min_distance + np.random.random() * (max_distance - min_distance)
-
-        # 새 위치 계산
-        new_x = current_x + distance * np.cos(angle)
-        new_y = current_y + distance * np.sin(angle)
-
-        # 도착 방향 (다음 웨이포인트를 향하도록, 마지막은 랜덤)
-        if i < num_waypoints - 1:
-            target_yaw = angle
-        else:
-            target_yaw = np.random.random() * 2 * np.pi
-
-        # 웨이포인트 추가
-        waypoints.append((new_x, new_y, target_yaw))
-
-        # 현재 위치 업데이트
-        current_x, current_y = new_x, new_y
-
-    radius = 1.5  # 기본 반경
-    colors = [(0, 255, 0), (255, 255, 0), (0, 255, 255), (255, 0, 255), (0, 0, 255)]
-    base_color = colors[vehicle_id % len(colors)]
-
-    for i, (x, y, yaw) in enumerate(waypoints):
-        goal_id = vehicle.add_goal(x, y, yaw, radius, base_color)
-
-    return waypoints
 
 # ==============
 # Course Builder Helper Functions
@@ -372,7 +235,6 @@ def manual_control_with_obstacles():
     print_basic_controls("Manual Control With Obstacles")
     print("  1: Load Basic Course")
     print("  2: Load Slalom Course")
-    print("  Tab: Switch between vehicles")
 
     running = True
     while running:
@@ -430,7 +292,6 @@ def dynamic_obstacles_test():
     print("  1: Reset with circular moving obstacles")
     print("  2: Reset with oscillating obstacles")
     print("  3: Reset with random movement obstacles")
-    print("  Tab: Switch between vehicles")
 
     # 모든 차량에 대한 초기 목적지 생성
     for i in range(env.num_vehicles):

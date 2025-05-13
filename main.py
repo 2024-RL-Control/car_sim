@@ -1,6 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 import pygame
-from src.examples.env_examples import manual_control, manual_control_with_obstacles, multi_vehicle_test, waypoint_navigation_test, dynamic_obstacles_test
+from src.examples.env_examples import manual_control, manual_control_with_goal, manual_control_with_obstacles, dynamic_obstacles_test
 from src.ui.menu import MainMenu
 
 # ==============
@@ -19,10 +19,8 @@ if __name__ == "__main__":
             manual_control()
         elif selected_option == 'obstacles':
             manual_control_with_obstacles()
-        elif selected_option == 'multi_vehicle':
-            multi_vehicle_test()
-        elif selected_option == 'waypoint':
-            waypoint_navigation_test()
+        elif selected_option == 'goal':
+            manual_control_with_goal()
         elif selected_option == 'dynamic_obstacles':
             dynamic_obstacles_test()
         elif selected_option == 'quit':

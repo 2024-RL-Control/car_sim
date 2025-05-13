@@ -18,11 +18,10 @@ class MainMenu:
         # 메뉴 항목
         self.menu_items = [
             "1. Manual Driving",
-            "2. Obstacle Course Driving",
-            "3. Multi-Vehicle Test",
-            "4. Waypoint Navigation Test",
-            "5. Dynamic Obstacles Test",
-            "6. Quit"
+            "2. Obstacle Driving",
+            "3. Goal Driving",
+            "4. Dynamic Obstacles Test",
+            "5. Quit"
         ]
 
     def show_main_menu(self):
@@ -30,7 +29,7 @@ class MainMenu:
         메인 메뉴 표시 및 선택 처리
 
         Returns:
-            str: 선택한 메뉴 항목 ('manual', 'obstacles', 'multi_vehicle', 'waypoint', 'dynamic_obstacles', 'quit')
+            str: 선택한 메뉴 항목 ('manual', 'obstacles', 'goal', 'dynamic_obstacles', 'quit')
         """
         running = True
         while running:
@@ -66,18 +65,14 @@ class MainMenu:
                         pygame.quit()
                         return 'obstacles'
                     elif event.key == pygame.K_3:
-                        # 다중 차량 테스트 모드
+                        # 목표 주행 모드
                         pygame.quit()
-                        return 'multi_vehicle'
+                        return 'goal'
                     elif event.key == pygame.K_4:
-                        # 웨이포인트 주행 테스트 모드
-                        pygame.quit()
-                        return 'waypoint'
-                    elif event.key == pygame.K_5:
                         # 동적 장애물 테스트 모드
                         pygame.quit()
                         return 'dynamic_obstacles'
-                    elif event.key == pygame.K_6 or event.key == pygame.K_ESCAPE:
+                    elif event.key == pygame.K_5 or event.key == pygame.K_ESCAPE:
                         # 종료
                         running = False
                         return 'quit'
