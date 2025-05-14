@@ -113,19 +113,19 @@ class BasicRLDrivingEnv:
             y = random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'])
 
             # 랜덤 크기의 장애물
-            size = random.uniform(1.0, 3.0)
+            size = random.uniform(1.0, 10.0)
 
             # 장애물 유형 랜덤 선택 (원형, 정사각형, 직사각형)
             obstacle_type = random.choice(['circle', 'square', 'rectangle'])
 
             if obstacle_type == 'circle':
-                obstacle_manager.add_circle_obstacle(None, x, y, 0, 0, 0, size, (200, 0, 0))
+                obstacle_manager.add_circle_obstacle(None, x, y, 0, 0, 0, size)
             elif obstacle_type == 'square':
-                obstacle_manager.add_square_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, size, (0, 200, 0))
+                obstacle_manager.add_square_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, size)
             else:  # rectangle
-                width = random.uniform(1.5, 4.0)
-                height = random.uniform(1.0, 2.5)
-                obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, width, height, (0, 0, 200))
+                width = random.uniform(1.5, 10.0)
+                height = random.uniform(1.0, 3.5)
+                obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, width, height)
 
         # 동적 장애물 배치
         for _ in range(self.num_dynamic_obstacles):
@@ -133,21 +133,18 @@ class BasicRLDrivingEnv:
             y = random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'])
 
             # 랜덤 속도, 방향 및 크기
-            speed = random.uniform(1.0, 3.0)
+            speed = random.uniform(1.0, 10.0)
             direction = random.uniform(-pi/2, pi/2)
-            size = random.uniform(1.0, 2.0)
-            yaw_rate = random.uniform(-0.3, 0.3)  # 회전 속도
-
-            # 랜덤 색상
-            color = (random.randint(100, 255), random.randint(100, 255), random.randint(100, 255))
+            size = random.uniform(1.0, 10.0)
+            yaw_rate = random.uniform(-0.4, 0.4)  # 회전 속도
 
             # 장애물 유형 랜덤 선택
             obstacle_type = random.choice(['circle', 'square'])
 
             if obstacle_type == 'circle':
-                obstacle_manager.add_circle_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
+                obstacle_manager.add_circle_obstacle(None, x, y, direction, yaw_rate, speed, size)
             else:  # square
-                obstacle_manager.add_square_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
+                obstacle_manager.add_square_obstacle(None, x, y, direction, yaw_rate, speed, size)
 
     def _setup_vehicle(self):
         """
@@ -176,7 +173,6 @@ class BasicRLDrivingEnv:
 
             # 새 차량 생성
             self.env.vehicle_manager.create_vehicle(x=x, y=y, yaw=yaw, vehicle_id=i)
-            print(placement_area)
 
             # 차량 시작 위치 저장 (목적지 설정에 사용)
             self.vehicle_start_position.append({
@@ -210,7 +206,7 @@ class BasicRLDrivingEnv:
             y = random.uniform(boundary['y_min'], boundary['y_max'])
 
             # 차량에 목적지 추가
-            self.env.add_goal_for_vehicle(i, x, y, yaw, radius=2.0, color=(0, 255, 0))
+            self.env.add_goal_for_vehicle(i, x, y, yaw, radius=2.0)
 
     def reset(self):
         """
