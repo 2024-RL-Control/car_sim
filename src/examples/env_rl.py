@@ -6,7 +6,7 @@ import math
 from math import pi, cos, sin
 from src.env.env import CarSimulatorEnv
 
-class RLBasicDrivingEnv:
+class BasicRLDrivingEnv:
     """
     강화학습 기반 기초 자율주행 에이전트를 위한 환경 클래스
     목표:
@@ -25,7 +25,6 @@ class RLBasicDrivingEnv:
         self.env = CarSimulatorEnv(config_path, setup=False)
 
         self.num_episodes = self.env.config['simulation']['num_episodes']
-        self.num_vehicles = self.env.config['simulation']['num_vehicles']
         self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
         self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
 
@@ -304,76 +303,73 @@ class RLBasicDrivingEnv:
         print("  Tab: Switch between vehicles")
         print("  ESC: Quit")
 
-def train_autonomous_agent():
-    """
-    자율주행 에이전트 학습 함수
-    """
-    # 강화학습 환경 초기화
-    env = RLBasicDrivingEnv()
-    env.print_basic_controls()
+    def train(self):
+        """
+        자율주행 에이전트 학습 함수
+        """
+        self.print_basic_controls()
+        # 에피소드 스텝을 관리하는 변수
+        episode_rewards = []
+        terminated = False
 
-    # 에피소드 스텝을 관리하는 변수
-    episode_rewards = []
-    terminated = False
-
-    for _ in range(env.num_episodes):
-        if terminated:
-            break
-
-        # 환경 초기화
-        obs_array = env.reset()
-
-        # 에피소드 정보
-        total_reward = 0
-        done = False
-
-        print(f"Episode {env.episode_count}/{env.num_episodes}")
-
-        while not done and not terminated:
-            # 키보드 입력 처리
-            env.handle_keyboard_input()
-
-            # 랜덤 액션 테스트 (실제 학습에서는 에이전트가 결정, 다중 차량 고려)
-            actions = []
-            for _ in range(env.env.num_vehicles):
-                # throttle_engine, throttle_brake, steering
-                actions.append(np.array([random.uniform(0, 1), random.uniform(0, 1), random.uniform(-1, 1)]))
-
-            # 환경에서 한 스텝 진행
-            obs_array, reward_array, done, info = env.step(np.array(actions))
-
-            # 보상 누적
-            for reward in reward_array:
-                total_reward += reward
-
-            # info 속 collisions, outside_roads, reached_targets(id, value) 활용, 충돌 or 도착 or 도로 벗어날 시 에이전트 조작 및 학습 사용 X
-
-            # 렌더링
-            env.render()
-
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    terminated = True
-                    break
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        terminated = True
-                        break
-
-            # 종료 확인
-            if done:
-                print(f"  Step: {env.steps}, Total Reward: {total_reward:.2f}")
-                episode_rewards.append(total_reward)
+        for _ in range(self.num_episodes):
+            if terminated:
                 break
 
-    # 환경 종료
-    env.close()
+            # 환경 초기화
+            obs_array = self.reset()
 
-    # 학습 결과 출력
-    if not terminated:
-        print(f"\nTraining completed for {env.num_episodes} episodes.")
-        print(f"Average reward: {np.mean(episode_rewards):.2f}")
-    else:
-        print("Training terminated by user.")
+            # 에피소드 정보
+            total_reward = 0
+            done = False
 
-    return episode_rewards
+            print(f"Episode {self.episode_count}/{self.num_episodes}")
+
+            while not done and not terminated:
+                # 키보드 입력 처리
+                self.handle_keyboard_input()
+
+                # 랜덤 액션 테스트 (실제 학습에서는 에이전트가 결정, 다중 차량 고려)
+                actions = []
+                for _ in range(self.env.num_vehicles):
+                    # throttle_engine, throttle_brake, steering
+                    actions.append(np.array([random.uniform(0, 1), random.uniform(0, 1), random.uniform(-1, 1)]))
+
+                # 환경에서 한 스텝 진행
+                obs_array, reward_array, done, info = self.step(np.array(actions))
+
+                # 보상 누적
+                for reward in reward_array:
+                    total_reward += reward
+
+                # info 속 collisions, outside_roads, reached_targets(id, value) 활용, 충돌 or 도착 or 도로 벗어날 시 에이전트 조작 및 학습 사용 X
+
+                # 렌더링
+                self.render()
+
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        terminated = True
+                        break
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            terminated = True
+                            break
+
+                # 종료 확인
+                if done:
+                    print(f"  Step: {self.steps}, Total Reward: {total_reward:.2f}")
+                    episode_rewards.append(total_reward)
+                    break
+
+        # 환경 종료
+        self.close()
+
+        # 학습 결과 출력
+        if not terminated:
+            print(f"\nTraining completed for {self.num_episodes} episodes.")
+            print(f"Average reward: {np.mean(episode_rewards):.2f}")
+        else:
+            print("Training terminated by user.")
+
+        return episode_rewards
