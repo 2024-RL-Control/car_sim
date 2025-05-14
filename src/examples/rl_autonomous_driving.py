@@ -48,6 +48,34 @@ class RLAutonomousDrivingEnv:
         # 버퍼 거리 (차량과 장애물 공간 사이 여유)
         self.buffer_distance = self.env.config['simulation']['obstacle']['buffer_distance']
 
+        # 차량 배치 가능 공간
+        self.vehicle_area = {
+            'left': {
+                'x_min': self.boundary['x_min'],
+                'x_max': self.obstacle_area['x_min'] - self.buffer_distance,
+                'y_min': self.boundary['y_min'],
+                'y_max': self.boundary['y_max']
+            },
+            'right': {
+                'x_min': self.obstacle_area['x_max'] + self.buffer_distance,
+                'x_max': self.boundary['x_max'],
+                'y_min': self.boundary['y_min'],
+                'y_max': self.boundary['y_max']
+            },
+            'top': {
+                'x_min': self.boundary['x_min'],
+                'x_max': self.boundary['x_max'],
+                'y_min': self.boundary['y_min'],
+                'y_max': self.obstacle_area['y_max'] - self.buffer_distance
+            },
+            'bottom': {
+                'x_min': self.boundary['x_min'],
+                'x_max': self.boundary['x_max'],
+                'y_min': self.obstacle_area['y_min'] + self.buffer_distance,
+                'y_max': self.boundary['y_max']
+            }
+        }
+
         # 초기화 시 장애물 및 목적지 설정
         self.setup_environment()
 
@@ -100,6 +128,8 @@ class RLAutonomousDrivingEnv:
                 height = random.uniform(1.0, 2.5)
                 obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(0, 2*pi), 0, 0, width, height, (0, 0, 200))
 
+            print("Static obstacle position:", x, y)
+
         # 동적 장애물 배치
         for _ in range(self.num_dynamic_obstacles):
             x = random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'])
@@ -122,6 +152,8 @@ class RLAutonomousDrivingEnv:
             else:  # square
                 obstacle_manager.add_square_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
 
+            print("Dynamic obstacle position:", x, y)
+
     def _setup_vehicle(self):
         """
         차량 배치: 외곽 영역에 차량 배치
@@ -133,27 +165,18 @@ class RLAutonomousDrivingEnv:
         # 상하좌우 네 영역 중 랜덤 선택
         for i in range(self.num_vehicles):
             placement_area = random.choice(['top', 'bottom', 'left', 'right'])
+            boundary = self.vehicle_area[placement_area]
+            x = random.uniform(boundary['x_min'], boundary['x_max'])
+            y = random.uniform(boundary['y_max'], boundary['y_max'])
             yaw_volatility = random.uniform(-pi/6, pi/6)
 
             if placement_area == 'top':
-                x = random.uniform(self.boundary['x_min'] + self.buffer_distance,
-                                self.boundary['x_max'] - self.buffer_distance)
-                y = self.boundary['y_min'] + self.buffer_distance/2  # 상단 가장자리
                 yaw = pi/2 + yaw_volatility  # 아래쪽 방향
             elif placement_area == 'bottom':
-                x = random.uniform(self.boundary['x_min'] + self.buffer_distance,
-                                self.boundary['x_max'] - self.buffer_distance)
-                y = self.boundary['y_max'] - self.buffer_distance/2  # 하단 가장자리
                 yaw = -pi/2 + yaw_volatility  # 위쪽 방향
             elif placement_area == 'left':
-                x = self.boundary['x_min'] + self.buffer_distance/2  # 왼쪽 가장자리
-                y = random.uniform(self.boundary['y_min'] + self.buffer_distance,
-                                self.boundary['y_max'] - self.buffer_distance)
                 yaw = 0 + yaw_volatility  # 오른쪽 방향
             else:  # right
-                x = self.boundary['x_max'] - self.buffer_distance/2  # 오른쪽 가장자리
-                y = random.uniform(self.boundary['y_min'] + self.buffer_distance,
-                                self.boundary['y_max'] - self.buffer_distance)
                 yaw = pi + yaw_volatility  # 왼쪽 방향
 
             # 새 차량 생성
