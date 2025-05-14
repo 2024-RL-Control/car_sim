@@ -163,7 +163,7 @@ class RLAutonomousDrivingEnv:
 
         # 차량 배치 가능 공간은 외곽 영역
         # 상하좌우 네 영역 중 랜덤 선택
-        for i in range(self.num_vehicles):
+        for i in range(self.env.num_vehicles):
             placement_area = random.choice(['top', 'bottom', 'left', 'right'])
             boundary = self.vehicle_area[placement_area]
             x = random.uniform(boundary['x_min'], boundary['x_max'])
@@ -195,7 +195,7 @@ class RLAutonomousDrivingEnv:
         목적지 설정: 차량 시작 위치의 반대편에 목적지 설정
         """
         # 차량 시작 위치의 반대편 결정
-        for i in range(self.num_vehicles):
+        for i in range(self.env.num_vehicles):
             placement = self.vehicle_start_position[i]['placement']
             yaw_volatility = random.uniform(-pi/6, pi/6)
 
@@ -335,7 +335,7 @@ def train_autonomous_agent():
 
             # 랜덤 액션 테스트 (실제 학습에서는 에이전트가 결정, 다중 차량 고려)
             actions = []
-            for _ in range(env.num_vehicles):
+            for _ in range(env.env.num_vehicles):
                 # throttle_engine, throttle_brake, steering
                 actions.append(np.array([random.uniform(0, 1), random.uniform(0, 1), random.uniform(-1, 1)]))
 
