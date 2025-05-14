@@ -65,8 +65,10 @@ class Renderer:
         cam_x, cam_y = camera.get_position()
 
         # 화면 영역(viewport)에서 보이는 월드 좌표 범위 계산
-        screen_width = self.config['visualization']['window_width']
-        screen_height = self.config['visualization']['window_height']
+        # screen_width = self.config['visualization']['window_width']
+        # screen_height = self.config['visualization']['window_height']
+        screen_width = 3000
+        screen_height = 3000
 
         # 화면 경계에 해당하는 월드 좌표 계산
         world_left = cam_x - screen_width / (2 * scale)
@@ -75,10 +77,10 @@ class Renderer:
         world_bottom = cam_y - screen_height / (2 * scale)
 
         # 화면에 표시될 그리드 라인의 시작/끝 인덱스 계산
-        grid_start_x = int(world_left / grid_size) - 1
-        grid_end_x = int(world_right / grid_size) + 1
-        grid_start_y = int(world_bottom / grid_size) - 1
-        grid_end_y = int(world_top / grid_size) + 1
+        grid_start_x = int(world_left / grid_size)
+        grid_end_x = int(world_right / grid_size)
+        grid_start_y = int(world_bottom / grid_size)
+        grid_end_y = int(world_top / grid_size)
 
         # 수직 그리드 라인 (X축과 평행한 선)
         for i in range(grid_start_x, grid_end_x + 1):

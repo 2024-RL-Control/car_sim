@@ -122,10 +122,9 @@ class CarSimulatorEnv(gym.Env):
         self.screen, self.clock = self.renderer.init_pygame()
         self.hud = HUD(self.config)
 
-    def _world_to_screen(self, x, y, cam_x=None, cam_y=None):
+    def _world_to_screen(self, x, y, vehicle=None):
         """카메라의 world_to_screen 메서드를 호출하는 래퍼 함수"""
-        active_vehicle = self.vehicle_manager.get_active_vehicle()
-        return self.camera.world_to_screen(x, y, cam_x, cam_y, active_vehicle)
+        return self.camera.world_to_screen(x, y, vehicle)
 
     def handle_keyboard_input(self):
         """키보드 입력 처리 (상태 업데이트)"""
