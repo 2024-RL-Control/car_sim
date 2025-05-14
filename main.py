@@ -1,7 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 import pygame
 from src.examples.env_examples import manual_control, manual_control_with_goal, manual_control_with_obstacles, dynamic_obstacles_test
-from src.examples.rl_autonomous_driving import train_autonomous_agent
+from src.examples.env_rl import train_autonomous_agent
 from src.ui.menu import MainMenu
 
 # ==============

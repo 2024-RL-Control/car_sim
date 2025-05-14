@@ -6,9 +6,9 @@ import math
 from math import pi, cos, sin
 from src.env.env import CarSimulatorEnv
 
-class RLAutonomousDrivingEnv:
+class RLBasicDrivingEnv:
     """
-    강화학습 기반 자율주행 에이전트를 위한 환경 클래스
+    강화학습 기반 기초 자율주행 에이전트를 위한 환경 클래스
     목표:
     1. 목적지 도착
     2. 장애물 회피
@@ -290,7 +290,7 @@ class RLAutonomousDrivingEnv:
         self.env.close()
 
     def print_basic_controls(self):
-        print("=== RLAutonomousDrivingEnv ===")
+        print("=== RL Basic Driving Env ===")
         print("  C: Toggle camera follow")
         print("  R: Reset camera view")
         print("  +/-: Zoom in/out")
@@ -309,7 +309,7 @@ def train_autonomous_agent():
     자율주행 에이전트 학습 함수
     """
     # 강화학습 환경 초기화
-    env = RLAutonomousDrivingEnv()
+    env = RLBasicDrivingEnv()
     env.print_basic_controls()
 
     # 에피소드 스텝을 관리하는 변수
