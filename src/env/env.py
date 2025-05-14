@@ -359,9 +359,13 @@ class CarSimulatorEnv(gym.Env):
             objects.extend(obstacles)
         if self.vehicle_manager.get_vehicle_count() > 0:
             vehicles = self.vehicle_manager.get_all_vehicles()
+            body = []
             for v in vehicles:
                 if v.id != vehicle_id:
-                    objects.extend(v.get_outer_circles_world())
+                    body.extend(v.get_outer_circles_world())
+            if vehicle._check_collision(body):
+                raise ValueError("위치가 다른 차량과 충돌합니다")
+            objects.extend(body)
 
         return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
 

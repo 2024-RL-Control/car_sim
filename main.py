@@ -1,6 +1,6 @@
 ﻿# -*- coding: utf-8 -*-
 import pygame
-from src.examples.env_examples import manual_control, manual_control_with_goal, manual_control_with_obstacles, dynamic_obstacles_test
+from src.examples.env_examples import manual_control, manual_control_with_goal, manual_control_with_obstacles
 from src.examples.env_rl import BasicRLDrivingEnv
 from src.ui.menu import MainMenu
 
@@ -22,8 +22,6 @@ if __name__ == "__main__":
             manual_control_with_obstacles()
         elif selected_option == 'goal':
             manual_control_with_goal()
-        elif selected_option == 'dynamic_obstacles':
-            dynamic_obstacles_test()
         elif selected_option == 'basic_rl_training':
             env = BasicRLDrivingEnv()
             env.train()
