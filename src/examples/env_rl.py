@@ -30,17 +30,17 @@ class BasicRLDrivingEnv:
 
         # 환경 바운더리 설정
         self.boundary = {
-            'x_min': -self.env.config['simulation']['boundary']['x_min'],
+            'x_min': self.env.config['simulation']['boundary']['x_min'],
             'x_max': self.env.config['simulation']['boundary']['x_max'],
-            'y_min': -self.env.config['simulation']['boundary']['y_min'],
+            'y_min': self.env.config['simulation']['boundary']['y_min'],
             'y_max': self.env.config['simulation']['boundary']['y_max']
         }
 
         # 장애물 배치 가능 공간
         self.obstacle_area = {
-            'x_min': -self.env.config['simulation']['obstacle']['boundary']['x_min'],
+            'x_min': self.env.config['simulation']['obstacle']['boundary']['x_min'],
             'x_max': self.env.config['simulation']['obstacle']['boundary']['x_max'],
-            'y_min': -self.env.config['simulation']['obstacle']['boundary']['y_min'],
+            'y_min': self.env.config['simulation']['obstacle']['boundary']['y_min'],
             'y_max': self.env.config['simulation']['obstacle']['boundary']['y_max']
         }
 
@@ -127,8 +127,6 @@ class BasicRLDrivingEnv:
                 height = random.uniform(1.0, 2.5)
                 obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(0, 2*pi), 0, 0, width, height, (0, 0, 200))
 
-            print("Static obstacle position:", x, y)
-
         # 동적 장애물 배치
         for _ in range(self.num_dynamic_obstacles):
             x = random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'])
@@ -151,8 +149,6 @@ class BasicRLDrivingEnv:
             else:  # square
                 obstacle_manager.add_square_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
 
-            print("Dynamic obstacle position:", x, y)
-
     def _setup_vehicle(self):
         """
         차량 배치: 외곽 영역에 차량 배치
@@ -166,7 +162,7 @@ class BasicRLDrivingEnv:
             placement_area = random.choice(['top', 'bottom', 'left', 'right'])
             boundary = self.vehicle_area[placement_area]
             x = random.uniform(boundary['x_min'], boundary['x_max'])
-            y = random.uniform(boundary['y_max'], boundary['y_max'])
+            y = random.uniform(boundary['y_min'], boundary['y_max'])
             yaw_volatility = random.uniform(-pi/6, pi/6)
 
             if placement_area == 'top':
@@ -180,7 +176,7 @@ class BasicRLDrivingEnv:
 
             # 새 차량 생성
             self.env.vehicle_manager.create_vehicle(x=x, y=y, yaw=yaw, vehicle_id=i)
-            print(f"Vehicle {i} created at ({x}, {y}) with yaw {yaw}, placement {placement_area}")
+            print(placement_area)
 
             # 차량 시작 위치 저장 (목적지 설정에 사용)
             self.vehicle_start_position.append({
@@ -195,32 +191,26 @@ class BasicRLDrivingEnv:
         """
         # 차량 시작 위치의 반대편 결정
         for i in range(self.env.num_vehicles):
-            placement = self.vehicle_start_position[i]['placement']
+            vehicle_placement = self.vehicle_start_position[i]['placement']
             yaw_volatility = random.uniform(-pi/6, pi/6)
-
-            if placement == 'top':
-                goal_x = random.uniform(self.boundary['x_min'] + self.buffer_distance,
-                                       self.boundary['x_max'] - self.buffer_distance)
-                goal_y = self.boundary['y_max'] - self.buffer_distance/2  # 하단 가장자리
-                goal_yaw = -pi/2 + yaw_volatility  # 위쪽을 바라봄
-            elif placement == 'bottom':
-                goal_x = random.uniform(self.boundary['x_min'] + self.buffer_distance,
-                                       self.boundary['x_max'] - self.buffer_distance)
-                goal_y = self.boundary['y_min'] + self.buffer_distance/2  # 상단 가장자리
-                goal_yaw = pi/2 + yaw_volatility  # 아래쪽을 바라봄
-            elif placement == 'left':
-                goal_x = self.boundary['x_max'] - self.buffer_distance/2  # 오른쪽 가장자리
-                goal_y = random.uniform(self.boundary['y_min'] + self.buffer_distance,
-                                       self.boundary['y_max'] - self.buffer_distance)
-                goal_yaw = pi + yaw_volatility  # 왼쪽을 바라봄
+            if vehicle_placement == 'top':
+                boundary = self.vehicle_area['bottom']
+                yaw = -pi/2 + yaw_volatility
+            elif vehicle_placement == 'bottom':
+                boundary = self.vehicle_area['top']
+                yaw = pi/2 + yaw_volatility
+            elif vehicle_placement == 'left':
+                boundary = self.vehicle_area['right']
+                yaw = 0 + yaw_volatility
             else:  # right
-                goal_x = self.boundary['x_min'] + self.buffer_distance/2  # 왼쪽 가장자리
-                goal_y = random.uniform(self.boundary['y_min'] + self.buffer_distance,
-                                       self.boundary['y_max'] - self.buffer_distance)
-                goal_yaw = 0 + yaw_volatility  # 오른쪽을 바라봄
+                boundary = self.vehicle_area['left']
+                yaw = pi + yaw_volatility
+
+            x = random.uniform(boundary['x_min'], boundary['x_max'])
+            y = random.uniform(boundary['y_min'], boundary['y_max'])
 
             # 차량에 목적지 추가
-            self.env.add_goal_for_vehicle(i, goal_x, goal_y, goal_yaw, radius=2.0, color=(0, 255, 0))
+            self.env.add_goal_for_vehicle(i, x, y, yaw, radius=2.0, color=(0, 255, 0))
 
     def reset(self):
         """
