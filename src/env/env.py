@@ -54,7 +54,8 @@ class CarSimulatorEnv(gym.Env):
         )
 
         # 초기 차량들 생성
-        if setup:
+        self.setup = setup
+        if self.setup:
             for i in range(self.num_vehicles):
                 self.vehicle_manager.create_vehicle(x=i*100, y=0, vehicle_id=i)
 
@@ -287,8 +288,9 @@ class CarSimulatorEnv(gym.Env):
         self.vehicle_manager.reset_vehicle()
 
         # 각 차량 위치 설정 (X축으로 간격 두고 배치)
-        for i, vehicle in enumerate(self.vehicle_manager.get_all_vehicles()):
-            vehicle.set_position(i*100, 0)
+        if self.setup:
+            for i, vehicle in enumerate(self.vehicle_manager.get_all_vehicles()):
+                vehicle.set_position(i*100, 0)
 
         # 상태 기록 초기화
         self._state_history.clear()
