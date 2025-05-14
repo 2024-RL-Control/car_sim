@@ -117,15 +117,16 @@ class BasicRLDrivingEnv:
 
             # 장애물 유형 랜덤 선택 (원형, 정사각형, 직사각형)
             obstacle_type = random.choice(['circle', 'square', 'rectangle'])
+            color = (100, 100, 200)
 
             if obstacle_type == 'circle':
-                obstacle_manager.add_circle_obstacle(None, x, y, 0, 0, 0, size)
+                obstacle_manager.add_circle_obstacle(None, x, y, 0, 0, 0, size, color)
             elif obstacle_type == 'square':
-                obstacle_manager.add_square_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, size)
+                obstacle_manager.add_square_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, size, color)
             else:  # rectangle
                 width = random.uniform(1.5, 10.0)
                 height = random.uniform(1.0, 3.5)
-                obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, width, height)
+                obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, width, height, color)
 
         # 동적 장애물 배치
         for _ in range(self.num_dynamic_obstacles):
@@ -140,11 +141,12 @@ class BasicRLDrivingEnv:
 
             # 장애물 유형 랜덤 선택
             obstacle_type = random.choice(['circle', 'square'])
+            color = (200, 100, 100)
 
             if obstacle_type == 'circle':
-                obstacle_manager.add_circle_obstacle(None, x, y, direction, yaw_rate, speed, size)
+                obstacle_manager.add_circle_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
             else:  # square
-                obstacle_manager.add_square_obstacle(None, x, y, direction, yaw_rate, speed, size)
+                obstacle_manager.add_square_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
 
     def _setup_vehicle(self):
         """
@@ -344,7 +346,11 @@ class BasicRLDrivingEnv:
                 break
 
             # 환경 초기화
-            obs_array = self.reset()
+            try:
+                obs_array = self.reset()
+            except Exception as e:
+                print(f"Error resetting environment: {e}")
+                continue
 
             # 에피소드 정보
             total_reward = 0
