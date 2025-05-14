@@ -63,6 +63,8 @@ class Renderer:
         grid_size = 10 * scale   # 그리드 단위 (픽셀 수) * 스케일
 
         cam_x, cam_y = camera.get_position()
+        # cam_x = 0
+        # cam_y = 0
 
         # 화면 영역(viewport)에서 보이는 월드 좌표 범위 계산
         # screen_width = self.config['visualization']['window_width']

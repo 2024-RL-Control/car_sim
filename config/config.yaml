@@ -15,22 +15,22 @@ simulation:
   obstacle:
     num_static_obstacles: 10
     num_dynamic_obstacles: 10
-    buffer_distance: 10 # [m]
-    boundary:         # [m]
+    buffer_distance: 10  # [m]
+    boundary:            # [m]
       x_min: -280
       x_max: 280
       y_min: -280
       y_max: 280
   path_planning:
-    max_iterations: 5000       # maximum iterations for path planning
-    base_step_size: 0.1         # Base for variable RRT step [m]
-    min_step_factor: 1.0        # Min multiplier for base_step_size
-    max_step_factor: 5.0       # Max multiplier for base_step_size
-    goal_distance_threshold: 3.0 # RRT node proximity to goal for final connection [m]
-    goal_sampling_rate: 0.3     # goal sampling rate for path planning [0, 1]
-    road_width: 6.0             # Default road width [m]
+    max_iterations: 5000          # maximum iterations for path planning
+    base_step_size: 0.1           # Base for variable RRT step [m]
+    min_step_factor: 1.0          # Min multiplier for base_step_size
+    max_step_factor: 5.0          # Max multiplier for base_step_size
+    goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
+    goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
+    road_width: 6.0               # Default road width [m]
     min_radius: 6.5               # minimum turning radius for path planning [m]
-    point_separation: 0.5       # minimum distance between points in the path [m]
+    point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 30
     min_speed: 5
     max_speed: 50

@@ -64,14 +64,14 @@ class BasicRLDrivingEnv:
             'top': {
                 'x_min': self.boundary['x_min'],
                 'x_max': self.boundary['x_max'],
-                'y_min': self.boundary['y_min'],
-                'y_max': self.obstacle_area['y_max'] - self.buffer_distance
+                'y_min': self.obstacle_area['y_max'] + self.buffer_distance,
+                'y_max': self.boundary['y_max']
             },
             'bottom': {
                 'x_min': self.boundary['x_min'],
                 'x_max': self.boundary['x_max'],
-                'y_min': self.obstacle_area['y_min'] + self.buffer_distance,
-                'y_max': self.boundary['y_max']
+                'y_min': self.boundary['y_min'],
+                'y_max': self.obstacle_area['y_min'] - self.buffer_distance
             }
         }
 
@@ -121,11 +121,11 @@ class BasicRLDrivingEnv:
             if obstacle_type == 'circle':
                 obstacle_manager.add_circle_obstacle(None, x, y, 0, 0, 0, size, (200, 0, 0))
             elif obstacle_type == 'square':
-                obstacle_manager.add_square_obstacle(None, x, y, 0, 0, 0, size, (0, 200, 0))
+                obstacle_manager.add_square_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, size, (0, 200, 0))
             else:  # rectangle
                 width = random.uniform(1.5, 4.0)
                 height = random.uniform(1.0, 2.5)
-                obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(0, 2*pi), 0, 0, width, height, (0, 0, 200))
+                obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, width, height, (0, 0, 200))
 
         # 동적 장애물 배치
         for _ in range(self.num_dynamic_obstacles):
@@ -134,7 +134,7 @@ class BasicRLDrivingEnv:
 
             # 랜덤 속도, 방향 및 크기
             speed = random.uniform(1.0, 3.0)
-            direction = random.uniform(0, 2*pi)
+            direction = random.uniform(-pi/2, pi/2)
             size = random.uniform(1.0, 2.0)
             yaw_rate = random.uniform(-0.3, 0.3)  # 회전 속도
 
@@ -166,9 +166,9 @@ class BasicRLDrivingEnv:
             yaw_volatility = random.uniform(-pi/6, pi/6)
 
             if placement_area == 'top':
-                yaw = pi/2 + yaw_volatility  # 아래쪽 방향
+                yaw = -pi/2 + yaw_volatility  # 아래쪽 방향
             elif placement_area == 'bottom':
-                yaw = -pi/2 + yaw_volatility  # 위쪽 방향
+                yaw = pi/2 + yaw_volatility  # 위쪽 방향
             elif placement_area == 'left':
                 yaw = 0 + yaw_volatility  # 오른쪽 방향
             else:  # right
@@ -195,16 +195,16 @@ class BasicRLDrivingEnv:
             yaw_volatility = random.uniform(-pi/6, pi/6)
             if vehicle_placement == 'top':
                 boundary = self.vehicle_area['bottom']
-                yaw = -pi/2 + yaw_volatility
+                yaw = pi/2 + yaw_volatility
             elif vehicle_placement == 'bottom':
                 boundary = self.vehicle_area['top']
-                yaw = pi/2 + yaw_volatility
+                yaw = -pi/2 + yaw_volatility
             elif vehicle_placement == 'left':
                 boundary = self.vehicle_area['right']
-                yaw = 0 + yaw_volatility
+                yaw = pi + yaw_volatility
             else:  # right
                 boundary = self.vehicle_area['left']
-                yaw = pi + yaw_volatility
+                yaw = 0 + yaw_volatility
 
             x = random.uniform(boundary['x_min'], boundary['x_max'])
             y = random.uniform(boundary['y_min'], boundary['y_max'])
@@ -364,7 +364,7 @@ class BasicRLDrivingEnv:
                 actions = []
                 for _ in range(self.env.num_vehicles):
                     # throttle_engine, throttle_brake, steering
-                    actions.append(np.array([random.uniform(0, 1), random.uniform(0, 1), random.uniform(-1, 1)]))
+                    actions.append(np.array([random.uniform(0, 1), 0, random.uniform(-1, 1)]))
 
                 # 환경에서 한 스텝 진행
                 obs_array, reward_array, done, info = self.step(np.array(actions))
