@@ -262,7 +262,7 @@ class PhysicsEngine:
     """
 
     @classmethod
-    def update(cls, state, action, dt, physics_config, vehicle_config):
+    def update(cls, state, action, dt, physics_config, vehicle_config, predict=False):
         """
         차량 상태 업데이트
 
@@ -292,4 +292,5 @@ class PhysicsEngine:
             )
 
         # 과거 궤적 업데이트
-        state.update_history_trajectory()
+        if not predict:
+            state.update_history_trajectory()

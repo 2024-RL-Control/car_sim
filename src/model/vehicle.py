@@ -103,6 +103,46 @@ class VehicleState:
 
         self.terrain_type = "asphalt"
 
+    def clone(self):
+        """차량 상태 복제 - 핵심 상태 값만 복제하고 큰 데이터 구조는 제외"""
+        new_state = VehicleState()
+
+        # 위치 및 방향 관련 속성 복사
+        new_state.x = self.x
+        new_state.y = self.y
+        new_state.yaw = self.yaw
+        new_state.rear_axle_x = self.rear_axle_x
+        new_state.rear_axle_y = self.rear_axle_y
+        new_state.half_wheelbase = self.half_wheelbase
+
+        # 속도 및 가속도 관련 속성 복사
+        new_state.vel_long = self.vel_long
+        new_state.vel_lat = self.vel_lat
+        new_state.acc_long = self.acc_long
+        new_state.acc_lat = self.acc_lat
+        new_state.yaw_rate = self.yaw_rate
+
+        # 제어 입력 관련 속성 복사
+        new_state.throttle_engine = self.throttle_engine
+        new_state.throttle_brake = self.throttle_brake
+        new_state.steer = self.steer
+
+        # 목적지 관련 속성 복사
+        new_state.target_x = self.target_x
+        new_state.target_y = self.target_y
+        new_state.target_yaw = self.target_yaw
+        new_state.distance_to_target = self.distance_to_target
+        new_state.yaw_diff_to_target = self.yaw_diff_to_target
+
+        # frenet 좌표 복사
+        new_state.frenet_d = self.frenet_d
+        new_state.frenet_point = self.frenet_point
+        new_state.target_vel_long = self.target_vel_long
+
+        # 환경 속성 복사
+        new_state.terrain_type = self.terrain_type
+        return new_state
+
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
         return (angle + pi) % (2 * pi) - pi

@@ -424,19 +424,19 @@ class TrajectoryPredictor:
         Returns:
             trajectory_data_list: 예측된 궤적 데이터 리스트
         """
-        from copy import deepcopy
+        import time
         from .physics import PhysicsEngine
 
         # 결과를 저장할 궤적 리스트
         trajectory_data_list = []
 
         # state_history가 충분히 있는지 확인
-        if not hasattr(state, 'state_history') or len(state.state_history) < 2:
+        if len(state.state_history) < 2:
             # 이력이 부족한 경우 간단한 유지 궤적으로 대체
             return cls._create_simple_continuation_trajectory(state, time_horizon, dt)
 
-        # 초기 상태 복사 및 시뮬레이션용 임시 상태 생성
-        sim_state = deepcopy(state)
+        # 초기 상태 복사 및 시뮬레이션용 임시 상태 복제
+        sim_state = state.clone()
 
         # 시뮬레이션을 위한 제어 입력 패턴 추정 (최근 state_history 사용)
         control_patterns = cls._estimate_control_pattern_from_history(
@@ -466,9 +466,9 @@ class TrajectoryPredictor:
             # 현재 시간 스텝에 대한 제어 입력 가져오기
             action = control_patterns[min(i, len(control_patterns) - 1)]
 
-            # 물리 엔진으로 상태 업데이트, deepcopy된 상태 사용
+            # 물리 엔진으로 상태 업데이트, clone된 상태 사용
             PhysicsEngine.update(
-                sim_state, action, dt, physics_config, vehicle_config
+                sim_state, action, dt, physics_config, vehicle_config, predict=True
             )
 
             # 새 궤적 포인트 생성 및 추가
@@ -483,7 +483,6 @@ class TrajectoryPredictor:
                 a_lat=sim_state.acc_lat
             )
             trajectory_data_list.append(new_trajectory_data)
-
         return trajectory_data_list
 
     @classmethod
