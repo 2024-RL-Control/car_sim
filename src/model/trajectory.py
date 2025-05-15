@@ -424,7 +424,6 @@ class TrajectoryPredictor:
         Returns:
             trajectory_data_list: 예측된 궤적 데이터 리스트
         """
-        import time
         from .physics import PhysicsEngine
 
         # 결과를 저장할 궤적 리스트
