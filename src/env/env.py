@@ -86,7 +86,7 @@ class CarSimulatorEnv(gym.Env):
             spaces.Box(
                 low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
                 high=np.array([1.0, 1.0,  1.0]),
-                dtype=np.float32
+                dtype=np.float64
             ) for _ in range(self.num_vehicles)
         ])
 
@@ -99,7 +99,7 @@ class CarSimulatorEnv(gym.Env):
                 low=-1.0,
                 high=1.0,
                 shape=(obs_dim,),
-                dtype=np.float32
+                dtype=np.float64
             ) for _ in range(self.num_vehicles)
         ])
 
