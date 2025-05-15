@@ -62,15 +62,15 @@ class Renderer:
         scale = self.config['visualization']['scale_factor']
         grid_size = 10 * scale   # 그리드 단위 (픽셀 수) * 스케일
 
-        # cam_x, cam_y = camera.get_position()
-        cam_x = 0
-        cam_y = 0
+        cam_x, cam_y = camera.get_position()
 
         # 화면 영역(viewport)에서 보이는 월드 좌표 범위 계산
-        # screen_width = self.config['visualization']['window_width']
-        # screen_height = self.config['visualization']['window_height']
-        screen_width = 3000
-        screen_height = 3000
+        if self.config['visualization']['camera_follow']:
+            screen_width = self.config['visualization']['window_width']
+            screen_height = self.config['visualization']['window_height']
+        else:
+            screen_width = 3000
+            screen_height = 3000
 
         # 화면 경계에 해당하는 월드 좌표 계산
         world_left = cam_x - screen_width / (2 * scale)
