@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from math import cos, sin, tan, atan, pi
+from math import cos, sin, atan, pi, log, e
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
@@ -22,23 +22,60 @@ class TrajectoryData:
     s: Optional[float] = None       # Frenet s 좌표 [m]
     d: Optional[float] = None       # Frenet d 좌표 [m]
 
-    def encoding_angle(self, angle):
+    def _encoding_angle(self, angle):
         """cos/sin 인코딩을 통한 각도 표현"""
         return cos(angle), sin(angle)
 
-    def get_data(self, x, y):
-        rel_x = x - self.x
-        rel_y = y - self.y
-        cos_yaw, sin_yaw = self.encoding_angle(self.yaw)
+    def _normalize_angle(self, angle):
+        """[-π, π] 범위로 각도 정규화"""
+        return (angle + pi) % (2 * pi) - pi
+
+    def _scale_distance(self, distance):
+        """거리 정규화"""
+        return 1.0 / log(e + distance/5)
+
+    def _scale_long(self, vel_long, acc_long, max_vel_long, min_vel_long, max_acc_long, min_acc_long):
+        """종방향 속도 정규화"""
+        vel_long = min(max_vel_long, max(vel_long, min_vel_long))
+        acc_long = min(max_acc_long, max(acc_long, min_acc_long))
+        scale_vel = 0
+        scale_acc = 0
+        if vel_long > 0:
+            scale_vel = vel_long / max_vel_long
+        else:
+            scale_vel = vel_long / min_vel_long
+        if acc_long > 0:
+            scale_acc = acc_long / max_acc_long
+        else:
+            scale_acc = acc_long / min_acc_long
+        return scale_vel, scale_acc
+
+    def _scale_lat(self, vel_lat, acc_lat, max_vel_lat, max_acc_lat):
+        """횡방향 속도 정규화"""
+        vel_lat = min(max_vel_lat, max(vel_lat, -max_vel_lat))
+        acc_lat = min(max_acc_lat, max(acc_lat, -max_acc_lat))
+        scale_vel = vel_lat / max_vel_lat
+        scale_acc = acc_lat / max_acc_lat
+        return scale_vel, scale_acc
+
+    def get_data(self, x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat):
+        dx = x - self.x
+        dy = y - self.y
+        distance = (dx**2 + dy**2) ** 0.5
+        yaw_diff = self._normalize_angle(yaw - self.yaw)
+
+        norm_distance = self._scale_distance(distance)
+        cos_diff, sin_diff = self._encoding_angle(yaw_diff)
+        scale_vel_long, scale_acc_long = self._scale_long(self.v_long, self.a_long, max_vel_long, min_vel_long, max_acc_long, min_acc_long)
+        scale_vel_lat, scale_acc_lat = self._scale_lat(self.v_lat, self.a_lat, max_vel_lat, max_acc_lat)
         data = np.array([
-            rel_x,
-            rel_y,
-            cos_yaw,
-            sin_yaw,
-            self.v_long,
-            self.a_long,
-            self.v_lat,
-            self.a_lat
+            norm_distance,
+            cos_diff,
+            sin_diff,
+            scale_vel_long,
+            scale_acc_long,
+            scale_vel_lat,
+            scale_acc_lat
         ])
         return data
 

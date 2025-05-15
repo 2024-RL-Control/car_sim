@@ -7,7 +7,6 @@ import time
 import pickle
 import os
 from collections import deque
-from math import radians, degrees, pi, cos, sin
 from ..model.vehicle import VehicleManager
 from ..model.object import ObstacleManager
 from ..model.road import RoadNetworkManager
@@ -35,6 +34,13 @@ class CarSimulatorEnv(gym.Env):
 
         # config.yaml에서 설정 로드
         self.config = load_config(config_path)
+
+        self.max_vel_long = self.config['vehicle']['max_speed']
+        self.min_vel_long = self.config['vehicle']['min_speed']
+        self.max_acc_long = self.config['vehicle']['max_accel']
+        self.min_acc_long = self.config['vehicle']['max_brake']
+        self.max_vel_lat = self.config['vehicle']['max_vel_lat']
+        self.max_acc_lat = self.config['vehicle']['max_acc_lat']
 
         # 다중 차량 모드 설정
         self.num_vehicles = self.config['simulation']['num_vehicles']
@@ -393,27 +399,36 @@ class CarSimulatorEnv(gym.Env):
         """
         state = vehicle.get_state()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
+        scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
+        scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
+        goal_distance = state.scale_distance(state.distance_to_target)
+        cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
+        frenet_d = state.scale_frenet_d(state.frenet_d)
 
-        # 기본 차량 상태
+        # 기본 차량 상태 (13, )
         obs = np.array([
-            cos_yaw,    # -1 ~ 1
-            sin_yaw,    # -1 ~ 1
-            state.vel_long, # -inf ~ inf
-            state.acc_long, # -inf ~ inf
-            state.vel_lat,  # -inf ~ inf
-            state.acc_lat,  # -inf ~ inf
-            state.steer,    # -1 ~ 1
+            state.steer,            # -1 ~ 1
             state.throttle_engine,  # 0 ~ 1
             state.throttle_brake,   # 0 ~ 1
-            state.distance_to_target, # -inf ~ inf
-            state.yaw_diff_to_target, # -inf ~ inf
-            state.frenet_d, # -inf ~ inf
+            cos_yaw,                # -1 ~ 1
+            sin_yaw,                # -1 ~ 1
+            scale_vel_long,         # -1 ~ 1
+            scale_acc_long,         # -1 ~ 1
+            scale_vel_lat,          # -1 ~ 1
+            scale_acc_lat,          # -1 ~ 1
+            goal_distance,          # 0 ~ 1
+            cos_goal_yaw_diff,      # -1 ~ 1
+            sin_goal_yaw_diff,      # -1 ~ 1
+            frenet_d,               # -1 ~ 1
         ], dtype=np.float32)
 
-        lidar_data = state.get_lidar_data()             # (36, ), 0 ~ 1, 정규화된 데이터
-        trajectory_data = state.get_trajectory_data()   # (6, 8), (rel_x, rel_y, cos_yaw, sin_yaw, v_long, a_long, v_lat, a_lat)
+        # (36, ), 0 ~ 1, 정규화된 데이터
+        lidar_data = state.get_lidar_data()
+        # (6, 7), (norm_distance, cos_diff, sin_diff, scale_vel_long, scale_acc_long, scale_vel_lat, scale_acc_lat)
+        trajectory_data = state.get_trajectory_data(self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long, self.max_vel_lat, self.max_acc_lat)
 
-        return np.concatenate((obs, lidar_data, trajectory_data.flatten())) # (96, )
+        obs = np.concatenate((obs, lidar_data, trajectory_data.flatten())) # (91, )
+        return obs
 
     def _calculate_rewards(self, collisions, outside_roads, reached_targets):
         """
