@@ -90,34 +90,15 @@ class CarSimulatorEnv(gym.Env):
             ) for _ in range(self.num_vehicles)
         ])
 
-        # 관측 공간: [cos(yaw), sin(yaw), vel_long, acc_long, vel_lat, acc_lat, steer, throttle_engine, throttle_brake, distance_to_target, yaw_diff_to_target, frenet_d]
-        # 차량 관측 공간 - 각 차량마다 별도 관측
+        # 관측 공간 - 각 차량마다 별도 관측
+        # 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
+        obs_dim = 91  # 13(기본상태) + 36(LIDAR) + 42(궤적)
+
         self.observation_space = spaces.Tuple([
             spaces.Box(
-                low=np.array([-1,   # cos(yaw)
-                            -1,   # sin(yaw)
-                            -20,  # vel_long
-                            -4,   # acc_long
-                            -25,  # vel_lat
-                            -np.inf,  # acc_lat
-                            -np.pi,  # steer
-                            0,  # throttle_engine
-                            0,  # throttle_brake
-                            0,  # distance_to_target
-                            -np.pi,  # yaw_diff_to_target
-                            -np.inf]),  # frenet_d
-                high=np.array([1,   # cos(yaw)
-                            1,   # sin(yaw)
-                            65,  # vel_long
-                            4,   # acc_long
-                            25,  # vel_lat
-                            np.inf,  # acc_lat
-                            np.pi,  # steer
-                            1,  # throttle_engine
-                            1,  # throttle_brake
-                            np.inf,  # distance_to_target
-                            np.pi,  # yaw_diff_to_target
-                            np.inf]),  # frenet_d
+                low=-1.0,
+                high=1.0,
+                shape=(obs_dim,),
                 dtype=np.float32
             ) for _ in range(self.num_vehicles)
         ])
