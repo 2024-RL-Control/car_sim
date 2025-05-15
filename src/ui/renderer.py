@@ -69,8 +69,8 @@ class Renderer:
             screen_width = self.config['visualization']['window_width']
             screen_height = self.config['visualization']['window_height']
         else:
-            screen_width = 3000
-            screen_height = 3000
+            screen_width = (self.config['simulation']['boundary']['x_max'] - self.config['simulation']['boundary']['x_min']) * scale
+            screen_height = (self.config['simulation']['boundary']['y_max'] - self.config['simulation']['boundary']['y_min']) * scale
 
         # 화면 경계에 해당하는 월드 좌표 계산
         world_left = cam_x - screen_width / (2 * scale)

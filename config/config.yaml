@@ -50,7 +50,6 @@ visualization:
   window_size: [1300, 800]
   scale_factor: 5                   # pixels per meter
   camera_zoom: 0.25
-  grid_size: 100                    # meters, size of each grid cell(width and height)
   training_mode: false              # training mode, if true: fixed dt and no fps limit
   debug_mode: false
   visualize: true
