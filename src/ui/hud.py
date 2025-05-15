@@ -82,7 +82,9 @@ class HUD:
                 f"Left wheel: {np.degrees(left_steer):.1f}°, Right wheel: {np.degrees(right_steer):.1f}°",
                 f"Longitude Accel: {state.acc_long:.2f} m/s²",
                 f"Lateral Vel: {state.vel_lat:.2f} m/s",
-                f"Lateral Accel: {state.acc_lat:.2f} m/s²"
+                f"Lateral Accel: {state.acc_lat:.2f} m/s²",
+                f"Render Time: {performance_metrics['render_time']:.5f} ms",
+                f"Physics Time: {performance_metrics['physics_time']:.5f} ms"
             ])
 
         # HUD 배경
