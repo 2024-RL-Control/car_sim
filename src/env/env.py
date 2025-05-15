@@ -394,9 +394,6 @@ class CarSimulatorEnv(gym.Env):
         state = vehicle.get_state()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
 
-        lidar_data = state.get_lidar_data()             # (36, ), 0 ~ 1
-        trajectory_data = state.get_trajectory_data()   # (6, 8), (rel_x, rel_y, cos_yaw, sin_yaw, v_long, a_long, v_lat, a_lat)
-
         # 기본 차량 상태
         obs = np.array([
             cos_yaw,    # -1 ~ 1
@@ -412,6 +409,9 @@ class CarSimulatorEnv(gym.Env):
             state.yaw_diff_to_target, # -inf ~ inf
             state.frenet_d, # -inf ~ inf
         ], dtype=np.float32)
+
+        lidar_data = state.get_lidar_data()             # (36, ), 0 ~ 1, 정규화된 데이터
+        trajectory_data = state.get_trajectory_data()   # (6, 8), (rel_x, rel_y, cos_yaw, sin_yaw, v_long, a_long, v_lat, a_lat)
 
         return np.concatenate((obs, lidar_data, trajectory_data.flatten())) # (96, )
 

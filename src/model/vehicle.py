@@ -373,6 +373,8 @@ class Vehicle:
 
         # 차량 센서 업데이트
         self.sensor_manager.update(dt, time_elapsed, objects)
+
+        # 센서 정보 업데이트
         self._update_lidar_data()
 
         # 도로 정보 업데이트
