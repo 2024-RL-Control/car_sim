@@ -2,9 +2,10 @@
 import pygame
 import numpy as np
 import random
-import math
-from math import pi, cos, sin
+from math import pi
 from src.env.env import CarSimulatorEnv
+import os
+import torch
 
 class BasicRLDrivingEnv:
     """
@@ -27,6 +28,9 @@ class BasicRLDrivingEnv:
         self.num_episodes = self.env.config['simulation']['num_episodes']
         self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
         self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        print(f"사용 중인 디바이스: {self.device}")
 
         # 환경 바운더리 설정
         self.boundary = {
