@@ -99,6 +99,8 @@ class Camera:
             self.config['visualization']['camera_follow'] = not self.config['visualization']['camera_follow']
             if self.config['visualization']['camera_follow']:
                 self.config['visualization']['camera_zoom'] = 1.5
+            else:
+                self.config['visualization']['camera_zoom'] = 0.25
             self._camera_pos = (0, 0)
             self._camera_offset = (0, 0)
         self._keys_state[pygame.K_c] = pressed_keys[pygame.K_c]
