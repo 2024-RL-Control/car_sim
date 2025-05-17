@@ -1,13 +1,12 @@
 ﻿# -*- coding: utf-8 -*-
 import pygame
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 import numpy as np
 import time
 import pickle
 import os
 from collections import deque
-from math import radians, degrees, pi, cos, sin
 from ..model.vehicle import VehicleManager
 from ..model.object import ObstacleManager
 from ..model.road import RoadNetworkManager
@@ -24,7 +23,7 @@ class CarSimulatorEnv(gym.Env):
     """2D Top-Down 시점 차량 시뮬레이터(Gym) 환경"""
     metadata = {'render.modes': ['human', 'rgb_array'],}
 
-    def __init__(self, config_path: str = None):
+    def __init__(self, config_path: str = None, setup: bool = True):
         """
         시뮬레이터 환경 초기화
 
@@ -36,9 +35,15 @@ class CarSimulatorEnv(gym.Env):
         # config.yaml에서 설정 로드
         self.config = load_config(config_path)
 
+        self.max_vel_long = self.config['vehicle']['max_speed']
+        self.min_vel_long = self.config['vehicle']['min_speed']
+        self.max_acc_long = self.config['vehicle']['max_accel']
+        self.min_acc_long = self.config['vehicle']['max_brake']
+        self.max_vel_lat = self.config['vehicle']['max_vel_lat']
+        self.max_acc_lat = self.config['vehicle']['max_acc_lat']
+
         # 다중 차량 모드 설정
         self.num_vehicles = self.config['simulation']['num_vehicles']
-        self.multi_vehicle = (self.num_vehicles > 1)
 
         # 장애물 매니저 초기화
         self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
@@ -55,8 +60,10 @@ class CarSimulatorEnv(gym.Env):
         )
 
         # 초기 차량들 생성
-        for i in range(self.num_vehicles):
-            self.vehicle_manager.create_vehicle(x=i*100, y=0, vehicle_id=i)
+        self.setup = setup
+        if self.setup:
+            for i in range(self.num_vehicles):
+                self.vehicle_manager.create_vehicle(x=i*100, y=0, vehicle_id=i)
 
         # UI 모듈 초기화
         self.camera = Camera(self.config)
@@ -74,83 +81,27 @@ class CarSimulatorEnv(gym.Env):
         # Pygame 초기화
         self._init_pygame()
 
-        # Gym 인터페이스
-        if not self.multi_vehicle:
-            # 단일 차량 모드
-            self.action_space = spaces.Box(
+        # 차량 조작 공간 - 각 차량마다 별도 액션
+        self.action_space = spaces.Tuple([
+            spaces.Box(
                 low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
                 high=np.array([1.0, 1.0,  1.0]),
-                dtype=np.float32
-            )
+                dtype=np.float64
+            ) for _ in range(self.num_vehicles)
+        ])
 
-            # 관측 공간: [cos(yaw), sin(yaw), vel_long, acc_long, vel_lat, acc_lat, steer, throttle_engine, throttle_brake, distance_to_target, yaw_diff_to_target, frenet_d]
-            self.observation_space = spaces.Box(
-                low=np.array([-1,   # cos(yaw)
-                              -1,   # sin(yaw)
-                              -20,  # vel_long
-                              -4,   # acc_long
-                              -25,  # vel_lat
-                              -np.inf,  # acc_lat
-                              -np.pi,  # steer
-                              0,  # throttle_engine
-                              0,  # throttle_brake
-                              0,  # distance_to_target
-                              -np.pi,  # yaw_diff_to_target
-                              -np.inf]),  # frenet_d
-                high=np.array([1,   # cos(yaw)
-                               1,   # sin(yaw)
-                               65,  # vel_long
-                               4,   # acc_long
-                               25,  # vel_lat
-                               np.inf,  # acc_lat
-                               np.pi,  # steer
-                               1,  # throttle_engine
-                               1,  # throttle_brake
-                               np.inf,  # distance_to_target
-                               np.pi,  # yaw_diff_to_target
-                               np.inf]),  # frenet_d
-                dtype=np.float32
-            )
-        else:
-            # 다중 차량 모드 - 각 차량마다 별도 액션
-            self.action_space = spaces.Tuple([
-                spaces.Box(
-                    low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
-                    high=np.array([1.0, 1.0,  1.0]),
-                    dtype=np.float32
-                ) for _ in range(self.num_vehicles)
-            ])
+        # 관측 공간 - 각 차량마다 별도 관측
+        # 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
+        obs_dim = 91  # 13(기본상태) + 36(LIDAR) + 42(궤적)
 
-            # 다중 차량 관측 공간 - 각 차량마다 별도 관측
-            self.observation_space = spaces.Tuple([
-                spaces.Box(
-                    low=np.array([-1,   # cos(yaw)
-                                -1,   # sin(yaw)
-                                -20,  # vel_long
-                                -4,   # acc_long
-                                -25,  # vel_lat
-                                -np.inf,  # acc_lat
-                                -np.pi,  # steer
-                                0,  # throttle_engine
-                                0,  # throttle_brake
-                                0,  # distance_to_target
-                                -np.pi,  # yaw_diff_to_target
-                                -np.inf]),  # frenet_d
-                    high=np.array([1,   # cos(yaw)
-                                1,   # sin(yaw)
-                                65,  # vel_long
-                                4,   # acc_long
-                                25,  # vel_lat
-                                np.inf,  # acc_lat
-                                np.pi,  # steer
-                                1,  # throttle_engine
-                                1,  # throttle_brake
-                                np.inf,  # distance_to_target
-                                np.pi,  # yaw_diff_to_target
-                                np.inf]),  # frenet_d
-                    dtype=np.float32
-                ) for _ in range(self.num_vehicles)
-            ])
+        self.observation_space = spaces.Tuple([
+            spaces.Box(
+                low=-1.0,
+                high=1.0,
+                shape=(obs_dim,),
+                dtype=np.float64
+            ) for _ in range(self.num_vehicles)
+        ])
 
     def _init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
@@ -159,10 +110,9 @@ class CarSimulatorEnv(gym.Env):
         self.screen, self.clock = self.renderer.init_pygame()
         self.hud = HUD(self.config)
 
-    def _world_to_screen(self, x, y, cam_x=None, cam_y=None):
+    def _world_to_screen(self, x, y, vehicle=None):
         """카메라의 world_to_screen 메서드를 호출하는 래퍼 함수"""
-        active_vehicle = self.vehicle_manager.get_active_vehicle()
-        return self.camera.world_to_screen(x, y, cam_x, cam_y, active_vehicle)
+        return self.camera.world_to_screen(x, y, vehicle)
 
     def handle_keyboard_input(self):
         """키보드 입력 처리 (상태 업데이트)"""
@@ -216,9 +166,8 @@ class CarSimulatorEnv(gym.Env):
             if 'vehicles' in save_data:
                 self.vehicle_manager.load_from_serialized(save_data['vehicles'])
 
-                # 다중 차량 모드 설정 업데이트
+                # 차량 수 업데이트
                 self.num_vehicles = self.vehicle_manager.get_vehicle_count()
-                self.multi_vehicle = (self.num_vehicles > 1)
 
             # 장애물 정보 복원
             self.obstacle_manager.clear_obstacles()  # 기존 장애물 제거
@@ -251,8 +200,8 @@ class CarSimulatorEnv(gym.Env):
         환경 스텝 실행
 
         Args:
-            action: 단일 차량 모드: [가속도, 조향] 명령 [-1, 1]
-                    다중 차량 모드: 차량별 [가속도, 조향] 명령 리스트
+            action: 단일 차량 모드: [엔진, 브레이크, 조향] 명령
+                    다중 차량 모드: 차량별 [엔진, 브레이크, 조향] 명령 리스트
 
         Returns:
             obs: 관측 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
@@ -280,8 +229,8 @@ class CarSimulatorEnv(gym.Env):
         )
 
         # 관측값 및 보상 계산
-        obs = self._get_obs()
-        reward = self._calculate_rewards(collisions, outside_roads, reached_targets)
+        obs_array = self._get_obs()
+        reward_array = self._calculate_rewards(collisions, outside_roads, reached_targets)
 
         # 물리 시뮬레이션 시간 측정
         physics_time = time.time() - physics_start
@@ -289,20 +238,24 @@ class CarSimulatorEnv(gym.Env):
             self.renderer.set_physics_time(physics_time)
 
         # 충돌 여부 확인
-        any_collision = any(collisions.values())
+        all_collision = all(collisions.values())
 
         # 도로 이탈 여부 확인
-        any_outside_road = any(outside_roads.values())
+        all_outside_road = all(outside_roads.values())
 
-        # 종료 여부 결정
-        done = any_collision or any_outside_road
+        # 목표 도달 여부 확인
+        all_reached_target = all(reached_targets.values())
+
+        # 종료 여부 결정, 모든 차량이 충돌 or 도로 벗어남 or 목표 도달 시 종료
+        done = all_collision or all_outside_road or all_reached_target
 
         info = {
             'collisions': collisions,
             'outside_roads': outside_roads,
             'reached_targets': reached_targets,
-            'collision': any_collision,
-            'outside_road': any_outside_road
+            'all_collision': all_collision,
+            'all_outside_road': all_outside_road,
+            'all_reached_target': all_reached_target
         }
 
         # 상태 기록 (리플레이용)
@@ -314,7 +267,7 @@ class CarSimulatorEnv(gym.Env):
         # 시간 업데이트
         self._last_update_time = current_time
 
-        return obs, reward, done, info
+        return obs_array, reward_array, done, info
 
     def reset(self):
         """환경 초기화"""
@@ -322,8 +275,9 @@ class CarSimulatorEnv(gym.Env):
         self.vehicle_manager.reset_vehicle()
 
         # 각 차량 위치 설정 (X축으로 간격 두고 배치)
-        for i, vehicle in enumerate(self.vehicle_manager.get_all_vehicles()):
-            vehicle.set_position(i*100, 0)
+        if self.setup:
+            for i, vehicle in enumerate(self.vehicle_manager.get_all_vehicles()):
+                vehicle.set_position(i*100, 0)
 
         # 상태 기록 초기화
         self._state_history.clear()
@@ -394,9 +348,13 @@ class CarSimulatorEnv(gym.Env):
             objects.extend(obstacles)
         if self.vehicle_manager.get_vehicle_count() > 0:
             vehicles = self.vehicle_manager.get_all_vehicles()
+            body = []
             for v in vehicles:
                 if v.id != vehicle_id:
-                    objects.extend(v.get_outer_circles_world())
+                    body.extend(v.get_outer_circles_world())
+            if vehicle._check_collision(body):
+                raise ValueError("위치가 다른 차량과 충돌합니다")
+            objects.extend(body)
 
         return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
 
@@ -405,16 +363,10 @@ class CarSimulatorEnv(gym.Env):
         모든 차량의 관측값 반환
 
         Returns:
-            관측값 리스트 (단일 차량이면 단일 관측값)
+            관측값 (numpy 배열), (num_vehicles, obs_dim)
         """
-        if not self.multi_vehicle:
-            # 단일 차량 모드
-            if len(self.vehicle_manager.get_all_vehicles()) > 0:
-                return self._get_vehicle_observation(self.vehicle_manager.get_all_vehicles()[0])
-            return np.zeros(self.observation_space.shape)
-        else:
-            # 다중 차량 모드
-            return [self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()]
+        obs_array = np.array([self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()])
+        return obs_array
 
     def _get_vehicle_observation(self, vehicle):
         """
@@ -428,27 +380,36 @@ class CarSimulatorEnv(gym.Env):
         """
         state = vehicle.get_state()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
+        scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
+        scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
+        goal_distance = state.scale_distance(state.distance_to_target)
+        cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
+        frenet_d = state.scale_frenet_d(state.frenet_d)
 
-        lidar_data = state.get_lidar_data()             # (36, ), 0 ~ 1
-        trajectory_data = state.get_trajectory_data()   # (6, 8), (rel_x, rel_y, cos_yaw, sin_yaw, v_long, a_long, v_lat, a_lat)
-
-        # 기본 차량 상태
+        # 기본 차량 상태 (13, )
         obs = np.array([
-            cos_yaw,    # -1 ~ 1
-            sin_yaw,    # -1 ~ 1
-            state.vel_long, # -inf ~ inf
-            state.acc_long, # -inf ~ inf
-            state.vel_lat,  # -inf ~ inf
-            state.acc_lat,  # -inf ~ inf
-            state.steer,    # -1 ~ 1
+            state.steer,            # -1 ~ 1
             state.throttle_engine,  # 0 ~ 1
             state.throttle_brake,   # 0 ~ 1
-            state.distance_to_target, # -inf ~ inf
-            state.yaw_diff_to_target, # -inf ~ inf
-            state.frenet_d, # -inf ~ inf
+            cos_yaw,                # -1 ~ 1
+            sin_yaw,                # -1 ~ 1
+            scale_vel_long,         # -1 ~ 1
+            scale_acc_long,         # -1 ~ 1
+            scale_vel_lat,          # -1 ~ 1
+            scale_acc_lat,          # -1 ~ 1
+            goal_distance,          # 0 ~ 1
+            cos_goal_yaw_diff,      # -1 ~ 1
+            sin_goal_yaw_diff,      # -1 ~ 1
+            frenet_d,               # -1 ~ 1
         ], dtype=np.float32)
 
-        return np.concatenate((obs, lidar_data, trajectory_data.flatten())) # (96, )
+        # (36, ), 0 ~ 1, 정규화된 데이터
+        lidar_data = state.get_lidar_data()
+        # (6, 7), (norm_distance, cos_diff, sin_diff, scale_vel_long, scale_acc_long, scale_vel_lat, scale_acc_lat)
+        trajectory_data = state.get_trajectory_data(self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long, self.max_vel_lat, self.max_acc_lat)
+
+        obs = np.concatenate((obs, lidar_data, trajectory_data.flatten())) # (91, )
+        return obs
 
     def _calculate_rewards(self, collisions, outside_roads, reached_targets):
         """
@@ -460,30 +421,18 @@ class CarSimulatorEnv(gym.Env):
             reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
 
         Returns:
-            보상 리스트 (단일 차량이면 단일 보상)
+            보상 배열 (numpy 배열), (num_vehicles, )
         """
-        if not self.multi_vehicle:
-            # 단일 차량 모드
-            if len(self.vehicle_manager.get_all_vehicles()) > 0:
-                vehicle = self.vehicle_manager.get_all_vehicles()[0]
-                return self._calculate_vehicle_reward(
-                    vehicle,
-                    collisions.get(vehicle.id, False),
-                    outside_roads.get(vehicle.id, False),
-                    reached_targets.get(vehicle.id, False)
-                )
-            return 0.0
-        else:
-            # 다중 차량 모드
-            return [
-                self._calculate_vehicle_reward(
-                    vehicle,
-                    collisions.get(vehicle.id, False),
-                    outside_roads.get(vehicle.id, False),
-                    reached_targets.get(vehicle.id, False)
-                )
-                for vehicle in self.vehicle_manager.get_all_vehicles()
-            ]
+        reward_array = np.array([
+            self._calculate_vehicle_reward(
+                vehicle,
+                collisions.get(vehicle.id, False),
+                outside_roads.get(vehicle.id, False),
+                reached_targets.get(vehicle.id, False)
+            )
+            for vehicle in self.vehicle_manager.get_all_vehicles()
+        ])
+        return reward_array
 
     def _calculate_vehicle_reward(self, vehicle, collision, outside_road, reached_target):
         """

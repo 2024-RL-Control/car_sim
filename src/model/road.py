@@ -93,6 +93,9 @@ class Link:
     def get_target_vel(self):
         return self.target_vel
 
+    def get_data(self):
+        return (self.start, self.end, self.mode)
+
     def sample(self, step_size=0.5):
         """
         step_size 간격으로 (x,y,yaw) 리스트 반환
@@ -803,6 +806,11 @@ class RoadNetworkManager:
         Returns:
             성공 여부(Boolean)
         """
+        for link in self.links:
+            start, end, mode = link.get_data()
+            if start == point1 and end == point2 and mode == mode:
+                return True
+
         # 링크 생성 및 리스트에 추가
         nodes_points, paths_list = self.global_planner.plan(point1, point2, obstacles, mode)
 
@@ -825,9 +833,11 @@ class RoadNetworkManager:
         1. 두 좌표(x,y,yaw)를 Node 클래스로 변환 후 nodes에 추가
             1. 같은 노드 있으면 재활용
         2. Link 클래스 활용해 두 노드간 연결 후 links에 추가
-            1. 경로 계획 모드: 장애물과 충돌하지 않는 경로 생성
-            2. 직진 모드: 직선 경로 생성
-            3. 곡선 모드: 베지에 곡선으로 좌회전, 우회전 경로 생성
+            1. 같은 링크 있으면 재활용
+            2. 생성 모드:
+                1. 경로 계획 모드: 장애물과 충돌하지 않는 경로 생성
+                2. 직진 모드: 직선 경로 생성
+                3. 곡선 모드: 베지에 곡선으로 좌회전, 우회전 경로 생성
 
         Returns:
             성공 여부(Boolean)

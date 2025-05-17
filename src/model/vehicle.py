@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List
 from collections import deque
-from math import radians, degrees, pi, cos, sin
+from math import degrees, pi, cos, sin, log, e
 import pygame
 import numpy as np
 import time
@@ -52,7 +52,7 @@ class VehicleState:
     lidar_data: List = field(default_factory=list)
 
     # 차량 과거 궤적
-    history_trajectory: deque = field(default_factory=lambda: deque(maxlen=3000))
+    history_trajectory: deque = field(default_factory=lambda: deque(maxlen=500))
 
     # 궤적 데이터
     polynomial_trajectory: List[TrajectoryData] = field(default_factory=list)
@@ -103,6 +103,46 @@ class VehicleState:
 
         self.terrain_type = "asphalt"
 
+    def clone(self):
+        """차량 상태 복제 - 핵심 상태 값만 복제하고 큰 데이터 구조는 제외"""
+        new_state = VehicleState()
+
+        # 위치 및 방향 관련 속성 복사
+        new_state.x = self.x
+        new_state.y = self.y
+        new_state.yaw = self.yaw
+        new_state.rear_axle_x = self.rear_axle_x
+        new_state.rear_axle_y = self.rear_axle_y
+        new_state.half_wheelbase = self.half_wheelbase
+
+        # 속도 및 가속도 관련 속성 복사
+        new_state.vel_long = self.vel_long
+        new_state.vel_lat = self.vel_lat
+        new_state.acc_long = self.acc_long
+        new_state.acc_lat = self.acc_lat
+        new_state.yaw_rate = self.yaw_rate
+
+        # 제어 입력 관련 속성 복사
+        new_state.throttle_engine = self.throttle_engine
+        new_state.throttle_brake = self.throttle_brake
+        new_state.steer = self.steer
+
+        # 목적지 관련 속성 복사
+        new_state.target_x = self.target_x
+        new_state.target_y = self.target_y
+        new_state.target_yaw = self.target_yaw
+        new_state.distance_to_target = self.distance_to_target
+        new_state.yaw_diff_to_target = self.yaw_diff_to_target
+
+        # frenet 좌표 복사
+        new_state.frenet_d = self.frenet_d
+        new_state.frenet_point = self.frenet_point
+        new_state.target_vel_long = self.target_vel_long
+
+        # 환경 속성 복사
+        new_state.terrain_type = self.terrain_type
+        return new_state
+
     def normalize_angle(self, angle):
         """[-π, π] 범위로 각도 정규화"""
         return (angle + pi) % (2 * pi) - pi
@@ -110,6 +150,40 @@ class VehicleState:
     def encoding_angle(self, angle):
         """cos/sin 인코딩을 통한 각도 표현"""
         return cos(angle), sin(angle)
+
+    def scale_distance(self, distance):
+        """거리 정규화"""
+        return 1.0 / log(e + distance/10)
+
+    def scale_frenet_d(self, d):
+        """frenet_d 값의 연속적 스케일링 (tanh 사용)"""
+        if d is None:
+            return 0.0
+        return np.tanh(d/10)
+
+    def scale_long(self, vel_long, acc_long, max_vel, min_vel, max_acc, min_acc):
+        """종방향 속도 정규화"""
+        vel_long = min(max_vel, max(vel_long, min_vel))
+        acc_long = min(max_acc, max(acc_long, min_acc))
+        scale_vel = 0
+        scale_acc = 0
+        if vel_long > 0:
+            scale_vel = vel_long / max_vel
+        else:
+            scale_vel = vel_long / min_vel
+        if acc_long > 0:
+            scale_acc = acc_long / max_acc
+        else:
+            scale_acc = acc_long / min_acc
+        return scale_vel, scale_acc
+
+    def scale_lat(self, vel_lat, acc_lat, max_vel_lat, max_acc_lat):
+        """횡방향 속도 정규화"""
+        vel_lat = min(max_vel_lat, max(vel_lat, -max_vel_lat))
+        acc_lat = min(max_acc_lat, max(acc_lat, -max_acc_lat))
+        scale_vel = vel_lat / max_vel_lat
+        scale_acc = acc_lat / max_acc_lat
+        return scale_vel, scale_acc
 
     def update_history_trajectory(self):
         """현재 위치를 궤적에 추가"""
@@ -167,19 +241,27 @@ class VehicleState:
         self.polynomial_trajectory = polynomial_trajectory
         self.physics_trajectory = physics_trajectory
 
-    def get_trajectory_data(self):
+    def get_position(self):
+        """차량 위치 반환"""
+        return (self.x, self.y, self.yaw)
+
+    def get_rear_axle_position(self):
+        """차량 뒷바퀴 위치 반환"""
+        return (self.rear_axle_x, self.rear_axle_y, self.yaw)
+
+    def get_trajectory_data(self, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat):
         """차량 궤적 데이터 반환, 각 지점의 상대적 위치로 변환
 
         각 궤적에서 시작, 중간, 마지막 데이터만 추출
         """
         polynomial_trajectory = self.polynomial_trajectory
         physics_trajectory = self.physics_trajectory
-
         data_list = []
 
         # 다항식 궤적에서 초반, 중반, 마지막 데이터 추출
         if polynomial_trajectory:
             traj_len = len(polynomial_trajectory)
+            x, y, yaw = self.get_position()
             # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
             start_idx = 0
             mid_idx = traj_len // 2
@@ -187,20 +269,21 @@ class VehicleState:
 
             # 선택된 지점의 데이터만 추가
             if start_idx < traj_len:
-                data = polynomial_trajectory[start_idx].get_data(self.x, self.y)
+                data = polynomial_trajectory[start_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
                 data_list.append(data)
 
             if mid_idx < traj_len and mid_idx != start_idx:
-                data = polynomial_trajectory[mid_idx].get_data(self.x, self.y)
+                data = polynomial_trajectory[mid_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
                 data_list.append(data)
 
             if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
-                data = polynomial_trajectory[end_idx].get_data(self.x, self.y)
+                data = polynomial_trajectory[end_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
                 data_list.append(data)
 
         # 물리 기반 궤적에서 초반, 중반, 마지막 데이터 추출
         if physics_trajectory:
             traj_len = len(physics_trajectory)
+            x, y, yaw = self.get_rear_axle_position()
             # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
             start_idx = 0
             mid_idx = traj_len // 2
@@ -208,15 +291,15 @@ class VehicleState:
 
             # 선택된 지점의 데이터만 추가
             if start_idx < traj_len:
-                data = physics_trajectory[start_idx].get_data(self.x, self.y)
+                data = physics_trajectory[start_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
                 data_list.append(data)
 
             if mid_idx < traj_len and mid_idx != start_idx:
-                data = physics_trajectory[mid_idx].get_data(self.x, self.y)
+                data = physics_trajectory[mid_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
                 data_list.append(data)
 
             if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
-                data = physics_trajectory[end_idx].get_data(self.x, self.y)
+                data = physics_trajectory[end_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
                 data_list.append(data)
 
         return np.array(data_list)
@@ -274,7 +357,7 @@ class Vehicle:
 
     def get_position(self):
         """차량 위치 반환"""
-        return (self.state.x, self.state.y, self.state.yaw)
+        return self.state.get_position()
 
     def get_current_goal(self):
         """현재 목표 반환"""
@@ -373,6 +456,8 @@ class Vehicle:
 
         # 차량 센서 업데이트
         self.sensor_manager.update(dt, time_elapsed, objects)
+
+        # 센서 정보 업데이트
         self._update_lidar_data()
 
         # 도로 정보 업데이트
@@ -859,7 +944,7 @@ class Vehicle:
             for key, value in state_dict.items():
                 if hasattr(self.state, key):
                     if key == 'history_trajectory':
-                        self.state.history_trajectory = deque(value, maxlen=3000)
+                        self.state.history_trajectory = deque(value, maxlen=500)
                     else:
                         setattr(self.state, key, value)
 
@@ -893,6 +978,10 @@ class VehicleManager:
         self.next_vehicle_id = 0  # 다음 차량 ID (자동 생성용)
 
         self.road_manager = road_manager  # 도로 관리자
+
+        self.collisions = {}
+        self.outside_roads = {}
+        self.reached_targets = {}
 
         # 설정 저장
         self.vehicle_config = vehicle_config
@@ -941,11 +1030,27 @@ class VehicleManager:
         self.vehicles.append(vehicle)
         self.vehicle_map[vehicle_id] = vehicle
 
+        self.collisions[vehicle_id] = False
+        self.outside_roads[vehicle_id] = False
+        self.reached_targets[vehicle_id] = False
+
         # 첫 번째 차량이면 활성화
         if len(self.vehicles) == 1:
             self.active_vehicle_idx = 0
 
         return vehicle
+
+    def clear_all_vehicles(self):
+        """
+        모든 차량 제거
+        """
+        self.vehicles.clear()
+        self.vehicle_map.clear()
+        self.collisions = {}
+        self.outside_roads = {}
+        self.reached_targets = {}
+        self.active_vehicle_idx = 0
+        self.next_vehicle_id = 0
 
     def remove_vehicle(self, vehicle_id):
         """
@@ -966,6 +1071,9 @@ class VehicleManager:
         # 차량 목록과 맵에서 제거
         self.vehicles.remove(vehicle)
         del self.vehicle_map[vehicle_id]
+        del self.collisions[vehicle_id]
+        del self.outside_roads[vehicle_id]
+        del self.reached_targets[vehicle_id]
 
         # 활성 차량 인덱스 조정
         if len(self.vehicles) > 0:
@@ -989,12 +1097,18 @@ class VehicleManager:
             # 특정 차량만 초기화
             if vehicle_id in self.vehicle_map:
                 self.vehicle_map[vehicle_id].reset()
+                self.collisions[vehicle_id] = False
+                self.outside_roads[vehicle_id] = False
+                self.reached_targets[vehicle_id] = False
                 return True
             return False
         else:
             # 모든 차량 초기화
             for vehicle in self.vehicles:
                 vehicle.reset()
+                self.collisions[vehicle.id] = False
+                self.outside_roads[vehicle.id] = False
+                self.reached_targets[vehicle.id] = False
             return True
 
     def get_vehicle_by_id(self, vehicle_id):
@@ -1132,41 +1246,31 @@ class VehicleManager:
         모든 차량 상태 업데이트
 
         Args:
-            actions: 차량별 액션 (단일 차량이면 단일 액션, 다중 차량이면 액션 리스트)
+            actions: 차량별 액션 (액션 리스트, 2차원 배열)
             dt: 시간 간격
             time_elapsed: 총 경과 시간
             obstacles: 장애물 목록
 
         Returns:
             collisions: 차량별 충돌 여부 {vehicle_id: bool}
+            outside_roads: 차량별 도로 외부 여부 {vehicle_id: bool}
             reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
         """
         # 빈 장애물 리스트 초기화
         if obstacles is None:
             obstacles = []
 
-        collisions = {}
-        outside_roads = {}
-        reached_targets = {}
-
-        # 단일 액션인 경우 (단일 차량 모드)
-        if not isinstance(actions, list):
-            if len(self.vehicles) > 0:
-                vehicle = self.vehicles[0]
-                _, collision, outside_road, reached = vehicle.step(actions, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
-                collisions[vehicle.id] = collision
-                outside_roads[vehicle.id] = outside_road
-                reached_targets[vehicle.id] = reached
-        else:
-            # 다중 차량 모드
-            for i, vehicle in enumerate(self.vehicles):
-                if i < len(actions):
-                    vehicle_action = actions[i]
-                    _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
-                    collisions[vehicle.id] = collision
-                    outside_roads[vehicle.id] = outside_road
-                    reached_targets[vehicle.id] = reached
-        return collisions, outside_roads, reached_targets
+        for i, vehicle in enumerate(self.vehicles):
+            if i < len(actions):
+                vehicle_action = actions[i]
+                _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
+                if collision:
+                    self.collisions[vehicle.id] = True
+                if outside_road:
+                    self.outside_roads[vehicle.id] = True
+                if reached:
+                    self.reached_targets[vehicle.id] = True
+        return self.collisions, self.outside_roads, self.reached_targets
 
     def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
         """
@@ -1207,7 +1311,10 @@ class VehicleManager:
             vehicle_data.update({
                 'vehicle_config': vehicle.vehicle_config,
                 'physics_config': vehicle.physics_config,
-                'visual_config': vehicle.visual_config
+                'visual_config': vehicle.visual_config,
+                'collision': self.collisions.get(vehicle.id, False),
+                'outside_road': self.outside_roads.get(vehicle.id, False),
+                'reached_target': self.reached_targets.get(vehicle.id, False)
             })
             vehicles_data.append(vehicle_data)
 
@@ -1231,6 +1338,11 @@ class VehicleManager:
         self.vehicles = []
         self.vehicle_map = {}
 
+        # 충돌, 도로 이탈, 목표 도달 여부 초기화
+        self.collisions = {}
+        self.outside_roads = {}
+        self.reached_targets = {}
+
         # 차량 정보 복원
         if 'vehicles' in serialized_data:
             for vehicle_data in serialized_data['vehicles']:
@@ -1253,6 +1365,11 @@ class VehicleManager:
                 # 차량 목록 및 맵에 추가
                 self.vehicles.append(vehicle)
                 self.vehicle_map[vehicle_id] = vehicle
+
+                # 충돌, 도로 이탈, 목표 도달 여부 복원
+                self.collisions[vehicle_id] = vehicle_data.get('collision', False)
+                self.outside_roads[vehicle_id] = vehicle_data.get('outside_road', False)
+                self.reached_targets[vehicle_id] = vehicle_data.get('reached_target', False)
 
         # 활성 차량 인덱스 복원
         if 'active_vehicle_idx' in serialized_data:

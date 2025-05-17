@@ -4,18 +4,33 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
+  num_episodes: 1000
   max_steps: 1000   # maximum steps per episode
-  num_vehicles: 1   # number of vehicles on the environment, if num_vehicles = 1: single vehicle, else multi-vehicle
+  num_vehicles: 1   # number of vehicles on the environment
+  boundary:         # [m]
+    x_min: -300
+    x_max: 300
+    y_min: -300
+    y_max: 300
+  obstacle:
+    num_static_obstacles: 40
+    num_dynamic_obstacles: 60
+    buffer_distance: 10  # [m]
+    boundary:            # [m]
+      x_min: -280
+      x_max: 280
+      y_min: -280
+      y_max: 280
   path_planning:
-    max_iterations: 5000       # maximum iterations for path planning
-    base_step_size: 0.1         # Base for variable RRT step [m]
-    min_step_factor: 1.0        # Min multiplier for base_step_size
-    max_step_factor: 5.0       # Max multiplier for base_step_size
-    goal_distance_threshold: 3.0 # RRT node proximity to goal for final connection [m]
-    goal_sampling_rate: 0.3     # goal sampling rate for path planning [0, 1]
-    road_width: 6.0             # Default road width [m]
+    max_iterations: 5000          # maximum iterations for path planning
+    base_step_size: 0.1           # Base for variable RRT step [m]
+    min_step_factor: 1.0          # Min multiplier for base_step_size
+    max_step_factor: 5.0          # Max multiplier for base_step_size
+    goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
+    goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
+    road_width: 6.0               # Default road width [m]
     min_radius: 6.5               # minimum turning radius for path planning [m]
-    point_separation: 0.5       # minimum distance between points in the path [m]
+    point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 30
     min_speed: 5
     max_speed: 50
@@ -34,13 +49,12 @@ visualization:
   window_height: 800
   window_size: [1300, 800]
   scale_factor: 5                   # pixels per meter
-  camera_zoom: 1.0
-  grid_size: 100                    # meters, size of each grid cell(width and height)
+  camera_zoom: 0.25
   training_mode: false              # training mode, if true: fixed dt and no fps limit
   debug_mode: false
   visualize: true
   visualize_hud: true
-  camera_follow: true               # 카메라가 차량 추적
+  camera_follow: false               # 카메라가 차량 추적
   background_color: [0, 0, 0]       # RGB
   grid_color: [100, 100, 100]       # RGB color for grid lines
   hud_bg_color: [50, 50, 50, 180]   # RGBA
@@ -81,6 +95,8 @@ vehicle:
   max_brake: 6.0         # 최대 제동 [m/s²]
   max_speed: 65.0        # 최대 속도 [m/s] (약 234 km/h)
   min_speed: -20.0       # 최소 속도 [m/s] (약 -72 km/h)
+  max_vel_lat: 23.0      # 최대 횡방향 속도 [m/s], 종방향 속도에 대한 휴리스틱 값
+  max_acc_lat: 705.0     # 최대 횡방향 가속도 [m/s²], 종방향 가속도에 대한 휴리스틱 값
 
   sensors:
     "0":  # 첫 번째 센서 (라이다)

@@ -20,7 +20,7 @@ class MainMenu:
             "1. Manual Driving",
             "2. Obstacle Driving",
             "3. Goal Driving",
-            "4. Dynamic Obstacles Test",
+            "4. Basic RL Driving Training",
             "5. Quit"
         ]
 
@@ -29,7 +29,7 @@ class MainMenu:
         메인 메뉴 표시 및 선택 처리
 
         Returns:
-            str: 선택한 메뉴 항목 ('manual', 'obstacles', 'goal', 'dynamic_obstacles', 'quit')
+            str: 선택한 메뉴 항목 ('manual', 'obstacles', 'goal', 'basic_rl_training', 'quit')
         """
         running = True
         while running:
@@ -69,9 +69,9 @@ class MainMenu:
                         pygame.quit()
                         return 'goal'
                     elif event.key == pygame.K_4:
-                        # 동적 장애물 테스트 모드
+                        # 자율주행 학습 모드
                         pygame.quit()
-                        return 'dynamic_obstacles'
+                        return 'basic_rl_training'
                     elif event.key == pygame.K_5 or event.key == pygame.K_ESCAPE:
                         # 종료
                         running = False

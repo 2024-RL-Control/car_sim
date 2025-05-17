@@ -52,24 +52,25 @@ class Renderer:
 
         return self.screen, self.clock
 
-    def draw_grid(self, camera, vehicle):
+    def draw_grid(self, camera):
         """
         고정 그리드 그리기
 
         Args:
             camera: 카메라 객체
-            vehicle: 활성 차량 객체
         """
         scale = self.config['visualization']['scale_factor']
         grid_size = 10 * scale   # 그리드 단위 (픽셀 수) * 스케일
 
-        # 카메라 위치 계산 (활성 차량 중심)
-        cam_x = vehicle.state.x
-        cam_y = vehicle.state.y
+        cam_x, cam_y = camera.get_position()
 
         # 화면 영역(viewport)에서 보이는 월드 좌표 범위 계산
-        screen_width = self.config['visualization']['window_width']
-        screen_height = self.config['visualization']['window_height']
+        if self.config['visualization']['camera_follow']:
+            screen_width = self.config['visualization']['window_width']
+            screen_height = self.config['visualization']['window_height']
+        else:
+            screen_width = (self.config['simulation']['boundary']['x_max'] - self.config['simulation']['boundary']['x_min']) * scale
+            screen_height = (self.config['simulation']['boundary']['y_max'] - self.config['simulation']['boundary']['y_min']) * scale
 
         # 화면 경계에 해당하는 월드 좌표 계산
         world_left = cam_x - screen_width / (2 * scale)
@@ -78,10 +79,10 @@ class Renderer:
         world_bottom = cam_y - screen_height / (2 * scale)
 
         # 화면에 표시될 그리드 라인의 시작/끝 인덱스 계산
-        grid_start_x = int(world_left / grid_size) - 1
-        grid_end_x = int(world_right / grid_size) + 1
-        grid_start_y = int(world_bottom / grid_size) - 1
-        grid_end_y = int(world_top / grid_size) + 1
+        grid_start_x = int(world_left / grid_size)
+        grid_end_x = int(world_right / grid_size)
+        grid_start_y = int(world_bottom / grid_size)
+        grid_end_y = int(world_top / grid_size)
 
         # 수직 그리드 라인 (X축과 평행한 선)
         for i in range(grid_start_x, grid_end_x + 1):
@@ -89,15 +90,15 @@ class Renderer:
             grid_x = i * grid_size
 
             # 화면 좌표로 변환하여 그리기 (카메라 위치 전달)
-            start_v = camera.world_to_screen(grid_x, world_bottom, cam_x, cam_y)
-            end_v = camera.world_to_screen(grid_x, world_top, cam_x, cam_y)
+            start_v = camera.world_to_screen(grid_x, world_bottom)
+            end_v = camera.world_to_screen(grid_x, world_top)
             pygame.draw.line(self.screen, self.config['visualization']['grid_color'], start_v, end_v, 1)
 
             # 좌표 표시 (원점 제외)
             if i != 0:
                 x_coord = self.font.render(f"{i*grid_size}m", True, self.config['visualization']['grid_color'])
                 # 카메라 좌표를 명시적으로 전달하여 그리드에 고정
-                x_pos = camera.world_to_screen(grid_x, 0, cam_x, cam_y)
+                x_pos = camera.world_to_screen(grid_x, 0)
                 self.screen.blit(x_coord, (x_pos[0] - 20, x_pos[1] + 5))
 
         # 수평 그리드 라인 (Y축과 평행한 선)
@@ -106,21 +107,21 @@ class Renderer:
             grid_y = i * grid_size
 
             # 화면 좌표로 변환하여 그리기 (카메라 위치 전달)
-            start_h = camera.world_to_screen(world_left, grid_y, cam_x, cam_y)
-            end_h = camera.world_to_screen(world_right, grid_y, cam_x, cam_y)
+            start_h = camera.world_to_screen(world_left, grid_y)
+            end_h = camera.world_to_screen(world_right, grid_y)
             pygame.draw.line(self.screen, self.config['visualization']['grid_color'], start_h, end_h, 1)
 
             # 좌표 표시 (원점 제외)
             if i != 0:
                 y_coord = self.font.render(f"{i*grid_size}m", True, self.config['visualization']['grid_color'])
                 # 카메라 좌표를 명시적으로 전달하여 그리드에 고정
-                y_pos = camera.world_to_screen(0, grid_y, cam_x, cam_y)
+                y_pos = camera.world_to_screen(0, grid_y)
                 self.screen.blit(y_coord, (y_pos[0] + 5, y_pos[1] - 20))
 
         # 원점 표시
         origin = self.font.render("(0,0)", True, self.config['visualization']['grid_color'])
         # 카메라 좌표를 명시적으로 전달하여 그리드에 고정
-        origin_pos = camera.world_to_screen(0, 0, cam_x, cam_y)
+        origin_pos = camera.world_to_screen(0, 0)
         self.screen.blit(origin, (origin_pos[0] + 5, origin_pos[1] + 5))
 
         # 그리드 교차점에 좌표 표시 (2칸 간격으로 표시하여 화면이 복잡해지지 않게 함)
@@ -143,7 +144,7 @@ class Renderer:
                 coord_label = small_font.render(coord_text, True, self.config['visualization']['grid_color'])
 
                 # 화면 좌표로 변환하여 표시
-                coord_pos = camera.world_to_screen(grid_x, grid_y, cam_x, cam_y)
+                coord_pos = camera.world_to_screen(grid_x, grid_y)
                 # 텍스트가 교차점 주위에 적절하게 배치되도록 약간의 오프셋 적용
                 self.screen.blit(coord_label, (coord_pos[0] + 5, coord_pos[1] - 15))
 
@@ -170,12 +171,17 @@ class Renderer:
             return
 
         # 월드 좌표를 화면 좌표로 변환하는 함수를 생성
-        world_to_screen = lambda x, y: camera.world_to_screen(x, y, vehicle=active_vehicle)
+        if self.config['visualization']['camera_follow']:
+            # 카메라 위치를 활성 차량 중심으로 설정
+            world_to_screen = lambda x, y: camera.world_to_screen(x, y, vehicle=active_vehicle)
+        else:
+            # 카메라 위치를 카메라 객체의 위치로 설정
+            world_to_screen = lambda x, y: camera.world_to_screen(x, y)
 
         # 전체 렌더링 설정이 켜져 있을 때만 렌더링을 수행
         if self.config['visualization']['visualize']:
             # 고정 그리드 그리기
-            self.draw_grid(camera, active_vehicle)
+            self.draw_grid(camera)
 
             # 도로 네트워크 그리기
             env.road_manager.draw(self.screen, world_to_screen, self.config['visualization']['debug_mode'])
