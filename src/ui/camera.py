@@ -16,6 +16,7 @@ class Camera:
         self._camera_pos = (0, 0)    # 카메라 위치 (카메라가 차량을 따라가지 않을 때 사용)
         self._camera_offset = (0, 0)  # 카메라 오프셋 (팬/줌 기능용)
 
+        self._init_camera_follow = self.config['visualization']['camera_follow']
         self._init_camera_zoom = self.config['visualization']['camera_zoom']
 
         self._keys_state = {
@@ -100,7 +101,7 @@ class Camera:
             if self.config['visualization']['camera_follow']:
                 self.config['visualization']['camera_zoom'] = 1.5
             else:
-                self.config['visualization']['camera_zoom'] = 0.25
+                self.config['visualization']['camera_zoom'] = self._init_camera_zoom
             self._camera_pos = (0, 0)
             self._camera_offset = (0, 0)
         self._keys_state[pygame.K_c] = pressed_keys[pygame.K_c]
@@ -109,7 +110,8 @@ class Camera:
         """카메라 설정 초기화"""
         self._camera_pos = (0, 0)
         self._camera_offset = (0, 0)
-        self.config['visualization']['camera_zoom'] = self._init_camera_zoom
+        # self.config['visualization']['camera_follow'] = self._init_camera_follow
+        # self.config['visualization']['camera_zoom'] = self._init_camera_zoom
         self._keys_state = {
             pygame.K_r: False,
             pygame.K_c: False
