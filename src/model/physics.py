@@ -294,3 +294,32 @@ class PhysicsEngine:
         # 과거 궤적 업데이트
         if not predict:
             state.update_history_trajectory()
+
+    @classmethod
+    def update_single_step(cls, state, action, dt, physics_config, vehicle_config, predict=False):
+        """
+        차량 상태 업데이트
+
+        Args:
+            state: 차량 상태 객체 (VehicleState)
+            action: 제어 입력 배열 [throttle_engine, throttle_brake, steering] ([0, 1], [0, 1], [-1, 1]) 범위
+            dt: 시간 간격 [s]
+            physics_config: 물리 설정
+            vehicle_config: 차량 설정
+        """
+        # 입력 처리
+        InputProcessor.process_inputs(state, action, dt, vehicle_config, physics_config)
+
+        # 물리 업데이트 (힘 계산)
+        acc_long, acc_lat, yaw_rate = ForceCalculator.calculate_forces(
+            state, dt, physics_config, vehicle_config
+        )
+
+        # 상태 업데이트
+        StateUpdater.update_vehicle_state(
+            state, acc_long, acc_lat, yaw_rate, dt, vehicle_config, physics_config
+        )
+
+        # 과거 궤적 업데이트
+        if not predict:
+            state.update_history_trajectory()

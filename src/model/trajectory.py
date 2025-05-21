@@ -466,7 +466,7 @@ class TrajectoryPredictor:
             action = control_patterns[min(i, len(control_patterns) - 1)]
 
             # 물리 엔진으로 상태 업데이트, clone된 상태 사용
-            PhysicsEngine.update(
+            PhysicsEngine.update_single_step(
                 sim_state, action, dt, physics_config, vehicle_config, predict=True
             )
 
