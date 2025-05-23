@@ -64,11 +64,16 @@ class BaseObstacle:
         self.yaw_rate = yaw_rate
         self.vel = vel
 
+    def _normalize_angle(self, angle):
+        """[-π, π] 범위로 각도 정규화"""
+        return (angle + pi) % (2 * pi) - pi
+
     def update(self, dt: float):
         """객체 상태 업데이트: 이동 및 회전"""
         # 회전 업데이트
-        self.yaw += self.yaw_rate * dt
-        self.yaw = (self.yaw + pi) % (2 * pi) - pi  # [-π, π] 범위로 정규화
+        if abs(self.yaw_rate) > 0.001:
+            self.yaw += self.yaw_rate * dt
+            self.yaw = self._normalize_angle(self.yaw)
 
         # 이동 업데이트 (현재 방향으로)
         if abs(self.vel) > 0.001:  # 속도가 있는 경우만
