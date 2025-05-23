@@ -42,8 +42,8 @@ if __name__ == "__main__":
                 s = io.StringIO()
                 sortby = pstats.SortKey.CUMULATIVE # 'tottime', 'calls', 'cumulative'
                 ps = pstats.Stats(profiler, stream=s).sort_stats(sortby)
-                ps.print_stats(50)
-                print("\n=== Profiling Results (Top 50) ===")
+                ps.print_stats(30)
+                print("\n=== Profiling Results (Top 30) ===")
                 print(s.getvalue())
                 print("=== End of Profiling ===\n")
 
