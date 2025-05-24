@@ -517,20 +517,20 @@ class PathPlanner:
         options.sort(key=lambda x: x[1])
         return options[:nb_options]
 
-    def _is_collision_path(self, path_points, obstacles, collision_dist):
+    def _is_collision_path(self, path_points, obstacles_array, collision_dist):
         """Checks if any point in path_points collides with obstacles."""
-        if path_points is None or len(path_points) == 0:
+        if path_points is None or len(path_points) == 0 or len(obstacles_array) == 0:
             return False
-        for point in path_points:
-            point_coords = (point[0], point[1])
-            for obstacle in obstacles:
-                obs_center = np.array([obstacle[0], obstacle[1]])
-                obs_effective_radius = obstacle[2] + collision_dist
 
-                dist_sq = (point_coords[0] - obs_center[0])**2 + (point_coords[1] - obs_center[1])**2
-                if dist_sq < obs_effective_radius**2:
-                    return True
-        return False
+        path_coords = np.array([p[:2] for p in path_points]) # Shape: (N, 2)
+        obstacles_center = obstacles_array[:, :2] # Shape: (M, 2)
+        obstacles_effective_radii_sq = (obstacles_array[:, 2] + collision_dist)**2 # Shape: (M,)
+
+        diff = path_coords[:, np.newaxis, :] - obstacles_center[np.newaxis, :, :] # Shape: (N, M, 2)
+        dist_sq_matrix = np.sum(diff**2, axis=2) # Shape: (N, M)
+        collision_matrix = dist_sq_matrix < obstacles_effective_radii_sq[np.newaxis, :] # Shape: (N, M)
+
+        return np.any(collision_matrix)
 
     def _reconstruct_path(self, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
         """
@@ -590,6 +590,7 @@ class PathPlanner:
         goal = point2
         root = start
         collision_dist = self.width / 2.0
+        obstacles_array = np.array(obstacles)
 
         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
 
@@ -614,7 +615,7 @@ class PathPlanner:
                                                                          opt_data[1],
                                                                          opt_data[2])
 
-                if self._is_collision_path(path_segment_points, obstacles, collision_dist):
+                if self._is_collision_path(path_segment_points, obstacles_array, collision_dist):
                     break
 
                 parent_rrt_node = nodes[node_from_option]
