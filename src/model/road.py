@@ -850,16 +850,13 @@ class RoadNetworkManager:
         if not self.nodes:
             return None
 
-        min_dist = float('inf')
-        closest_node = None
+        node_coords = np.array([[node.x, node.y] for node in self.nodes]) # Shape: (K, 2)
+        target_point = np.array([x, y]) # Shape: (2,)
 
-        for node in self.nodes:
-            dist = math.sqrt((node.x - x)**2 + (node.y - y)**2)
-            if dist < min_dist:
-                min_dist = dist
-                closest_node = node
+        dist_sq_vector = np.sum((node_coords - target_point)**2, axis=1) # Shape: (K,)
+        min_dist_idx = np.argmin(dist_sq_vector)
 
-        return closest_node
+        return self.nodes[min_dist_idx]
 
     def _find_link_by_node(self, node):
         """노드가 포함된 모든 링크 찾기"""
