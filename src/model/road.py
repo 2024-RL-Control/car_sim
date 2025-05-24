@@ -881,17 +881,13 @@ class RoadNetworkManager:
         if not sampled_points:
             return None, float('inf')
 
-        # 가장 가까운 포인트 찾기
-        min_dist = float('inf')
-        closest_point = None
+        point_coords = np.array(sampled_points) # Shape: (K, 3)
+        target_point = np.array([x, y]) # Shape: (2,)
 
-        for point in sampled_points:
-            dist = math.sqrt((point[0] - x)**2 + (point[1] - y)**2)
-            if dist < min_dist:
-                min_dist = dist
-                closest_point = point
+        dist_sq_vector = np.sum((point_coords[:, :2] - target_point)**2, axis=1) # Shape: (K,)
+        min_dist_idx = np.argmin(dist_sq_vector)
 
-        return closest_point, min_dist
+        return sampled_points[min_dist_idx], math.sqrt(dist_sq_vector[min_dist_idx])
 
     def get_vehicle_update_data(self, vehicle_position=(0,0,0)):
         """
