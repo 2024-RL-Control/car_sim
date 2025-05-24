@@ -116,7 +116,10 @@ class Link:
             dist = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
             # 필요한 샘플 수 계산
-            num_samples = max(2, int(dist / step_size))
+            if(dist < 1e-3):
+                num_samples = 2
+            else:
+                num_samples = max(2, int(dist / step_size))
 
             # 두 점 사이를 균등하게 나누어 샘플링
             for j in range(num_samples):
