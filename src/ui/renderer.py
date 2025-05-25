@@ -37,6 +37,10 @@ class Renderer:
         self._last_update_time = time.time()
         self._frame_times = []
 
+        # 좌표 변환을 위한 현재 카메라 및 차량 저장
+        self._current_camera_for_transform = None
+        self._current_active_vehicle_for_transform = None
+
     def init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
         pygame.init()
@@ -148,6 +152,14 @@ class Renderer:
                 # 텍스트가 교차점 주위에 적절하게 배치되도록 약간의 오프셋 적용
                 self.screen.blit(coord_label, (coord_pos[0] + 5, coord_pos[1] - 15))
 
+    def _transform_world_to_screen_follow(self, x, y):
+        """카메라 추적 모드 시 월드 좌표를 화면 좌표로 변환"""
+        return self._current_camera_for_transform.world_to_screen(x, y, vehicle=self._current_active_vehicle_for_transform)
+
+    def _transform_world_to_screen_static(self, x, y):
+        """정적 카메라 모드 시 월드 좌표를 화면 좌표로 변환"""
+        return self._current_camera_for_transform.world_to_screen(x, y)
+
     def render(self, env, camera, hud):
         """
         환경 렌더링
@@ -170,13 +182,22 @@ class Renderer:
             pygame.display.flip()
             return
 
+        # 현재 카메라 및 활성 차량 업데이트
+        if self._current_camera_for_transform is None:
+            self._current_camera_for_transform = camera
+        if self._current_active_vehicle_for_transform is None:
+            self._current_active_vehicle_for_transform = active_vehicle
+        else:
+            if self._current_active_vehicle_for_transform.get_id() != active_vehicle.get_id():
+                self._current_active_vehicle_for_transform = active_vehicle
+
         # 월드 좌표를 화면 좌표로 변환하는 함수를 생성
         if self.config['visualization']['camera_follow']:
             # 카메라 위치를 활성 차량 중심으로 설정
-            world_to_screen = lambda x, y: camera.world_to_screen(x, y, vehicle=active_vehicle)
+            world_to_screen = self._transform_world_to_screen_follow
         else:
             # 카메라 위치를 카메라 객체의 위치로 설정
-            world_to_screen = lambda x, y: camera.world_to_screen(x, y)
+            world_to_screen = self._transform_world_to_screen_static
 
         # 전체 렌더링 설정이 켜져 있을 때만 렌더링을 수행
         if self.config['visualization']['visualize']:
