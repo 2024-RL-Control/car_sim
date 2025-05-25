@@ -187,13 +187,11 @@ class Renderer:
             self._current_camera_for_transform = camera
         if self._current_active_vehicle_for_transform is None:
             self._current_active_vehicle_for_transform = active_vehicle
-        else:
-            if self._current_active_vehicle_for_transform.get_id() != active_vehicle.get_id():
-                self._current_active_vehicle_for_transform = active_vehicle
 
         # 월드 좌표를 화면 좌표로 변환하는 함수를 생성
         if self.config['visualization']['camera_follow']:
             # 카메라 위치를 활성 차량 중심으로 설정
+            self._current_active_vehicle_for_transform = active_vehicle
             world_to_screen = self._transform_world_to_screen_follow
         else:
             # 카메라 위치를 카메라 객체의 위치로 설정

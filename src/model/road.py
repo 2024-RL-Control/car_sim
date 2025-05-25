@@ -465,19 +465,17 @@ class PathPlanner:
     def plan(self, point1, point2, obstacles, mode):
         """
         경로 계획 메소드
+
+        Returns:
+            nodes_points: node points list, 2D array
+            paths_list: path list, 2D array
         """
-        nodes_points = [] # node points list, 2D array
-        paths_list = [] # path list, 2D array
         if mode == 'plan':
             nodes_points, paths_list = self._rrt_with_dubins(point1, point2, obstacles)
         elif mode == 'curve':
-            nodes_points.append(point1)
-            nodes_points.append(point2)
-            paths_list.append(self._quadratic_bezier_curve(point1, point2))
+            nodes_points, paths_list = self._quadratic_bezier_curve(point1, point2)
         else:
-            nodes_points.append(point1)
-            nodes_points.append(point2)
-            paths_list.append(self._straight(point1, point2))
+            nodes_points, paths_list = self._straight(point1, point2)
         return nodes_points, paths_list
 
     def calculate_target_vel(self, path, default_speed=30, min_speed=5, max_speed=50):
@@ -574,7 +572,7 @@ class PathPlanner:
         if path_points is None or len(path_points) == 0 or len(obstacles_array) == 0:
             return False
 
-        path_coords = np.array([p[:2] for p in path_points]) # Shape: (N, 2)
+        path_coords = path_points # Shape: (N, 2)
         obstacles_center = obstacles_array[:, :2] # Shape: (M, 2)
         obstacles_effective_radii_sq = (obstacles_array[:, 2] + collision_dist)**2 # Shape: (M,)
 
@@ -590,13 +588,13 @@ class PathPlanner:
         Returns a list of (x, y, yaw) waypoints.
         """
         if goal_reached_pos is None or goal_reached_pos not in rrt_nodes_map:
-            return [], []
+            raise ValueError("Path reconstruction error: Goal reached position is None or not in RRT nodes map.")
 
         if goal_reached_pos == root_pos:
             edge_for_start_goal = rrt_edges_map.get((root_pos, root_pos))
             if edge_for_start_goal and edge_for_start_goal.path:
                 return [root_pos], [list(edge_for_start_goal.path)]
-            return [root_pos], []
+            raise ValueError("Path reconstruction error: Missing edge or path segment from root to root.")
 
         path_nodes = deque([goal_reached_pos])
         path_segments = deque()
@@ -605,15 +603,13 @@ class PathPlanner:
         while current_pos != root_pos:
             node_data = rrt_nodes_map.get(current_pos)
             if node_data is None or node_data.parent_pos is None:
-                print("Path reconstruction error: Inconsistent tree or orphaned node.")
-                return [], []
+                raise ValueError("Path reconstruction error: Inconsistent tree or orphaned node.")
 
             parent_pos = node_data.parent_pos
             edge = rrt_edges_map.get((parent_pos, current_pos))
 
             if edge is None or not edge.path:
-                print(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
-                return [], []
+                raise ValueError(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
 
             path_nodes.appendleft(parent_pos)
             path_segments.appendleft(list(edge.path))
@@ -687,8 +683,11 @@ class PathPlanner:
                         break
                 break
 
-        # 경로를 찾지 못한 경우, 직선 경로로 대체
-        return self._straight(start, goal)
+        # # 경로를 찾지 못한 경우, 직선 경로로 대체
+        # return self._straight(start, goal)
+
+        raise Exception("Failed to find rrt-dubins path")
+
 
     def _straight(self, point1, point2):
         """
@@ -697,6 +696,7 @@ class PathPlanner:
         # 시작점과 끝점
         start = (point1[0], point1[1], point1[2])
         end = (point2[0], point2[1], point2[2])
+        nodes_points = [start, end]
         path = []
 
         # 방향 계산
@@ -721,7 +721,7 @@ class PathPlanner:
 
             path.append((x, y, yaw))
 
-        return path
+        return nodes_points, [path]
 
     def _quadratic_bezier_curve(self, point1, point2):
         """
@@ -730,6 +730,7 @@ class PathPlanner:
         # 시작점과 끝점
         start = (point1[0], point1[1], point1[2])
         end = (point2[0], point2[1], point2[2])
+        nodes_points = [start, end]
 
         # 시작 방향 및 끝 방향의 단위 벡터
         start_dir = (math.cos(start[2]), math.sin(start[2]))
@@ -823,7 +824,7 @@ class PathPlanner:
 
             path.append((x, y, yaw))
 
-        return path
+        return nodes_points, [path]
 
 
 class RoadNetworkManager:

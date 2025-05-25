@@ -265,37 +265,37 @@ class BasicRLDrivingEnv:
     def _draw_boundary(self):
         # 경계(boundary)와 장애물 영역(obstacle_area) 시각화
         if self.env.config['visualization']['debug_mode']:
-            world_to_screen = lambda x, y: self.env.camera.world_to_screen(x, y)
+            world_to_screen = self.env.camera.world_to_screen
 
             # 경계(Boundary) 시각화 - 노란색 선
             boundary_color = (255, 255, 0)  # RGB: 노란색
             pygame.draw.line(self.env.renderer.screen, boundary_color,
-                             world_to_screen(self.boundary['x_min'], self.boundary['y_min']),
-                             world_to_screen(self.boundary['x_max'], self.boundary['y_min']), 2)
+                             world_to_screen((self.boundary['x_min'], self.boundary['y_min'])),
+                             world_to_screen((self.boundary['x_max'], self.boundary['y_min'])), 2)
             pygame.draw.line(self.env.renderer.screen, boundary_color,
-                             world_to_screen(self.boundary['x_max'], self.boundary['y_min']),
-                             world_to_screen(self.boundary['x_max'], self.boundary['y_max']), 2)
+                             world_to_screen((self.boundary['x_max'], self.boundary['y_min'])),
+                             world_to_screen((self.boundary['x_max'], self.boundary['y_max'])), 2)
             pygame.draw.line(self.env.renderer.screen, boundary_color,
-                             world_to_screen(self.boundary['x_max'], self.boundary['y_max']),
-                             world_to_screen(self.boundary['x_min'], self.boundary['y_max']), 2)
+                             world_to_screen((self.boundary['x_max'], self.boundary['y_max'])),
+                             world_to_screen((self.boundary['x_min'], self.boundary['y_max'])), 2)
             pygame.draw.line(self.env.renderer.screen, boundary_color,
-                             world_to_screen(self.boundary['x_min'], self.boundary['y_max']),
-                             world_to_screen(self.boundary['x_min'], self.boundary['y_min']), 2)
+                             world_to_screen((self.boundary['x_min'], self.boundary['y_max'])),
+                             world_to_screen((self.boundary['x_min'], self.boundary['y_min'])), 2)
 
             # 장애물 영역(Obstacle Area) 시각화 - 빨간색 선
             obstacle_area_color = (255, 0, 0)  # RGB: 빨간색
             pygame.draw.line(self.env.renderer.screen, obstacle_area_color,
-                             world_to_screen(self.obstacle_area['x_min'], self.obstacle_area['y_min']),
-                             world_to_screen(self.obstacle_area['x_max'], self.obstacle_area['y_min']), 2)
+                             world_to_screen((self.obstacle_area['x_min'], self.obstacle_area['y_min'])),
+                             world_to_screen((self.obstacle_area['x_max'], self.obstacle_area['y_min'])), 2)
             pygame.draw.line(self.env.renderer.screen, obstacle_area_color,
-                             world_to_screen(self.obstacle_area['x_max'], self.obstacle_area['y_min']),
-                             world_to_screen(self.obstacle_area['x_max'], self.obstacle_area['y_max']), 2)
+                             world_to_screen((self.obstacle_area['x_max'], self.obstacle_area['y_min'])),
+                             world_to_screen((self.obstacle_area['x_max'], self.obstacle_area['y_max'])), 2)
             pygame.draw.line(self.env.renderer.screen, obstacle_area_color,
-                             world_to_screen(self.obstacle_area['x_max'], self.obstacle_area['y_max']),
-                             world_to_screen(self.obstacle_area['x_min'], self.obstacle_area['y_max']), 2)
+                             world_to_screen((self.obstacle_area['x_max'], self.obstacle_area['y_max'])),
+                             world_to_screen((self.obstacle_area['x_min'], self.obstacle_area['y_max'])), 2)
             pygame.draw.line(self.env.renderer.screen, obstacle_area_color,
-                             world_to_screen(self.obstacle_area['x_min'], self.obstacle_area['y_max']),
-                             world_to_screen(self.obstacle_area['x_min'], self.obstacle_area['y_min']), 2)
+                             world_to_screen((self.obstacle_area['x_min'], self.obstacle_area['y_max'])),
+                             world_to_screen((self.obstacle_area['x_min'], self.obstacle_area['y_min'])), 2)
 
             # 화면 업데이트
             pygame.display.flip()

@@ -233,7 +233,7 @@ class SquareObstacle(BaseObstacle):
         ]
 
         # 꼭지점 변환 (월드 좌표 → 화면 좌표)
-        screen_corners = []
+        world_corners = []
         for dx, dy in corners:
             # 회전 변환
             rotated_x = dx * cos(self.yaw) - dy * sin(self.yaw)
@@ -244,9 +244,10 @@ class SquareObstacle(BaseObstacle):
             world_y = self.y + rotated_y
 
             # 화면 좌표
-            screen_corners.append(world_to_screen_func((world_x, world_y)))
+            world_corners.append((world_x, world_y))
 
         # 정사각형 그리기
+        screen_corners = world_to_screen_func(world_corners)
         pygame.draw.polygon(screen, self.color, screen_corners, 2)
 
         # 디버그 모드: 경계 원 표시
@@ -333,7 +334,7 @@ class RectangleObstacle(BaseObstacle):
         ]
 
         # 꼭지점 변환 (월드 좌표 → 화면 좌표)
-        screen_corners = []
+        world_corners = []
         for dx, dy in corners:
             # 회전 변환
             rotated_x = dx * cos(self.yaw) - dy * sin(self.yaw)
@@ -344,9 +345,10 @@ class RectangleObstacle(BaseObstacle):
             world_y = self.y + rotated_y
 
             # 화면 좌표
-            screen_corners.append(world_to_screen_func((world_x, world_y)))
+            world_corners.append((world_x, world_y))
 
         # 직사각형 그리기
+        screen_corners = world_to_screen_func(world_corners)
         pygame.draw.polygon(screen, self.color, screen_corners, 2)
 
         # 디버그 모드: 경계 원 표시
