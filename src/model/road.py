@@ -89,6 +89,12 @@ class Link:
         self.mode = mode
         self._sampled_points = None
         self._sample_step = None
+
+        self._cached_center_world_line = []
+        self._cached_left_world_line = []
+        self._cached_right_world_line = []
+        self._calculate_cached_world_lines()
+
         Link._id_iter += 1
 
     def get_target_vel(self):
@@ -142,6 +148,65 @@ class Link:
         self._sample_step = step_size
         return result
 
+    def _calculate_cached_world_lines(self):
+        """Calculates and caches the world coordinates of road lines (center, left, right)."""
+        if not self.path or len(self.path) == 0:
+            self._cached_center_world_line = []
+            self._cached_left_world_line = []
+            self._cached_right_world_line = []
+            return
+
+        _center_world_line = []
+        _left_world_line = []
+        _right_world_line = []
+        half_width = self.width / 2
+
+        if len(self.path) == 1:
+            p_world = self.path[0]
+            _center_world_line.append((p_world[0], p_world[1]))
+            _left_world_line.append((p_world[0], p_world[1]))
+            _right_world_line.append((p_world[0], p_world[1]))
+        else:
+            for i in range(len(self.path) - 1):
+                p1_world = self.path[i]
+                p2_world = self.path[i+1]
+
+                # 선분의 방향 벡터
+                dx = p2_world[0] - p1_world[0]
+                dy = p2_world[1] - p1_world[1]
+                length = math.sqrt(dx*dx + dy*dy)
+                if length < 0.01:
+                    continue
+
+                # 방향 벡터를 정규화
+                dx_norm, dy_norm = (dx/length, dy/length)
+                perpx, perpy = -dy_norm, dx_norm # 수직 벡터 (시계 방향으로 90도 회전)
+
+                _center_world_line.append((p1_world[0], p1_world[1]))
+                _left_world_line.append((p1_world[0] + perpx * half_width, p1_world[1] + perpy * half_width))
+                _right_world_line.append((p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width))
+
+            # 마지막 점 (P_{N-1})의 수직 벡터를 사용하여 마지막 세그먼트 (P_{N-2} -> P_{N-1})
+            p1_world = self.path[-2]
+            p2_world = self.path[-1]
+
+            dx = p2_world[0] - p1_world[0]
+            dy = p2_world[1] - p1_world[1]
+            length = math.sqrt(dx*dx + dy*dy)
+            if length > 0.01:
+                dx_norm, dy_norm = (dx/length, dy/length)
+                perpx, perpy = -dy_norm, dx_norm
+
+                last_p_world = self.path[-1]
+                _center_world_line.append((last_p_world[0], last_p_world[1]))
+                _left_world_line.append((last_p_world[0] + perpx * half_width, last_p_world[1] + perpy * half_width))
+                _right_world_line.append((last_p_world[0] - perpx * half_width, last_p_world[1] - perpy * half_width))
+
+        self._cached_center_world_line = _center_world_line
+        self._cached_left_world_line = _left_world_line
+        self._cached_right_world_line = _right_world_line
+
+
     def draw(self, screen, world_to_screen_func, debug=False):
         """
         pygame 시각화 메소드
@@ -149,42 +214,19 @@ class Link:
         path를 중심선으로 고정 너비(self.width)의 도로 시각화
         debug 모드 시 중심선과 연결된 노드 id 출력
         """
-        if not self.path or len(self.path) < 2:
+        if len(self._cached_center_world_line) < 1:
             return
 
         road_color = (100, 100, 100)  # 회색
         line_color = (255, 255, 0)  # 노란색
 
-        left = []
-        right = []
-        center = []
-        half_width = self.width / 2
+        center_screen = [world_to_screen_func(p[0], p[1]) for p in self._cached_center_world_line]
+        left_screen = [world_to_screen_func(p[0], p[1]) for p in self._cached_left_world_line]
+        right_screen = [world_to_screen_func(p[0], p[1]) for p in self._cached_right_world_line]
 
-        # 도로 그리기
-        for i in range(len(self.path) - 1):
-            p1_world = self.path[i]
-            p2_world = self.path[i+1]
-
-            # 선분의 방향 벡터
-            dx = p2_world[0] - p1_world[0]
-            dy = p2_world[1] - p1_world[1]
-            length = math.sqrt(dx*dx + dy*dy)
-            if length < 0.01:
-                continue
-
-            # 방향 벡터를 정규화
-            dx_norm, dy_norm = dx/length, dy/length
-
-            # 수직 방향 벡터 (시계 방향으로 90도 회전)
-            perpx, perpy = -dy_norm, dx_norm
-
-            center.append(world_to_screen_func(p1_world[0], p1_world[1]))
-            left.append(world_to_screen_func(p1_world[0] + perpx * half_width, p1_world[1] + perpy * half_width))
-            right.append(world_to_screen_func(p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width))
-
-        pygame.draw.lines(screen, road_color, False, center, 2)
-        pygame.draw.lines(screen, line_color, False, left, 2)
-        pygame.draw.lines(screen, line_color, False, right, 2)
+        pygame.draw.lines(screen, road_color, False, center_screen, 2)
+        pygame.draw.lines(screen, line_color, False, left_screen, 2)
+        pygame.draw.lines(screen, line_color, False, right_screen, 2)
 
         # 디버그 모드 출력
         if debug:
@@ -208,7 +250,10 @@ class Link:
             "path": self.path,
             "target_vel": self.target_vel,
             "width": self.width,
-            "mode": self.mode
+            "mode": self.mode,
+            "cached_center_world_line": self._cached_center_world_line,
+            "cached_left_world_line": self._cached_left_world_line,
+            "cached_right_world_line": self._cached_right_world_line
         }
 
     def load_from_serialized(self, data, nodes_dict):
@@ -219,6 +264,9 @@ class Link:
         self.target_vel = data["target_vel"]
         self.width = data["width"]
         self.mode = data["mode"]
+        self._cached_center_world_line = data["cached_center_world_line"]
+        self._cached_left_world_line = data["cached_left_world_line"]
+        self._cached_right_world_line = data["cached_right_world_line"]
         self._sampled_points = None
         self._sample_step = None
 
