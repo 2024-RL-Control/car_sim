@@ -884,7 +884,7 @@ class RoadNetworkManager:
         # 링크의 경로 샘플링
         sampled_points = link.sample(0.5)
 
-        if not sampled_points:
+        if len(sampled_points) == 0:
             return None, float('inf')
 
         point_coords = np.array(sampled_points) # Shape: (K, 3)
@@ -918,10 +918,9 @@ class RoadNetworkManager:
         # 가장 가까운 링크와 포인트 및 평균 목표 속도 계산
         min_weighted_dist = float('inf')
         closest_point = None
-        closest_link = None
         average_target_vel = 0
 
-        yaw_weight = 2.0
+        yaw_weight = 1.5
 
         for link in links:
             point, dist = self._get_closest_point(x, y, link)
@@ -936,30 +935,10 @@ class RoadNetworkManager:
             if weighted_dist < min_weighted_dist:
                 min_weighted_dist = weighted_dist
                 closest_point = point
-                closest_link = link
             average_target_vel += link.get_target_vel()
 
         if (links):
             average_target_vel /= len(links)
-
-        # 추가적으로 근처의 다른 링크도 확인
-        for link in self.links:
-            if link in links:
-                continue
-
-            point, dist = self._get_closest_point(x, y, link)
-            if point is None:
-                continue
-
-            point_yaw = point[2]
-            yaw_diff = abs(self._normalize_angle(yaw - point_yaw))
-
-            weighted_dist = dist * (1 + yaw_diff * yaw_weight)
-
-            if weighted_dist < min_weighted_dist:
-                min_weighted_dist = weighted_dist
-                closest_point = point
-                closest_link = link
 
         if not closest_point:
             return None, None, None, False
