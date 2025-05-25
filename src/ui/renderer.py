@@ -154,7 +154,7 @@ class Renderer:
 
     def _transform_world_to_screen_follow(self, world_points):
         """카메라 추적 모드 시 월드 좌표를 화면 좌표로 변환"""
-        return self._current_camera_for_transform.world_to_screen(world_points, vehicle=self._current_active_vehicle_for_transform)
+        return self._current_camera_for_transform.world_to_screen(world_points, cam_point=self._current_active_vehicle_for_transform.get_position())
 
     def _transform_world_to_screen_static(self, world_points):
         """정적 카메라 모드 시 월드 좌표를 화면 좌표로 변환"""

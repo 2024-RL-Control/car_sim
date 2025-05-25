@@ -24,7 +24,7 @@ class Camera:
             pygame.K_c: False
         }
 
-    def world_to_screen(self, world_points, vehicle=None):
+    def world_to_screen(self, world_points, cam_point=None):
         """
         월드 좌표 리스트 → 화면 좌표 리스트 변환
         월드: 원점 중앙, Y축 위로 증가
@@ -35,7 +35,7 @@ class Camera:
 
         Args:
             world_points: 변환할 월드 좌표들의 리스트 또는 NumPy 배열. 각 요소는 (x, y) 튜플 또는 [x, y] 형태
-            vehicle: 카메라 위치를 가져올 차량 객체
+            cam_point: 카메라 위치 (x, y) 튜플 또는 [x, y] 형태
         """
         if isinstance(world_points, np.ndarray):
             world_points_arr = world_points
@@ -51,10 +51,10 @@ class Camera:
         ys = world_points_arr[:, 1]
 
         # 카메라 위치 결정
-        if self.config['visualization']['camera_follow'] and vehicle is not None:
+        if self.config['visualization']['camera_follow'] and cam_point is not None:
             # 카메라 추적 모드가 켜져 있고 차량이 주어진 경우, 차량 위치 사용
-            cam_x = vehicle.state.x
-            cam_y = vehicle.state.y
+            cam_x = cam_point[0]
+            cam_y = cam_point[1]
             self._camera_pos = (cam_x, cam_y)
         else:
             # 카메라 추적 모드가 꺼져 있거나 차량이 없는 경우, 기존 카메라 위치 사용
