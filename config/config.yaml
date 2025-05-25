@@ -22,7 +22,7 @@ simulation:
       y_min: -280
       y_max: 280
   path_planning:
-    max_iterations: 5000          # maximum iterations for path planning
+    max_iterations: 500          # maximum iterations for path planning
     base_step_size: 0.1           # Base for variable RRT step [m]
     min_step_factor: 1.0          # Min multiplier for base_step_size
     max_step_factor: 5.0          # Max multiplier for base_step_size

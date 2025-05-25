@@ -12,7 +12,7 @@ import io
 # ==============
 if __name__ == "__main__":
     running = True
-    is_profiling = True
+    is_profiling = False
 
     while running:
         # 메인 메뉴 생성 및 표시
