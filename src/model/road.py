@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import pygame
 import numpy as np
+from math import pi
 import math
 import random
 from collections import deque
@@ -792,6 +793,7 @@ class RoadNetworkManager:
         self.half_width = self.width / 2.0
         self.nodes = []
         self.links = []
+        self._node_coords = np.array([]).reshape(0, 2)
 
     def add_node(self, point):
         """노드 추가"""
@@ -801,6 +803,7 @@ class RoadNetworkManager:
 
         new_node = Node(point[0], point[1], point[2])
         self.nodes.append(new_node)
+        self._node_coords = np.vstack((self._node_coords, np.array([new_node.x, new_node.y])))
         return new_node
 
     def make_link(self, point1, point2, obstacles=[], mode='plan'):
@@ -853,7 +856,7 @@ class RoadNetworkManager:
         if not self.nodes:
             return None
 
-        node_coords = np.array([[node.x, node.y] for node in self.nodes]) # Shape: (K, 2)
+        node_coords = self._node_coords # Shape: (K, 2)
         target_point = np.array([x, y]) # Shape: (2,)
 
         dist_sq_vector = np.sum((node_coords - target_point)**2, axis=1) # Shape: (K,)
@@ -961,8 +964,6 @@ class RoadNetworkManager:
         if not closest_point:
             return None, None, None, False
 
-        closest_point  # 가장 가까운 포인트 저장
-
         # Frenet 좌표계의 d 계산 (차량이 경로에서 좌/우로 얼마나 떨어져 있는지)
         # 차량과 경로 포인트 사이의 벡터
         dx = x - closest_point[0]
@@ -985,11 +986,7 @@ class RoadNetworkManager:
 
     def _normalize_angle(self, angle):
         """각도를 -pi~pi 범위로 정규화"""
-        while angle > math.pi:
-            angle -= 2.0 * math.pi
-        while angle < -math.pi:
-            angle += 2.0 * math.pi
-        return angle
+        return (angle + pi) % (2 * pi) - pi
 
     def get_serializable_state(self):
         """
@@ -1027,6 +1024,7 @@ class RoadNetworkManager:
             node.load_from_serialized(node_data)
             self.nodes.append(node)
             nodes_dict[node.id] = node
+            self._node_coords = np.vstack((self._node_coords, np.array([node.x, node.y])))
         # 노드 ID 이터레이터 복원
         Node._id_iter = data.get("node_id_iter", 0)
 
@@ -1041,6 +1039,7 @@ class RoadNetworkManager:
         """노드와 링크 초기화"""
         self.nodes = []
         self.links = []
+        self._node_coords = np.array([]).reshape(0, 2)
         Node._id_iter = 0  # 노드 ID 초기화
         Link._id_iter = 0  # 링크 ID 초기화
 
