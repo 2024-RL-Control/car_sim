@@ -557,51 +557,70 @@ class TrajectoryPredictor:
             num_steps = int(time_horizon / dt)
             return [[0.0, 0.0, 0.0]] * num_steps
 
-        # 패턴을 저장할 리스트
-        control_patterns = []
         num_steps = int(time_horizon / dt)
+        if num_steps == 0:
+            return []
 
         # 최근 상태 이력에서 제어 입력 추출 (가장 최근 30개 데이터 사용)
-        recent_history = list(state_history)[-min(30, len(state_history)):]
+        recent_history_slice = list(state_history)[-min(30, len(state_history)):]
 
-        # 최근 스로틀, 브레이크, 조향 값 추출
-        recent_throttle_engine = [state['throttle_engine'] for state in recent_history]
-        recent_throttle_brake = [state['throttle_brake'] for state in recent_history]
-        recent_steer = [state['steer'] for state in recent_history]
+        # NumPy arrays for easier computation
+        recent_throttle_engines = np.array([state['throttle_engine'] for state in recent_history_slice])
+        recent_throttle_brakes = np.array([state['throttle_brake'] for state in recent_history_slice])
+        recent_steers = np.array([state['steer'] for state in recent_history_slice])
 
         # 평균 제어 입력 계산
-        avg_throttle_engine = sum(recent_throttle_engine) / len(recent_throttle_engine)
-        avg_throttle_brake = sum(recent_throttle_brake) / len(recent_throttle_brake)
-        avg_steer = sum(recent_steer) / len(recent_steer)
+        avg_throttle_engine = np.mean(recent_throttle_engines)
+        avg_throttle_brake = np.mean(recent_throttle_brakes)
+        avg_steer = np.mean(recent_steers)
 
         # 변화 추세 계산 (선형 추세)
         throttle_engine_trend = 0.0
         throttle_brake_trend = 0.0
         steer_trend = 0.0
 
-        if len(recent_history) >= 3:
+        if len(recent_history_slice) >= 3:
             # 간단한 추세 계산 (최근 3개 포인트 사용)
-            throttle_engine_trend = (recent_throttle_engine[-1] - recent_throttle_engine[-3]) / 2
-            throttle_brake_trend = (recent_throttle_brake[-1] - recent_throttle_brake[-3]) / 2
-            steer_trend = (recent_steer[-1] - recent_steer[-3]) / 2
+            throttle_engine_trend = (recent_throttle_engines[-1] - recent_throttle_engines[-3]) / 2.0
+            throttle_brake_trend = (recent_throttle_brakes[-1] - recent_throttle_brakes[-3]) / 2.0
+            steer_trend = (recent_steers[-1] - recent_steers[-3]) / 2.0
 
-        # 제어 입력 패턴을 시간 범위 동안 확장
-        for i in range(num_steps):
-            # 시간에 따른 추세 반영
-            trend_factor = min(i * dt, 1.0)  # 최대 1초까지만 추세 반영
+        # 제어 입력 패턴을 시간 범위 동안 확장 (Vectorized)
+        time_indices = np.arange(num_steps)  # 0, 1, ..., num_steps-1
+        trend_factors = np.minimum(time_indices * dt, 1.0)  # 시간에 따른 추세 반영 비율
 
-            # 추세를 반영한 제어 입력 계산
-            throttle_engine = np.clip(avg_throttle_engine + throttle_engine_trend * trend_factor, 0.0, 1.0)
-            throttle_brake = np.clip(avg_throttle_brake + throttle_brake_trend * trend_factor, 0.0, 1.0)
-            steer = np.clip(avg_steer + steer_trend * trend_factor, -1.0, 1.0)
+        # 추세를 반영한 제어 입력 계산 (raw values)
+        throttle_engines_out = avg_throttle_engine + throttle_engine_trend * trend_factors
+        throttle_brakes_out = avg_throttle_brake + throttle_brake_trend * trend_factors
+        steers_out = avg_steer + steer_trend * trend_factors
 
-            # 동시에 가속과 제동은 불가능
-            if throttle_engine > 0.1 and throttle_brake > 0.1:
-                if throttle_engine > throttle_brake:
-                    throttle_brake = 0.0
-                else:
-                    throttle_engine = 0.0
+        # np.clip 적용
+        throttle_engines_out = np.clip(throttle_engines_out, 0.0, 1.0)
+        throttle_brakes_out = np.clip(throttle_brakes_out, 0.0, 1.0)
+        steers_out = np.clip(steers_out, -1.0, 1.0)
 
-            control_patterns.append([throttle_engine, throttle_brake, steer])
+        # 동시에 가속과 제동은 불가능 조건 적용
+        # 조건 로직에서 이미 수정된 값을 사용하지 않도록 원본 클립된 값의 복사본을 사용합니다.
+        temp_engines = throttle_engines_out.copy()
+        temp_brakes = throttle_brakes_out.copy()
+
+        conflict_condition = (temp_engines > 0.1) & (temp_brakes > 0.1)
+
+        # 충돌 조건이고 엔진 > 브레이크이면, 브레이크 = 0
+        throttle_brakes_out = np.where(
+            conflict_condition & (temp_engines > temp_brakes),
+            0.0,
+            temp_brakes  # 그렇지 않으면 현재 브레이크 값 유지
+        )
+
+        # 충돌 조건이고 엔진 <= 브레이크이면, 엔진 = 0
+        throttle_engines_out = np.where(
+            conflict_condition & (temp_engines <= temp_brakes),
+            0.0,
+            temp_engines  # 그렇지 않으면 현재 엔진 값 유지
+        )
+
+        # 결과 조합: num_steps x 3 배열을 만들고 리스트로 변환
+        control_patterns = np.stack((throttle_engines_out, throttle_brakes_out, steers_out), axis=-1).tolist()
 
         return control_patterns
