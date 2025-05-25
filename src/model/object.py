@@ -89,10 +89,10 @@ class BaseObstacle:
         # 외접원 (색상: bounding_circle_colors[0])
         for circle in self.outer_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
-            circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
+            circle_pos = world_to_screen_func((world_pos[0], world_pos[1]))
 
             # 반지름을 화면 스케일로 변환
-            x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
+            x2 = world_to_screen_func((world_pos[0] + circle.radius, world_pos[1]))
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
             pygame.draw.circle(screen, self.bounding_circle_colors[0], circle_pos, screen_radius, 1)
@@ -100,10 +100,10 @@ class BaseObstacle:
         # 중간원 (색상: bounding_circle_colors[1])
         for circle in self.middle_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
-            circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
+            circle_pos = world_to_screen_func((world_pos[0], world_pos[1]))
 
             # 반지름을 화면 스케일로 변환
-            x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
+            x2 = world_to_screen_func((world_pos[0] + circle.radius, world_pos[1]))
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
             pygame.draw.circle(screen, self.bounding_circle_colors[1], circle_pos, screen_radius, 1)
@@ -111,10 +111,10 @@ class BaseObstacle:
         # 내접원 (색상: bounding_circle_colors[2])
         for circle in self.inner_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
-            circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
+            circle_pos = world_to_screen_func((world_pos[0], world_pos[1]))
 
             # 반지름을 화면 스케일로 변환
-            x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
+            x2 = world_to_screen_func((world_pos[0] + circle.radius, world_pos[1]))
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
             pygame.draw.circle(screen, self.bounding_circle_colors[2], circle_pos, screen_radius, 1)
@@ -172,10 +172,10 @@ class CircleObstacle(BaseObstacle):
     def draw(self, screen, world_to_screen_func, debug: bool = False):
         """원형 객체 렌더링"""
         # 객체 중심 위치를 화면 좌표로 변환
-        screen_pos = world_to_screen_func(self.x, self.y)
+        screen_pos = world_to_screen_func((self.x, self.y))
 
         # 반지름을 화면 스케일로 변환
-        x2 = world_to_screen_func(self.x + self.radius, self.y)
+        x2 = world_to_screen_func((self.x + self.radius, self.y))
         screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(screen_pos))))
 
         # 원형 객체 그리기
@@ -244,7 +244,7 @@ class SquareObstacle(BaseObstacle):
             world_y = self.y + rotated_y
 
             # 화면 좌표
-            screen_corners.append(world_to_screen_func(world_x, world_y))
+            screen_corners.append(world_to_screen_func((world_x, world_y)))
 
         # 정사각형 그리기
         pygame.draw.polygon(screen, self.color, screen_corners, 2)
@@ -344,7 +344,7 @@ class RectangleObstacle(BaseObstacle):
             world_y = self.y + rotated_y
 
             # 화면 좌표
-            screen_corners.append(world_to_screen_func(world_x, world_y))
+            screen_corners.append(world_to_screen_func((world_x, world_y)))
 
         # 직사각형 그리기
         pygame.draw.polygon(screen, self.color, screen_corners, 2)
@@ -379,10 +379,10 @@ class Goal(BaseObstacle):
     def draw(self, screen, world_to_screen_func, is_current: bool = False, debug: bool = False):
         """목적지 렌더링"""
         # 객체 중심 위치를 화면 좌표로 변환
-        screen_pos = world_to_screen_func(self.x, self.y)
+        screen_pos = world_to_screen_func((self.x, self.y))
 
         # 반지름을 화면 스케일로 변환
-        x2 = world_to_screen_func(self.x + self.radius, self.y)
+        x2 = world_to_screen_func((self.x + self.radius, self.y))
         screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(screen_pos))))
 
         original_color = self.color

@@ -28,7 +28,7 @@ class Node:
         pygame 시각화 메소드
         debug 모드 시 노드 id 같이 출력
         """
-        screen_pos = world_to_screen_func(self.x, self.y)
+        screen_pos = world_to_screen_func((self.x, self.y))
         pygame.draw.circle(screen, color, (int(screen_pos[0]), int(screen_pos[1])), radius)
         if debug:
             font = pygame.font.SysFont(None, 12)
@@ -220,9 +220,9 @@ class Link:
         road_color = (100, 100, 100)  # 회색
         line_color = (255, 255, 0)  # 노란색
 
-        center_screen = [world_to_screen_func(p[0], p[1]) for p in self._cached_center_world_line]
-        left_screen = [world_to_screen_func(p[0], p[1]) for p in self._cached_left_world_line]
-        right_screen = [world_to_screen_func(p[0], p[1]) for p in self._cached_right_world_line]
+        center_screen = world_to_screen_func(self._cached_center_world_line)
+        left_screen = world_to_screen_func(self._cached_left_world_line)
+        right_screen = world_to_screen_func(self._cached_right_world_line)
 
         pygame.draw.lines(screen, road_color, False, center_screen, 2)
         pygame.draw.lines(screen, line_color, False, left_screen, 2)
@@ -236,7 +236,7 @@ class Link:
             font = pygame.font.SysFont(None, 12)
             text = font.render(f"{self.id}: {self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point_world = self.path[len(self.path)//2]
-            mid_point_screen = world_to_screen_func(mid_point_world[0], mid_point_world[1])
+            mid_point_screen = world_to_screen_func((mid_point_world[0], mid_point_world[1]))
             screen.blit(text, (int(mid_point_screen[0]), int(mid_point_screen[1]) - 20))
 
     def get_serializable_state(self):

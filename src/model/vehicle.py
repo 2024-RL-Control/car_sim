@@ -646,7 +646,7 @@ class Vehicle:
         """frenet 좌표 시각화"""
         if self.state.frenet_point is not None:
             radius = max(1, int(2 * self.visual_config['camera_zoom']))
-            pygame.draw.circle(screen, (0, 255, 255), world_to_screen_func(self.state.frenet_point[0], self.state.frenet_point[1]), radius)
+            pygame.draw.circle(screen, (0, 255, 255), world_to_screen_func((self.state.frenet_point[0], self.state.frenet_point[1])), radius)
 
     def _load_graphics(self):
         """차량 및 타이어 그래픽 리소스 생성"""
@@ -742,13 +742,13 @@ class Vehicle:
 
             # 캐시된 회전 이미지 사용
             rotated_tire = self._tire_angle_cache[angle_deg]
-            tire_rect = rotated_tire.get_rect(center=world_to_screen_func(world_x, world_y))
+            tire_rect = rotated_tire.get_rect(center=world_to_screen_func((world_x, world_y)))
             screen.blit(rotated_tire, tire_rect.topleft)
 
     def _draw_body(self, screen, world_to_screen_func):
         """차체 렌더링"""
         rotated_surf = pygame.transform.rotate(self.car_surf, degrees(self.state.yaw))
-        rect = rotated_surf.get_rect(center=world_to_screen_func(self.state.x, self.state.y))
+        rect = rotated_surf.get_rect(center=world_to_screen_func((self.state.x, self.state.y)))
         screen.blit(rotated_surf, rect.topleft)
 
     def _calculate_tire_positions(self):
@@ -849,7 +849,7 @@ class Vehicle:
             return
 
         # 지난 궤적을 점선으로 표시
-        trajectory_points = [world_to_screen_func(x, y) for x, y in self.state.history_trajectory]
+        trajectory_points = world_to_screen_func(self.state.history_trajectory)
 
         # 줌 레벨에 맞게 선 너비 조정
         width = max(1, int(2 * self.visual_config['camera_zoom']))
@@ -892,20 +892,20 @@ class Vehicle:
 
         self.state.update_trajectory(predicted_polynomial_trajectory, predicted_physics_trajectory)
 
-    def _draw_predicted_trajectory(self, screen, world_to_screen):
+    def _draw_predicted_trajectory(self, screen, world_to_screen_func):
         """예측 궤적 시각화
 
         Args:
             screen: Pygame 화면 객체
-            world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
+            world_to_screen_func: 월드 좌표를 화면 좌표로 변환하는 함수
             color: 궤적 색상 (RGB)
             width: 선 두께
         """
         width = max(1, int(2 * self.visual_config['camera_zoom']))
 
         # 궤적 포인트들을 화면 좌표로 변환
-        polynomial_screen_points = [world_to_screen(point.x, point.y) for point in self.state.polynomial_trajectory]
-        physics_screen_points = [world_to_screen(point.x, point.y) for point in self.state.physics_trajectory]
+        polynomial_screen_points = [world_to_screen_func((point.x, point.y)) for point in self.state.polynomial_trajectory]
+        physics_screen_points = [world_to_screen_func((point.x, point.y)) for point in self.state.physics_trajectory]
 
         # 라인으로 연결하여 궤적 그리기
         if len(polynomial_screen_points) > 0:

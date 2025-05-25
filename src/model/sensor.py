@@ -498,14 +498,14 @@ class LidarSensor(BaseSensor):
 
         # 센서 위치
         sensor_x, sensor_y, _ = self.current_data.sensor_pose
-        sensor_screen_pos = world_to_screen_func(sensor_x, sensor_y)
+        sensor_screen_pos = world_to_screen_func((sensor_x, sensor_y))
 
         # 센서 본체 그리기
         pygame.draw.circle(screen, self.sensor_color, sensor_screen_pos, 3)
 
         # 현재 스캔 결과 그리기
         for i, hit in enumerate(self.current_data.ranges):
-            hit_screen_pos = world_to_screen_func(hit.hit_x, hit.hit_y)
+            hit_screen_pos = world_to_screen_func((hit.hit_x, hit.hit_y))
 
 
             # 감지 실패(최대 거리)인 경우와 성공한 경우 색상 다르게
@@ -522,7 +522,7 @@ class LidarSensor(BaseSensor):
             if self.scan_history:
                 for scan in self.scan_history:
                     for hit in scan.ranges:
-                        hit_screen_pos = world_to_screen_func(hit.hit_x, hit.hit_y)
+                        hit_screen_pos = world_to_screen_func((hit.hit_x, hit.hit_y))
                         # 작은 반투명 점으로 히스토리 표시
                         pygame.draw.circle(screen, self.sensor_history_data_color, hit_screen_pos, 1)
 
