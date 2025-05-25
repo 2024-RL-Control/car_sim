@@ -179,8 +179,7 @@ class Renderer:
         active_vehicle = env.vehicle_manager.get_active_vehicle()
         if active_vehicle is None:
             # 활성화된 차량이 없으면 렌더링 중지
-            pygame.display.flip()
-            return
+            raise ValueError("Active vehicle not found")
 
         # 현재 카메라 및 활성 차량 업데이트
         if self._current_camera_for_transform is None:
@@ -226,7 +225,8 @@ class Renderer:
         self._performance_metrics['render_time'] = time.time() - render_start
 
         # 화면 업데이트
-        pygame.display.flip()
+        if self.config['visualization']['visualize'] or self.config['visualization']['visualize_hud']:
+            pygame.display.flip()
 
         if not self.config['visualization']['training_mode']:
             self.clock.tick(self.config['simulation']['fps'])  # FPS 제한
