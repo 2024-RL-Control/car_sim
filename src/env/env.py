@@ -85,6 +85,7 @@ class CarSimulatorEnv(gym.Env):
         self.action_space = spaces.Box(
             low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
             high=np.array([1.0, 1.0,  1.0]),
+            shape=(3,),
             dtype=np.float64
         )
 

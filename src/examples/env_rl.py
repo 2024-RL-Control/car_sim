@@ -279,7 +279,7 @@ class BasicRLDrivingEnv(gym.Env):
 
         Returns:
             observations: 모든 차량의 관측값 (num_vehicles, obs_dim)
-            rewards: 모든 차량의 보상값 (num_vehicles,)
+            reward: 모든 차량의 보상값의 합
             done: 종료 여부 bool
             info: 추가 정보
         """
@@ -299,7 +299,10 @@ class BasicRLDrivingEnv(gym.Env):
         if self.steps >= self.max_step:
             done = True
 
-        return observations, rewards, done, False, info
+        info['rewards'] = rewards.copy()
+        reward = float(np.sum(rewards))
+
+        return observations, reward, done, False, info
 
     def _draw_boundary(self):
         # 경계(boundary)와 장애물 영역(obstacle_area) 시각화
@@ -451,11 +454,10 @@ class BasicRLDrivingEnv(gym.Env):
                         actions[i] = np.array([0.0, 0.0, 0.0])
 
                 # 환경에서 한 스텝 진행
-                next_observations, rewards, done, _, info = self.rl_env.step(actions)
+                next_observations, reward, done, _, info = self.rl_env.step(actions)
 
                 # 보상 누적
-                step_reward = sum(rewards)
-                self.total_reward += step_reward
+                self.total_reward += reward
                 self.episode_steps += 1
 
                 # 각 차량의 경험을 공유 리플레이 버퍼에 추가
@@ -465,7 +467,7 @@ class BasicRLDrivingEnv(gym.Env):
                         self.shared_buffer.add(
                             obs=self.prev_observations[i],
                             action=actions[i],
-                            reward=rewards[i],
+                            reward=info['rewards'][i],
                             next_obs=next_observations[i],
                             done=done,
                             infos=[{"terminal_observation": next_observations[i] if done else None}]
@@ -506,11 +508,11 @@ class BasicRLDrivingEnv(gym.Env):
                 return True
 
         # SAC 모델 생성
-        model = SAC(
+        model = MultiVehicleAlgorithm(
             "MlpPolicy",
             env,
             learning_rate=learning_rate,
-            buffer_size=buffer_size,
+            buffer_size=1,
             learning_starts=learning_starts,
             batch_size=batch_size,
             tau=0.005,
@@ -539,7 +541,7 @@ class BasicRLDrivingEnv(gym.Env):
             learning_starts
         )
         checkpoint_callback = CheckpointCallback(
-            save_freq=1000,
+            save_freq=5000,
             save_path=models_dir,
             name_prefix="sac",
             save_replay_buffer=True,
@@ -571,3 +573,87 @@ class BasicRLDrivingEnv(gym.Env):
         self.close()
 
         return model
+
+
+class MultiVehicleAlgorithm(SAC):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def collect_rollouts(
+        self,
+        env,
+        callback,
+        train_freq,
+        replay_buffer,
+        action_noise=None,
+        learning_starts=0,
+        log_interval=None,
+    ):
+        """
+        데이터 수집 과정을 비활성화하는 오버라이드 메서드
+        """
+        from stable_baselines3.common.type_aliases import RolloutReturn, TrainFrequencyUnit
+        from stable_baselines3.common.utils import should_collect_more_steps
+        from stable_baselines3.common.vec_env import VecEnv
+        # Switch to eval mode (this affects batch norm / dropout)
+        self.policy.set_training_mode(False)
+
+        num_collected_steps, num_collected_episodes = 0, 0
+
+        assert isinstance(env, VecEnv), "You must pass a VecEnv"
+        assert train_freq.frequency > 0, "Should at least collect one step or episode."
+
+        if env.num_envs > 1:
+            assert train_freq.unit == TrainFrequencyUnit.STEP, "You must use only one env when doing episodic training."
+
+        if self.use_sde:
+            self.actor.reset_noise(env.num_envs)  # type: ignore[operator]
+
+        callback.on_rollout_start()
+        continue_training = True
+        while should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
+            if self.use_sde and self.sde_sample_freq > 0 and num_collected_steps % self.sde_sample_freq == 0:
+                # Sample a new noise matrix
+                self.actor.reset_noise(env.num_envs)  # type: ignore[operator]
+
+            # Select action randomly or according to policy
+            actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
+
+            # Rescale and perform action
+            new_obs, rewards, dones, infos = env.step(actions)
+
+            self.num_timesteps += env.num_envs
+            num_collected_steps += 1
+
+            # Give access to local variables
+            callback.update_locals(locals())
+            # Only stop training if return value is False, not when it is None.
+            if not callback.on_step():
+                return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training=False)
+
+            # Retrieve reward and episode length if using Monitor wrapper
+            self._update_info_buffer(infos, dones)
+
+            # Store data in replay buffer (normalized action and unnormalized observation)
+            # self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)  # type: ignore[arg-type]
+
+            self._update_current_progress_remaining(self.num_timesteps, self._total_timesteps)
+
+            self._on_step()
+
+            for idx, done in enumerate(dones):
+                if done:
+                    # Update stats
+                    num_collected_episodes += 1
+                    self._episode_num += 1
+
+                    if action_noise is not None:
+                        kwargs = dict(indices=[idx]) if env.num_envs > 1 else {}
+                        action_noise.reset(**kwargs)
+
+                    # Log training infos
+                    if log_interval is not None and self._episode_num % log_interval == 0:
+                        self.dump_logs()
+        callback.on_rollout_end()
+
+        return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training)
