@@ -444,7 +444,6 @@ class BasicRLDrivingEnv:
             # 에피소드 정보
             total_reward = 0
             done = False
-            episode_steps = 0
 
             print(f"Episode {self.episode_count}/{self.num_episodes}")
             prev_observations = observations.copy()
@@ -452,6 +451,10 @@ class BasicRLDrivingEnv:
             while not done and not terminated:
                 # 키보드 입력 처리
                 self.handle_keyboard_input()
+
+                if self.steps == 0:
+                    observations, _, _, _ = self.step(actions)
+                    prev_observations = observations.copy()
 
                 # 각 차량별 행동 결정
                 for i in range(self.num_vehicles):
@@ -467,7 +470,6 @@ class BasicRLDrivingEnv:
 
                 # 환경에서 한 스텝 진행
                 next_observations, rewards, done, info = self.step(actions)
-                episode_steps += 1
                 total_timesteps += 1
 
                 # 보상 누적
@@ -509,10 +511,9 @@ class BasicRLDrivingEnv:
                             break
 
                 # 에피소드 종료 확인
-                if done or episode_steps >= self.max_steps:
-                    print(f"  Episode {self.episode_count}: Steps: {episode_steps}, Total Reward: {total_reward:.2f}")
+                if done:
+                    print(f"  Episode {self.episode_count}: Steps: {self.steps}, Total Reward: {total_reward:.2f}")
                     episode_rewards.append(total_reward)
-                    self.episode_count += 1
                     break
 
         # 학습된 모델 저장
