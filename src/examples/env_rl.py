@@ -6,6 +6,10 @@ from math import pi
 from src.env.env import CarSimulatorEnv
 import os
 import torch
+from stable_baselines3 import SAC
+from stable_baselines3.common.callbacks import CheckpointCallback
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.monitor import Monitor
 
 class BasicRLDrivingEnv:
     """
@@ -341,6 +345,44 @@ class BasicRLDrivingEnv:
         자율주행 에이전트 학습 함수
         """
         self.print_basic_controls()
+
+        # 로그 및 모델 저장 경로 설정
+        models_dir = "./logs/model"
+        logdir = "./logs/train"
+
+        os.makedirs(models_dir, exist_ok=True)
+        os.makedirs(logdir, exist_ok=True)
+
+        num_cpu = 1
+        env = Monitor(self.env, logdir)
+        env = SubprocVecEnv([lambda: env for _ in range(num_cpu)])
+
+        # 학습 콜백 설정
+        checkpoint_callback = CheckpointCallback(
+            save_freq=100,          # 100 타임스텝마다 저장
+            save_path=models_dir,
+            name_prefix="basic_sac",
+            verbose=1
+        )
+
+        # SAC 모델 설정
+        model = SAC(
+            "MlpPolicy",            # 다층 퍼셉트론 정책 사용
+            env,
+            learning_rate=3e-4,
+            buffer_size=100000,     # 리플레이 버퍼 크기
+            learning_starts=1000,   # 학습 시작 전 환경 탐색 스텝 수
+            batch_size=256,         # 미니배치 크기
+            tau=0.005,              # 타겟 네트워크 소프트 업데이트 계수
+            gamma=0.99,             # 할인 계수
+            train_freq=1,           # 업데이트 빈도
+            gradient_steps=1,       # 그래디언트 업데이트 스텝 수
+            ent_coef="auto",        # 엔트로피 계수 자동 조정
+            verbose=1,
+            tensorboard_log=logdir,
+            device=self.device
+        )
+
         # 에피소드 스텝을 관리하는 변수
         episode_rewards = []
         terminated = False

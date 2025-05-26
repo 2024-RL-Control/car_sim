@@ -81,27 +81,30 @@ class CarSimulatorEnv(gym.Env):
         # Pygame 초기화
         self._init_pygame()
 
-        # 차량 조작 공간 - 각 차량마다 별도 액션
-        self.action_space = spaces.Tuple([
-            spaces.Box(
-                low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
-                high=np.array([1.0, 1.0,  1.0]),
-                dtype=np.float64
-            ) for _ in range(self.num_vehicles)
-        ])
+        # 차량 조작 공간
+        action_box = spaces.Box(
+            low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
+            high=np.array([1.0, 1.0,  1.0]),
+            dtype=np.float64
+        )
 
-        # 관측 공간 - 각 차량마다 별도 관측
+        # 관측 공간
         # 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
         obs_dim = 91  # 13(기본상태) + 36(LIDAR) + 42(궤적)
+        observation_box = spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(obs_dim,),
+            dtype=np.float64
+        )
 
-        self.observation_space = spaces.Tuple([
-            spaces.Box(
-                low=-1.0,
-                high=1.0,
-                shape=(obs_dim,),
-                dtype=np.float64
-            ) for _ in range(self.num_vehicles)
-        ])
+        if self.num_vehicles == 1:
+            self.action_space = action_box
+            self.observation_space = observation_box
+        else:
+            # 다중 차량 모드: 각 차량마다 별도 액션/관측 공간
+            self.action_space = spaces.Tuple([action_box for _ in range(self.num_vehicles)])
+            self.observation_space = spaces.Tuple([observation_box for _ in range(self.num_vehicles)])
 
     def _init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
