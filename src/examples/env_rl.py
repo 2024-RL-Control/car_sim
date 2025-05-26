@@ -415,104 +415,12 @@ class BasicRLDrivingEnv(gym.Env):
             activation_fn=torch.nn.LeakyReLU
         )
 
-        # 커스텀 콜백 클래스 정의
-        class MultiVehicleCallback(BaseCallback):
-            def __init__(self, rl_env, model, shared_buffer, learning_starts, verbose=0):
-                super().__init__(verbose)
-                self.rl_env = rl_env
-                self.model = model
-                self.shared_buffer = shared_buffer
-                self.learning_starts = learning_starts
-                self.active_agents = self.rl_env.active_agents
-                self.num_vehicles = self.rl_env.num_vehicles
-                self.total_reward = 0
-                self.prev_observations = None
-                self.episode_steps = 0
-
-            def _on_training_start(self):
-                self.prev_observations, _ = self.rl_env.reset()
-
-            def _on_step(self):
-                # 키보드 입력 처리
-                self.rl_env.handle_keyboard_input()
-
-                # 현재 관측값
-                observations = self.prev_observations.copy()
-                actions = np.zeros((self.num_vehicles, 3))
-
-                # 각 차량별 행동 결정
-                for i in range(self.num_vehicles):
-                    if self.active_agents[i]:
-                        # 충분한 경험이 쌓이기 전에는 랜덤 행동
-                        if self.model._n_updates < self.learning_starts:
-                            actions[i] = self.rl_env.env.action_space.sample()
-                            actions[i][2] = 0.0  # 조향 안정화
-                        else:
-                            action, _ = self.model.predict(observations[i], deterministic=False)
-                            actions[i] = action
-                    else:
-                        actions[i] = np.array([0.0, 0.0, 0.0])
-
-                # 환경에서 한 스텝 진행
-                next_observations, reward, done, _, info = self.rl_env.step(actions)
-
-                # 보상 누적
-                self.total_reward += reward
-                self.episode_steps += 1
-
-                # 각 차량의 경험을 공유 리플레이 버퍼에 추가
-                for i in range(self.num_vehicles):
-                    if self.active_agents[i]:
-                        # 단일 차량의 경험 생성
-                        self.shared_buffer.add(
-                            obs=self.prev_observations[i],
-                            action=actions[i],
-                            reward=info['rewards'][i],
-                            next_obs=next_observations[i],
-                            done=done,
-                            infos=[{"terminal_observation": next_observations[i] if done else None}]
-                        )
-
-                # 다음 스텝을 위해 관측값 업데이트
-                self.prev_observations = next_observations.copy()
-
-                # 렌더링
-                self.rl_env.render()
-
-                # 이벤트 처리
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        return False
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_ESCAPE:
-                            return False
-
-                # 에피소드 종료 시 출력 및 로깅
-                if done:
-                    # 표준 출력
-                    print(f"Episode {self.rl_env.episode_count}/{self.rl_env.num_episodes}, "
-                          f"Steps: {self.episode_steps}, "
-                          f"Total Reward: {self.total_reward:.2f}"
-                    )
-
-                    # Tensorboard 로깅
-                    self.logger.record("train/episode_reward", self.total_reward)
-                    self.logger.record("train/episode_length", self.episode_steps)
-                    self.logger.record("train/active_vehicles", sum(self.active_agents))
-                    self.logger.dump(self.num_timesteps)
-
-                    # 초기화
-                    self.total_reward = 0
-                    self.episode_steps = 0
-
-                return True
-
-        # SAC 모델 생성
+        # 커스텀 SAC 모델 생성
         model = MultiVehicleAlgorithm(
             "MlpPolicy",
             env,
             learning_rate=learning_rate,
-            buffer_size=1,
+            buffer_size=buffer_size,
             learning_starts=learning_starts,
             batch_size=batch_size,
             tau=0.005,
@@ -530,16 +438,12 @@ class BasicRLDrivingEnv(gym.Env):
         # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
         model.replay_buffer = shared_buffer
 
-        # 로거 설정
-        model.set_logger(configure(log_dir, ['stdout', 'csv', 'tensorboard']))
+        # 환경 정보 설정
+        model.set_env_info(self)
 
-        # 콜백 생성
-        multi_vehicle_callback = MultiVehicleCallback(
-            self,
-            model,
-            shared_buffer,
-            learning_starts
-        )
+        # 로거 설정
+        model.set_logger(configure(log_dir))
+
         checkpoint_callback = CheckpointCallback(
             save_freq=5000,
             save_path=models_dir,
@@ -547,7 +451,7 @@ class BasicRLDrivingEnv(gym.Env):
             save_replay_buffer=True,
             save_vecnormalize=True
         )
-        callback = CallbackList([multi_vehicle_callback, checkpoint_callback])
+        callback = CallbackList([checkpoint_callback])
 
         # 기본 컨트롤 정보 출력
         self.print_basic_controls()
@@ -574,10 +478,152 @@ class BasicRLDrivingEnv(gym.Env):
 
         return model
 
-
 class MultiVehicleAlgorithm(SAC):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # 추가 속성 설정
+        self.active_agents = None
+        self.num_vehicles = None
+        self.prev_observations = None
+        self.total_reward = 0
+        self.episode_steps = 0
+        self.rl_env = None  # BasicRLDrivingEnv 인스턴스 저장용
+
+    def set_env_info(self, rl_env):
+        """
+        BasicRLDrivingEnv 정보 설정
+        """
+        self.rl_env = rl_env
+        self.active_agents = rl_env.active_agents
+        self.num_vehicles = rl_env.num_vehicles
+
+    def learn(
+        self,
+        total_timesteps: int,
+        callback = None,
+        log_interval: int = 4,
+        tb_log_name: str = "run",
+        reset_num_timesteps: bool = True,
+        progress_bar: bool = False,
+    ):
+        """
+        다중 차량을 위한 학습 메소드 오버라이드
+        """
+        total_timesteps, callback = self._setup_learn(
+            total_timesteps,
+            callback,
+            reset_num_timesteps,
+            tb_log_name,
+            progress_bar,
+        )
+
+        callback.on_training_start(locals(), globals())
+
+        # 초기 상태 설정
+        self.prev_observations, _ = self.rl_env.reset()
+        self.total_reward = 0
+        self.episode_steps = 0
+
+        while self.num_timesteps < total_timesteps:
+            # 학습 루프 시작
+            continue_training = self._custom_rollout_step(callback)
+
+            if not continue_training:
+                break
+
+            # 충분한 경험이 쌓인 후 학습 진행
+            if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
+                gradient_steps = self.gradient_steps if self.gradient_steps >= 0 else 1
+                if gradient_steps > 0:
+                    self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
+
+        callback.on_training_end()
+
+        return self
+
+    def _custom_rollout_step(self, callback):
+        """
+        한 스텝 진행하고 경험 수집
+        """
+        # 키보드 입력 처리
+        self.rl_env.handle_keyboard_input()
+
+        # 현재 관측값
+        observations = self.prev_observations.copy()
+        actions = np.zeros((self.num_vehicles, 3))
+
+        # 각 차량별 행동 결정
+        for i in range(self.num_vehicles):
+            if self.active_agents[i]:
+                # 충분한 경험이 쌓이기 전에는 랜덤 행동
+                if self._n_updates < self.learning_starts:
+                    actions[i] = self.rl_env.env.action_space.sample()
+                    actions[i][2] = 0.0  # 조향 안정화
+                else:
+                    action, _ = self.predict(observations[i], deterministic=False)
+                    actions[i] = action
+            else:
+                actions[i] = np.array([0.0, 0.0, 0.0])
+
+        # 환경에서 한 스텝 진행
+        next_observations, reward, done, _, info = self.rl_env.step(actions)
+
+        # 보상 누적 및 타임스텝 증가
+        self.total_reward += reward
+        self.episode_steps += 1
+        self.num_timesteps += 1
+
+        # 콜백 업데이트
+        callback.update_locals(locals())
+        if not callback.on_step():
+            return False
+
+        # 각 차량의 경험을 리플레이 버퍼에 추가
+        for i in range(self.num_vehicles):
+            if self.active_agents[i]:
+                # 단일 차량의 경험 생성
+                self.replay_buffer.add(
+                    obs=self.prev_observations[i],
+                    action=actions[i],
+                    reward=info['rewards'][i],
+                    next_obs=next_observations[i],
+                    done=done,
+                    infos=[{"terminal_observation": next_observations[i] if done else None}]
+                )
+
+        # 다음 스텝을 위해 관측값 업데이트
+        self.prev_observations = next_observations.copy()
+
+        # 렌더링
+        self.rl_env.render()
+
+        # 이벤트 처리
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    return False
+
+        # 에피소드 종료 시 처리
+        if done:
+            # 로깅
+            print(f"Episode {self.rl_env.episode_count}/{self.rl_env.num_episodes}, "
+                  f"Steps: {self.episode_steps}, "
+                  f"Total Reward: {self.total_reward:.2f}")
+
+            # 텐서보드 로깅
+            self.logger.record("train/episode_reward", self.total_reward)
+            self.logger.record("train/episode_length", self.episode_steps)
+            self.logger.record("train/active_vehicles", sum(self.active_agents))
+            self.logger.dump(self.num_timesteps)
+
+            # 초기화
+            self.total_reward = 0
+            self.episode_steps = 0
+            self.prev_observations, _ = self.rl_env.reset()
+
+        return True
 
     def collect_rollouts(
         self,
@@ -590,70 +636,9 @@ class MultiVehicleAlgorithm(SAC):
         log_interval=None,
     ):
         """
-        데이터 수집 과정을 비활성화하는 오버라이드 메서드
+        기본 데이터 수집 비활성화 (우리 방식으로 데이터 수집)
         """
-        from stable_baselines3.common.type_aliases import RolloutReturn, TrainFrequencyUnit
-        from stable_baselines3.common.utils import should_collect_more_steps
-        from stable_baselines3.common.vec_env import VecEnv
-        # Switch to eval mode (this affects batch norm / dropout)
-        self.policy.set_training_mode(False)
+        from stable_baselines3.common.type_aliases import RolloutReturn
 
-        num_collected_steps, num_collected_episodes = 0, 0
-
-        assert isinstance(env, VecEnv), "You must pass a VecEnv"
-        assert train_freq.frequency > 0, "Should at least collect one step or episode."
-
-        if env.num_envs > 1:
-            assert train_freq.unit == TrainFrequencyUnit.STEP, "You must use only one env when doing episodic training."
-
-        if self.use_sde:
-            self.actor.reset_noise(env.num_envs)  # type: ignore[operator]
-
-        callback.on_rollout_start()
-        continue_training = True
-        while should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
-            if self.use_sde and self.sde_sample_freq > 0 and num_collected_steps % self.sde_sample_freq == 0:
-                # Sample a new noise matrix
-                self.actor.reset_noise(env.num_envs)  # type: ignore[operator]
-
-            # Select action randomly or according to policy
-            actions, buffer_actions = self._sample_action(learning_starts, action_noise, env.num_envs)
-
-            # Rescale and perform action
-            new_obs, rewards, dones, infos = env.step(actions)
-
-            self.num_timesteps += env.num_envs
-            num_collected_steps += 1
-
-            # Give access to local variables
-            callback.update_locals(locals())
-            # Only stop training if return value is False, not when it is None.
-            if not callback.on_step():
-                return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training=False)
-
-            # Retrieve reward and episode length if using Monitor wrapper
-            self._update_info_buffer(infos, dones)
-
-            # Store data in replay buffer (normalized action and unnormalized observation)
-            # self._store_transition(replay_buffer, buffer_actions, new_obs, rewards, dones, infos)  # type: ignore[arg-type]
-
-            self._update_current_progress_remaining(self.num_timesteps, self._total_timesteps)
-
-            self._on_step()
-
-            for idx, done in enumerate(dones):
-                if done:
-                    # Update stats
-                    num_collected_episodes += 1
-                    self._episode_num += 1
-
-                    if action_noise is not None:
-                        kwargs = dict(indices=[idx]) if env.num_envs > 1 else {}
-                        action_noise.reset(**kwargs)
-
-                    # Log training infos
-                    if log_interval is not None and self._episode_num % log_interval == 0:
-                        self.dump_logs()
-        callback.on_rollout_end()
-
-        return RolloutReturn(num_collected_steps * env.num_envs, num_collected_episodes, continue_training)
+        # 빈 RolloutReturn 객체 반환
+        return RolloutReturn(0, 0, True)
