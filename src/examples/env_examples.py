@@ -144,12 +144,11 @@ def manual_control_with_goal():
 
         # 종료 시 잠시 대기 후 재시작
         if done:
-            if info.get('all_collision', False) or info.get('all_reached_target', False):
-                pygame.time.wait(1000)  # 1초 대기
-                env.reset()
-                # 초기 목적지 다시 생성
-                for i in range(env.num_vehicles):
-                    create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
+            pygame.time.wait(1000)  # 1초 대기
+            env.reset()
+            # 초기 목적지 다시 생성
+            for i in range(env.num_vehicles):
+                create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
 
     # 환경 종료
     env.close()
@@ -261,10 +260,9 @@ def manual_control_with_obstacles():
 
         # 충돌로 인한 종료 시 잠시 대기 후 재시작
         if done:
-            if info.get('all_collision', False):
-                pygame.time.wait(1000)  # 1초 대기
-                env.reset()
-                create_test_course(env.get_obstacle_manager(), current_course)
+            pygame.time.wait(1000)  # 1초 대기
+            env.reset()
+            create_test_course(env.get_obstacle_manager(), current_course)
 
     # 환경 종료
     env.close()
