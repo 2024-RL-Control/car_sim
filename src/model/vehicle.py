@@ -982,6 +982,7 @@ class VehicleManager:
         self.collisions = {}
         self.outside_roads = {}
         self.reached_targets = {}
+        self.dones = {}
 
         # 설정 저장
         self.vehicle_config = vehicle_config
@@ -1033,6 +1034,7 @@ class VehicleManager:
         self.collisions[vehicle_id] = False
         self.outside_roads[vehicle_id] = False
         self.reached_targets[vehicle_id] = False
+        self.dones[vehicle_id] = False
 
         # 첫 번째 차량이면 활성화
         if len(self.vehicles) == 1:
@@ -1049,6 +1051,7 @@ class VehicleManager:
         self.collisions = {}
         self.outside_roads = {}
         self.reached_targets = {}
+        self.dones = {}
         self.active_vehicle_idx = 0
         self.next_vehicle_id = 0
 
@@ -1074,6 +1077,7 @@ class VehicleManager:
         del self.collisions[vehicle_id]
         del self.outside_roads[vehicle_id]
         del self.reached_targets[vehicle_id]
+        del self.dones[vehicle_id]
 
         # 활성 차량 인덱스 조정
         if len(self.vehicles) > 0:
@@ -1100,6 +1104,7 @@ class VehicleManager:
                 self.collisions[vehicle_id] = False
                 self.outside_roads[vehicle_id] = False
                 self.reached_targets[vehicle_id] = False
+                self.dones[vehicle_id] = False
                 return True
             return False
         else:
@@ -1109,6 +1114,7 @@ class VehicleManager:
                 self.collisions[vehicle.id] = False
                 self.outside_roads[vehicle.id] = False
                 self.reached_targets[vehicle.id] = False
+                self.dones[vehicle.id] = False
             return True
 
     def get_vehicle_by_id(self, vehicle_id):
@@ -1255,6 +1261,7 @@ class VehicleManager:
             collisions: 차량별 충돌 여부 {vehicle_id: bool}
             outside_roads: 차량별 도로 외부 여부 {vehicle_id: bool}
             reached_targets: 차량별 목표 도달 여부 {vehicle_id: bool}
+            dones: 차량별 종료 여부 {vehicle_id: bool}
         """
         # 빈 장애물 리스트 초기화
         if obstacles is None:
@@ -1265,12 +1272,19 @@ class VehicleManager:
                 vehicle_action = actions[i]
                 _, collision, outside_road, reached = vehicle.step(vehicle_action, dt, time_elapsed, self.road_manager, obstacles, self.vehicles)
                 if collision:
-                    self.collisions[vehicle.id] = True
+                    if not self.collisions[vehicle.id]:
+                        self.collisions[vehicle.id] = True
                 if outside_road:
-                    self.outside_roads[vehicle.id] = True
+                    if not self.outside_roads[vehicle.id]:
+                        self.outside_roads[vehicle.id] = True
                 if reached:
-                    self.reached_targets[vehicle.id] = True
-        return self.collisions, self.outside_roads, self.reached_targets
+                    if not self.reached_targets[vehicle.id]:
+                        self.reached_targets[vehicle.id] = True
+                if collision or outside_road or reached:
+                    if not self.dones[vehicle.id]:
+                        self.dones[vehicle.id] = True
+
+        return self.collisions, self.outside_roads, self.reached_targets, self.dones
 
     def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
         """
@@ -1314,7 +1328,8 @@ class VehicleManager:
                 'visual_config': vehicle.visual_config,
                 'collision': self.collisions.get(vehicle.id, False),
                 'outside_road': self.outside_roads.get(vehicle.id, False),
-                'reached_target': self.reached_targets.get(vehicle.id, False)
+                'reached_target': self.reached_targets.get(vehicle.id, False),
+                'done': self.dones.get(vehicle.id, False)
             })
             vehicles_data.append(vehicle_data)
 
@@ -1342,6 +1357,7 @@ class VehicleManager:
         self.collisions = {}
         self.outside_roads = {}
         self.reached_targets = {}
+        self.dones = {}
 
         # 차량 정보 복원
         if 'vehicles' in serialized_data:
@@ -1370,6 +1386,7 @@ class VehicleManager:
                 self.collisions[vehicle_id] = vehicle_data.get('collision', False)
                 self.outside_roads[vehicle_id] = vehicle_data.get('outside_road', False)
                 self.reached_targets[vehicle_id] = vehicle_data.get('reached_target', False)
+                self.dones[vehicle_id] = vehicle_data.get('done', False)
 
         # 활성 차량 인덱스 복원
         if 'active_vehicle_idx' in serialized_data:
