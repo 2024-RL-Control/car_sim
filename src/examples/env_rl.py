@@ -9,8 +9,8 @@ import torch
 from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.buffers import ReplayBuffer
-from stable_baselines3.common.callbacks import CheckpointCallback
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, CallbackList
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 class BasicRLDrivingEnv:
     """
@@ -370,6 +370,13 @@ class BasicRLDrivingEnv:
         env = Monitor(self.env, log_dir)
         env = DummyVecEnv([lambda: env])
 
+        # SAC 하이퍼파라미터 설정
+        buffer_size = 100000
+        learning_rate = 3e-4
+        batch_size = 256
+        learning_starts = 1000
+
+        # 공유 리플레이 버퍼 생성
         shared_buffer = ReplayBuffer(
             buffer_size=buffer_size,
             observation_space=self.env.observation_space,
@@ -379,14 +386,14 @@ class BasicRLDrivingEnv:
             handle_timeout_termination=False
         )
 
-        # SAC 모델 설정
+        # 모든 차량을 위한 단일 SAC 모델 생성
         model = SAC(
             "MlpPolicy",                # 다층 퍼셉트론 정책 사용
             env,                        # 환경
-            learning_rate=3e-4,         # 학습률
-            buffer_size=100000,         # 리플레이 버퍼 크기
-            learning_starts=1000,       # 학습 시작 전 환경 탐색 스텝 수
-            batch_size=256,             # 미니배치 크기
+            learning_rate=learning_rate, # 학습률
+            buffer_size=buffer_size,    # 리플레이 버퍼 크기
+            learning_starts=learning_starts, # 학습 시작 전 환경 탐색 스텝 수
+            batch_size=batch_size,      # 미니배치 크기
             tau=0.005,                  # 타겟 네트워크 소프트 업데이트 계수
             gamma=0.99,                 # 할인 계수
             train_freq=1,               # 업데이트 빈도
@@ -397,6 +404,9 @@ class BasicRLDrivingEnv:
             tensorboard_log=log_dir,    # 텐서보드 로그 저장 경로
             device=self.device          # 사용할 디바이스
         )
+
+        # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
+        model.replay_buffer = shared_buffer
 
         # 학습 콜백 설정
         checkpoint_callback = CheckpointCallback(
@@ -409,16 +419,15 @@ class BasicRLDrivingEnv:
         eval_callback = EvalCallback(
             env,
             best_model_save_path=models_dir,
-            name_prefix="basic_sac",
             eval_freq=100,
             verbose=1
         )
-
         callback = CallbackList([checkpoint_callback, eval_callback])
 
         # 에피소드 관리 변수
         episode_rewards = []
         terminated = False
+        total_timesteps = 0
 
         for _ in range(self.num_episodes):
             if terminated:
@@ -435,34 +444,61 @@ class BasicRLDrivingEnv:
             # 에피소드 정보
             total_reward = 0
             done = False
+            episode_steps = 0
 
             print(f"Episode {self.episode_count}/{self.num_episodes}")
+            prev_observations = observations.copy()
 
             while not done and not terminated:
                 # 키보드 입력 처리
                 self.handle_keyboard_input()
 
-                # 행동 결정
+                # 각 차량별 행동 결정
                 for i in range(self.num_vehicles):
                     if self.active_agents[i]:
-                        action = model.predict(observations[i], deterministic=False)
-                        actions[i] = action
+                        # 충분한 경험이 쌓이기 전에는 랜덤 행동
+                        if total_timesteps < learning_starts:
+                            actions[i] = self.env.action_space.sample()
+                        else:
+                            action, _ = model.predict(observations[i], deterministic=False)
+                            actions[i] = action
                     else:
                         actions[i] = np.array([0.0, 0.0, 0.0])
 
                 # 환경에서 한 스텝 진행
-                observations, rewards, done, info = self.step(actions)
+                next_observations, rewards, done, info = self.step(actions)
+                episode_steps += 1
+                total_timesteps += 1
 
                 # 보상 누적
-                for reward in rewards:
-                    total_reward += reward
+                step_reward = sum(rewards)
+                total_reward += step_reward
 
-                # 활성화 차량에 대한 observation, reward를 공유 리플레이 버퍼에 추가
-                # 공유 리플레이 버퍼를 통한 학습
+                # 각 차량의 경험을 공유 리플레이 버퍼에 추가
+                for i in range(self.num_vehicles):
+                    if self.active_agents[i]:
+                        # 단일 차량의 경험 생성 (obs, action, reward, next_obs, done)
+                        shared_buffer.add(
+                            obs=prev_observations[i],
+                            action=actions[i],
+                            reward=rewards[i],
+                            next_obs=next_observations[i],
+                            done=done,
+                            infos=[{"terminal_observation": next_observations[i] if done else None}]
+                        )
+
+                # 충분한 데이터가 쌓이면 SAC 모델 학습
+                if total_timesteps > learning_starts and total_timesteps % model.train_freq[0] == 0:
+                    model.train(batch_size=batch_size, gradient_steps=1)
+
+                # 다음 스텝을 위해 관측값 업데이트
+                prev_observations = next_observations.copy()
+                observations = next_observations
 
                 # 렌더링
                 self.render()
 
+                # 이벤트 처리
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         terminated = True
@@ -472,11 +508,15 @@ class BasicRLDrivingEnv:
                             terminated = True
                             break
 
-                # 종료 확인
-                if done:
-                    print(f"  Step: {self.steps}, Total Reward: {total_reward:.2f}")
+                # 에피소드 종료 확인
+                if done or episode_steps >= self.max_steps:
+                    print(f"  Episode {self.episode_count}: Steps: {episode_steps}, Total Reward: {total_reward:.2f}")
                     episode_rewards.append(total_reward)
+                    self.episode_count += 1
                     break
+
+        # 학습된 모델 저장
+        model.save(os.path.join(models_dir, "final_sac_model"))
 
         # 환경 종료
         self.close()
@@ -485,7 +525,10 @@ class BasicRLDrivingEnv:
         if not terminated:
             print(f"\nTraining completed for {self.num_episodes} episodes.")
             print(f"Average reward: {np.mean(episode_rewards):.2f}")
+            print(f"Total timesteps: {total_timesteps}")
         else:
             print("Training terminated by user.")
+            print(f"Completed episodes: {self.episode_count}/{self.num_episodes}")
+            print(f"Total timesteps: {total_timesteps}")
 
         return episode_rewards
