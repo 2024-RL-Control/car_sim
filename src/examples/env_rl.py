@@ -7,6 +7,7 @@ from math import pi
 from src.env.env import CarSimulatorEnv
 import os
 import torch
+import time
 from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
@@ -474,19 +475,14 @@ class BasicRLDrivingEnv(gym.Env):
         # 기본 컨트롤 정보 출력
         self.print_basic_controls()
 
-        try:
-            # learn() 메소드로 학습 시작
-            model.learn(
-                total_timesteps=self.num_episodes * self.max_step,
-                callback=callback,
-                log_interval=10,
-                progress_bar=True
-            )
-        except KeyboardInterrupt:
-            print("학습이 사용자에 의해 중단되었습니다.")
 
-            # 중단된 시점의 모델 저장
-            model.save(os.path.join(models_dir, "sac_interrupted"))
+        # learn() 메소드로 학습 시작
+        model.learn(
+            total_timesteps=self.num_episodes * self.max_step,
+            callback=callback,
+            log_interval=10,
+            progress_bar=True
+        )
 
         # 학습된 모델 저장
         model.save(os.path.join(models_dir, "sac_final"))
@@ -539,8 +535,27 @@ class MultiVehicleAlgorithm(SAC):
 
         callback.on_training_start(locals(), globals())
 
-        # 초기 상태 설정
-        self.prev_observations, _ = self.rl_env.reset()
+        # 초기 상태 설정 - 예외 처리 추가 (성공할 때까지 무한 시도)
+        reset_success = False
+        reset_attempts = 0
+
+        while not reset_success:
+            try:
+                self.prev_observations, _ = self.rl_env.reset()
+                reset_success = True
+                if reset_attempts > 0:
+                    print(f"Successfully reset environment after {reset_attempts} attempts")
+            except Exception as e:
+                reset_attempts += 1
+                print(f"Reset failed (attempt {reset_attempts}): {e}")
+                if "Failed to find rrt-dubins path" in str(e):
+                    # RRT-Dubins 경로 찾기 실패시 재시도
+                    time.sleep(0.1)  # 잠시 대기 후 다시 시도
+                    continue
+                else:
+                    # 다른 예외는 다시 발생시키기
+                    raise
+
         self.total_reward = 0
         self.episode_steps = 0
 
@@ -656,6 +671,25 @@ class MultiVehicleAlgorithm(SAC):
             # 초기화
             self.total_reward = 0
             self.episode_steps = 0
-            self.prev_observations, _ = self.rl_env.reset()
 
+            # 환경 리셋 - 예외 처리 추가 (성공할 때까지 무한 시도)
+            reset_success = False
+            reset_attempts = 0
+
+            while not reset_success:
+                try:
+                    self.prev_observations, _ = self.rl_env.reset()
+                    reset_success = True
+                    if reset_attempts > 0:
+                        print(f"Successfully reset environment after {reset_attempts} attempts")
+                except Exception as e:
+                    reset_attempts += 1
+                    print(f"Reset failed during episode transition (attempt {reset_attempts}): {e}")
+                    if "Failed to find rrt-dubins path" in str(e):
+                        # RRT-Dubins 경로 찾기 실패시 재시도
+                        time.sleep(0.1)  # 잠시 대기 후 다시 시도
+                        continue
+                    else:
+                        # 다른 예외는 다시 발생시키기
+                        raise
         return True
