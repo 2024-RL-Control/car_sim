@@ -93,6 +93,7 @@ class BasicRLDrivingEnv:
 
         # 스텝 카운터
         self.steps = 0
+        self.max_step = self.env.config['simulation']['max_steps']
 
         # 에피소드 정보 저장용
         self.episode_count = 0
@@ -273,6 +274,9 @@ class BasicRLDrivingEnv:
             if vehicle_done and self.active_agents[vehicle_id]:
                 self.active_agents[vehicle_id] = False
 
+        if self.steps >= self.max_step:
+            done = True
+
         return observations, rewards, done, info
 
     def _draw_boundary(self):
@@ -353,8 +357,6 @@ class BasicRLDrivingEnv:
         """
         자율주행 에이전트 학습 함수
         """
-        self.print_basic_controls()
-
         # 로그 및 모델 저장 경로 설정
         models_dir = "./logs/model"
         log_dir = "./logs/train"
@@ -366,7 +368,7 @@ class BasicRLDrivingEnv:
         env = DummyVecEnv([lambda: env])
 
         # SAC 하이퍼파라미터 설정
-        buffer_size = 100000
+        buffer_size = 1000000
         learning_rate = 3e-4
         batch_size = 256
         learning_starts = 10000
@@ -379,6 +381,11 @@ class BasicRLDrivingEnv:
             device=self.device,
             n_envs=1,
             handle_timeout_termination=False
+        )
+
+        policy_kwargs = dict(
+            net_arch=dict(pi=[256, 256, 512, 256, 64], qf=[256, 256, 512, 256, 64, 32]), # 모델 크기 증가
+            activation_fn=torch.nn.LeakyReLU
         )
 
         # 모든 차량을 위한 단일 SAC 모델 생성
@@ -395,6 +402,7 @@ class BasicRLDrivingEnv:
             gradient_steps=1,           # 그래디언트 업데이트 스텝 수
             ent_coef="auto",            # 엔트로피 계수 자동 조정
             target_update_interval=1,   # 타겟 네트워크 업데이트 주기
+            policy_kwargs=policy_kwargs, # 커스텀 네트워크 구조 사용
             verbose=1,                  # 로그 출력
             tensorboard_log=log_dir,    # 텐서보드 로그 저장 경로
             device=self.device          # 사용할 디바이스
@@ -403,6 +411,8 @@ class BasicRLDrivingEnv:
         # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
         model.replay_buffer = shared_buffer
         model._logger = configure(log_dir, ['stdout', 'csv', 'tensorboard'])
+
+        print(model.policy)
 
         # 학습 콜백 설정
         checkpoint_callback = CheckpointCallback(
@@ -419,6 +429,8 @@ class BasicRLDrivingEnv:
             verbose=1
         )
         callback = CallbackList([checkpoint_callback, eval_callback])
+
+        self.print_basic_controls()
 
         # 에피소드 관리 변수
         episode_rewards = []
@@ -457,6 +469,7 @@ class BasicRLDrivingEnv:
                         # 충분한 경험이 쌓이기 전에는 랜덤 행동
                         if total_timesteps < learning_starts:
                             actions[i] = self.env.action_space.sample()
+                            actions[i][2] = 0.0
                         else:
                             action, _ = model.predict(observations[i], deterministic=False)
                             actions[i] = action
