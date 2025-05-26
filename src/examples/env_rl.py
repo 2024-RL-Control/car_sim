@@ -369,7 +369,7 @@ class BasicRLDrivingEnv:
         buffer_size = 100000
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 1000
+        learning_starts = 10000
 
         # 공유 리플레이 버퍼 생성
         shared_buffer = ReplayBuffer(
@@ -441,7 +441,6 @@ class BasicRLDrivingEnv:
             total_reward = 0
             done = False
 
-            print(f"Episode {self.episode_count}/{self.num_episodes}")
             prev_observations = observations.copy()
 
             while not done and not terminated:
@@ -508,7 +507,7 @@ class BasicRLDrivingEnv:
 
                 # 에피소드 종료 확인
                 if done:
-                    print(f"  Episode {self.episode_count}: Steps: {self.steps}, Total Reward: {total_reward:.2f}")
+                    print(f"Episode {self.episode_count}/{self.num_episodes}, Steps: {self.steps}, Total Reward: {total_reward:.2f}")
                     episode_rewards.append(total_reward)
                     break
 
