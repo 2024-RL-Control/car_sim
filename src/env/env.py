@@ -250,10 +250,23 @@ class CarSimulatorEnv(gym.Env):
         # 시간 업데이트
         self._last_update_time = current_time
 
-        return observations, rewards, done, info
+        return observations, rewards, done, False, info
 
-    def reset(self):
-        """환경 초기화"""
+    def reset(self, *, seed=None, options=None):
+        """환경 초기화
+
+        Args:
+            seed: 환경의 난수 생성기 시드
+            options: 추가 옵션 딕셔너리
+
+        Returns:
+            observation: 초기 관측값
+            info: 추가 정보 딕셔너리
+        """
+        # 시드가 제공되면 설정
+        if seed is not None:
+            np.random.seed(seed)
+
         # 차량 초기화
         self.vehicle_manager.reset_vehicle()
 

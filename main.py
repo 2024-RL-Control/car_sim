@@ -33,7 +33,7 @@ if __name__ == "__main__":
                 profiler = cProfile.Profile()
                 profiler.enable()
 
-            env.train()
+            env.learn()
 
             if is_profiling:
                 profiler.disable()

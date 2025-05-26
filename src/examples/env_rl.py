@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import pygame
+import gymnasium as gym
 import numpy as np
 import random
 from math import pi
@@ -10,10 +11,10 @@ from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
-from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, CallbackList
+from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, CallbackList, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-class BasicRLDrivingEnv:
+class BasicRLDrivingEnv(gym.Env):
     """
     강화학습 기반 기초 자율주행 에이전트를 위한 환경 클래스
     목표:
@@ -33,6 +34,19 @@ class BasicRLDrivingEnv:
 
         self.num_vehicles = self.env.num_vehicles
         self.active_agents = [True] * self.num_vehicles
+
+        self.observation_space = gym.spaces.Box(
+            low=np.tile(self.env.observation_space.low, (self.num_vehicles, 1)),
+            high=np.tile(self.env.observation_space.high, (self.num_vehicles, 1)),
+            shape=(self.num_vehicles, self.env.observation_space.shape[0]),
+            dtype=np.float64
+        )
+        self.action_space = gym.spaces.Box(
+            low=np.tile(self.env.action_space.low, (self.num_vehicles, 1)),
+            high=np.tile(self.env.action_space.high, (self.num_vehicles, 1)),
+            shape=(self.num_vehicles, self.env.action_space.shape[0]),
+            dtype=np.float64
+        )
 
         self.num_episodes = self.env.config['simulation']['num_episodes']
         self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
@@ -223,15 +237,19 @@ class BasicRLDrivingEnv:
             # 차량에 목적지 추가
             self.env.add_goal_for_vehicle(i, x, y, yaw, radius=2.0)
 
-    def reset(self):
+    def reset(self, *, seed=None, options=None):
         """
         환경 초기화 및 초기 관측값 반환
+
+        Args:
+            seed: 환경의 난수 생성기 시드
+            options: 추가 옵션 딕셔너리
 
         Returns:
             observations: 차량별 초기 관측 값 (num_vehicles, obs_dim) [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
         """
         # 환경 초기화
-        observations = self.env.reset()
+        _ = self.env.reset(seed=seed, options=options)
 
         # 장애물, 차량, 목적지 다시 설정
         self.setup_environment()
@@ -245,8 +263,12 @@ class BasicRLDrivingEnv:
         # 에피소드 카운터 증가
         self.episode_count += 1
 
+        # 초기 행동으로 0을 사용하여 첫 번째 스텝 실행
+        actions = np.zeros((self.num_vehicles, 3))
+        observations, _, _, _, _ = self.step(actions)
+
         # 초기 관측값 반환
-        return observations
+        return observations, {}
 
     def step(self, actions):
         """
@@ -262,7 +284,7 @@ class BasicRLDrivingEnv:
             info: 추가 정보
         """
         # 환경에서 스텝 진행
-        observations, rewards, done, info = self.env.step(actions)
+        observations, rewards, done, _, info = self.env.step(actions)
 
         # 스텝 카운터 증가
         self.steps += 1
@@ -277,7 +299,7 @@ class BasicRLDrivingEnv:
         if self.steps >= self.max_step:
             done = True
 
-        return observations, rewards, done, info
+        return observations, rewards, done, False, info
 
     def _draw_boundary(self):
         # 경계(boundary)와 장애물 영역(obstacle_area) 시각화
@@ -353,9 +375,9 @@ class BasicRLDrivingEnv:
         print("  Tab: Switch between vehicles")
         print("  ESC: Quit")
 
-    def train(self):
+    def learn(self):
         """
-        자율주행 에이전트 학습 함수
+        자율주행 에이전트 학습 함수 (learn() 메소드 사용)
         """
         # 로그 및 모델 저장 경로 설정
         models_dir = "./logs/model"
@@ -364,7 +386,8 @@ class BasicRLDrivingEnv:
         os.makedirs(models_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
 
-        env = Monitor(self.env, log_dir)
+        # Monitor와 DummyVecEnv로 환경 래핑
+        env = Monitor(self, log_dir)
         env = DummyVecEnv([lambda: env])
 
         # SAC 하이퍼파라미터 설정
@@ -383,113 +406,64 @@ class BasicRLDrivingEnv:
             handle_timeout_termination=False
         )
 
+        # 신경망 아키텍처 설정
         policy_kwargs = dict(
-            net_arch=dict(pi=[256, 256, 512, 256, 64], qf=[256, 256, 512, 256, 64, 32]), # 모델 크기 증가
+            net_arch=dict(pi=[256, 256, 512, 256, 64], qf=[256, 256, 512, 256, 64, 32]),
             activation_fn=torch.nn.LeakyReLU
         )
 
-        # 모든 차량을 위한 단일 SAC 모델 생성
-        model = SAC(
-            "MlpPolicy",                # 다층 퍼셉트론 정책 사용
-            env,                        # 환경
-            learning_rate=learning_rate, # 학습률
-            buffer_size=buffer_size,    # 리플레이 버퍼 크기
-            learning_starts=learning_starts, # 학습 시작 전 환경 탐색 스텝 수
-            batch_size=batch_size,      # 미니배치 크기
-            tau=0.005,                  # 타겟 네트워크 소프트 업데이트 계수
-            gamma=0.99,                 # 할인 계수
-            train_freq=1,               # 업데이트 빈도
-            gradient_steps=1,           # 그래디언트 업데이트 스텝 수
-            ent_coef="auto",            # 엔트로피 계수 자동 조정
-            target_update_interval=1,   # 타겟 네트워크 업데이트 주기
-            policy_kwargs=policy_kwargs, # 커스텀 네트워크 구조 사용
-            verbose=1,                  # 로그 출력
-            tensorboard_log=log_dir,    # 텐서보드 로그 저장 경로
-            device=self.device          # 사용할 디바이스
-        )
+        # 커스텀 콜백 클래스 정의
+        class MultiVehicleCallback(BaseCallback):
+            def __init__(self, rl_env, model, shared_buffer, learning_starts, verbose=0):
+                super().__init__(verbose)
+                self.rl_env = rl_env
+                self.model = model
+                self.shared_buffer = shared_buffer
+                self.learning_starts = learning_starts
+                self.active_agents = self.rl_env.active_agents
+                self.num_vehicles = self.rl_env.num_vehicles
+                self.total_reward = 0
+                self.prev_observations = None
+                self.episode_steps = 0
 
-        # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
-        model.replay_buffer = shared_buffer
-        model._logger = configure(log_dir, ['stdout', 'csv', 'tensorboard'])
+            def _on_training_start(self):
+                self.prev_observations, _ = self.rl_env.reset()
 
-        print(model.policy)
-
-        # 학습 콜백 설정
-        checkpoint_callback = CheckpointCallback(
-            save_freq=100,              # 100 타임스텝마다 저장
-            save_path=models_dir,
-            name_prefix="basic_sac",
-            verbose=1
-        )
-
-        eval_callback = EvalCallback(
-            env,
-            best_model_save_path=models_dir,
-            eval_freq=100,
-            verbose=1
-        )
-        callback = CallbackList([checkpoint_callback, eval_callback])
-
-        self.print_basic_controls()
-
-        # 에피소드 관리 변수
-        episode_rewards = []
-        terminated = False
-        total_timesteps = 0
-
-        for _ in range(self.num_episodes):
-            if terminated:
-                break
-
-            # 환경 초기화
-            try:
-                observations = self.reset()
-                actions = np.array([np.zeros(3) for _ in range(self.num_vehicles)])
-            except Exception as e:
-                print(f"Error resetting environment: {e}")
-                continue
-
-            # 에피소드 정보
-            total_reward = 0
-            done = False
-
-            prev_observations = observations.copy()
-
-            while not done and not terminated:
+            def _on_step(self):
                 # 키보드 입력 처리
-                self.handle_keyboard_input()
+                self.rl_env.handle_keyboard_input()
 
-                if self.steps == 0:
-                    observations, _, _, _ = self.step(actions)
-                    prev_observations = observations.copy()
+                # 현재 관측값
+                observations = self.prev_observations.copy()
+                actions = np.zeros((self.num_vehicles, 3))
 
                 # 각 차량별 행동 결정
                 for i in range(self.num_vehicles):
                     if self.active_agents[i]:
                         # 충분한 경험이 쌓이기 전에는 랜덤 행동
-                        if total_timesteps < learning_starts:
-                            actions[i] = self.env.action_space.sample()
-                            actions[i][2] = 0.0
+                        if self.model._n_updates < self.learning_starts:
+                            actions[i] = self.rl_env.env.action_space.sample()
+                            actions[i][2] = 0.0  # 조향 안정화
                         else:
-                            action, _ = model.predict(observations[i], deterministic=False)
+                            action, _ = self.model.predict(observations[i], deterministic=False)
                             actions[i] = action
                     else:
                         actions[i] = np.array([0.0, 0.0, 0.0])
 
                 # 환경에서 한 스텝 진행
-                next_observations, rewards, done, info = self.step(actions)
-                total_timesteps += 1
+                next_observations, rewards, done, _, info = self.rl_env.step(actions)
 
                 # 보상 누적
                 step_reward = sum(rewards)
-                total_reward += step_reward
+                self.total_reward += step_reward
+                self.episode_steps += 1
 
                 # 각 차량의 경험을 공유 리플레이 버퍼에 추가
                 for i in range(self.num_vehicles):
                     if self.active_agents[i]:
-                        # 단일 차량의 경험 생성 (obs, action, reward, next_obs, done)
-                        shared_buffer.add(
-                            obs=prev_observations[i],
+                        # 단일 차량의 경험 생성
+                        self.shared_buffer.add(
+                            obs=self.prev_observations[i],
                             action=actions[i],
                             reward=rewards[i],
                             next_obs=next_observations[i],
@@ -497,47 +471,103 @@ class BasicRLDrivingEnv:
                             infos=[{"terminal_observation": next_observations[i] if done else None}]
                         )
 
-                # 충분한 데이터가 쌓이면 SAC 모델 학습
-                if total_timesteps > learning_starts and total_timesteps % model.train_freq[0] == 0:
-                    model.train(batch_size=batch_size, gradient_steps=1)
-
                 # 다음 스텝을 위해 관측값 업데이트
-                prev_observations = next_observations.copy()
-                observations = next_observations
+                self.prev_observations = next_observations.copy()
 
                 # 렌더링
-                self.render()
+                self.rl_env.render()
 
                 # 이벤트 처리
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
-                        terminated = True
-                        break
+                        return False
                     elif event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE:
-                            terminated = True
-                            break
+                            return False
 
-                # 에피소드 종료 확인
+                # 에피소드 종료 시 출력 및 로깅
                 if done:
-                    print(f"Episode {self.episode_count}/{self.num_episodes}, Steps: {self.steps}, Total Reward: {total_reward:.2f}")
-                    episode_rewards.append(total_reward)
-                    break
+                    # 표준 출력
+                    print(f"Episode {self.rl_env.episode_count}/{self.rl_env.num_episodes}, "
+                          f"Steps: {self.episode_steps}, "
+                          f"Total Reward: {self.total_reward:.2f}"
+                    )
+
+                    # Tensorboard 로깅
+                    self.logger.record("train/episode_reward", self.total_reward)
+                    self.logger.record("train/episode_length", self.episode_steps)
+                    self.logger.record("train/active_vehicles", sum(self.active_agents))
+                    self.logger.dump(self.num_timesteps)
+
+                    # 초기화
+                    self.total_reward = 0
+                    self.episode_steps = 0
+
+                return True
+
+        # SAC 모델 생성
+        model = SAC(
+            "MlpPolicy",
+            env,
+            learning_rate=learning_rate,
+            buffer_size=buffer_size,
+            learning_starts=learning_starts,
+            batch_size=batch_size,
+            tau=0.005,
+            gamma=0.99,
+            train_freq=1,
+            gradient_steps=1,
+            ent_coef="auto",
+            target_update_interval=1,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            tensorboard_log=log_dir,
+            device=self.device
+        )
+
+        # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
+        model.replay_buffer = shared_buffer
+
+        # 로거 설정
+        model.set_logger(configure(log_dir, ['stdout', 'csv', 'tensorboard']))
+
+        # 콜백 생성
+        multi_vehicle_callback = MultiVehicleCallback(
+            self,
+            model,
+            shared_buffer,
+            learning_starts
+        )
+        checkpoint_callback = CheckpointCallback(
+            save_freq=1000,
+            save_path=models_dir,
+            name_prefix="sac",
+            save_replay_buffer=True,
+            save_vecnormalize=True
+        )
+        callback = CallbackList([multi_vehicle_callback, checkpoint_callback])
+
+        # 기본 컨트롤 정보 출력
+        self.print_basic_controls()
+
+        try:
+            # learn() 메소드로 학습 시작
+            model.learn(
+                total_timesteps=self.num_episodes * self.max_step,
+                callback=callback,
+                log_interval=10,
+                progress_bar=True
+            )
+        except KeyboardInterrupt:
+            print("학습이 사용자에 의해 중단되었습니다.")
+
+            # 중단된 시점의 모델 저장
+            model.save(os.path.join(models_dir, "sac_interrupted"))
 
         # 학습된 모델 저장
-        model.save(os.path.join(models_dir, "final_sac_model"))
+        model.save(os.path.join(models_dir, "sac_final"))
 
         # 환경 종료
         self.close()
 
-        # 학습 결과 출력
-        if not terminated:
-            print(f"\nTraining completed for {self.num_episodes} episodes.")
-            print(f"Average reward: {np.mean(episode_rewards):.2f}")
-            print(f"Total timesteps: {total_timesteps}")
-        else:
-            print("Training terminated by user.")
-            print(f"Completed episodes: {self.episode_count}/{self.num_episodes}")
-            print(f"Total timesteps: {total_timesteps}")
-
-        return episode_rewards
+        return model
