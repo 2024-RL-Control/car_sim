@@ -7,9 +7,10 @@ from src.env.env import CarSimulatorEnv
 import os
 import torch
 from stable_baselines3 import SAC
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.callbacks import CheckpointCallback
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from stable_baselines3.common.monitor import Monitor
 
 class BasicRLDrivingEnv:
     """
@@ -226,10 +227,10 @@ class BasicRLDrivingEnv:
         환경 초기화 및 초기 관측값 반환
 
         Returns:
-            초기 관측값
+            observations: 차량별 초기 관측 값 (num_vehicles, obs_dim) [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
         """
         # 환경 초기화
-        obs = self.env.reset()
+        observations = self.env.reset()
 
         # 장애물, 차량, 목적지 다시 설정
         self.setup_environment()
@@ -244,7 +245,7 @@ class BasicRLDrivingEnv:
         self.episode_count += 1
 
         # 초기 관측값 반환
-        return obs
+        return observations
 
     def step(self, actions):
         """
@@ -361,36 +362,45 @@ class BasicRLDrivingEnv:
 
         # 로그 및 모델 저장 경로 설정
         models_dir = "./logs/model"
-        logdir = "./logs/train"
+        log_dir = "./logs/train"
 
         os.makedirs(models_dir, exist_ok=True)
-        os.makedirs(logdir, exist_ok=True)
+        os.makedirs(log_dir, exist_ok=True)
 
-        num_cpu = 1
-        env = Monitor(self.env, logdir)
-        env = SubprocVecEnv([lambda: env for _ in range(num_cpu)])
+        env = Monitor(self.env, log_dir)
+        env = DummyVecEnv([lambda: env])
+
+        shared_buffer = ReplayBuffer(
+            buffer_size=buffer_size,
+            observation_space=self.env.observation_space,
+            action_space=self.env.action_space,
+            device=self.device,
+            n_envs=1,
+            handle_timeout_termination=False
+        )
 
         # SAC 모델 설정
         model = SAC(
-            "MlpPolicy",            # 다층 퍼셉트론 정책 사용
-            env,
-            learning_rate=3e-4,
-            buffer_size=100000,     # 리플레이 버퍼 크기
-            learning_starts=1000,   # 학습 시작 전 환경 탐색 스텝 수
-            batch_size=256,         # 미니배치 크기
-            tau=0.005,              # 타겟 네트워크 소프트 업데이트 계수
-            gamma=0.99,             # 할인 계수
-            train_freq=1,           # 업데이트 빈도
-            gradient_steps=1,       # 그래디언트 업데이트 스텝 수
-            ent_coef="auto",        # 엔트로피 계수 자동 조정
-            verbose=1,
-            tensorboard_log=logdir,
-            device=self.device
+            "MlpPolicy",                # 다층 퍼셉트론 정책 사용
+            env,                        # 환경
+            learning_rate=3e-4,         # 학습률
+            buffer_size=100000,         # 리플레이 버퍼 크기
+            learning_starts=1000,       # 학습 시작 전 환경 탐색 스텝 수
+            batch_size=256,             # 미니배치 크기
+            tau=0.005,                  # 타겟 네트워크 소프트 업데이트 계수
+            gamma=0.99,                 # 할인 계수
+            train_freq=1,               # 업데이트 빈도
+            gradient_steps=1,           # 그래디언트 업데이트 스텝 수
+            ent_coef="auto",            # 엔트로피 계수 자동 조정
+            target_update_interval=1,   # 타겟 네트워크 업데이트 주기
+            verbose=1,                  # 로그 출력
+            tensorboard_log=log_dir,    # 텐서보드 로그 저장 경로
+            device=self.device          # 사용할 디바이스
         )
 
         # 학습 콜백 설정
         checkpoint_callback = CheckpointCallback(
-            save_freq=100,          # 100 타임스텝마다 저장
+            save_freq=100,              # 100 타임스텝마다 저장
             save_path=models_dir,
             name_prefix="basic_sac",
             verbose=1
@@ -406,7 +416,7 @@ class BasicRLDrivingEnv:
 
         callback = CallbackList([checkpoint_callback, eval_callback])
 
-        # 에피소드 스텝을 관리하는 변수
+        # 에피소드 관리 변수
         episode_rewards = []
         terminated = False
 
@@ -416,7 +426,8 @@ class BasicRLDrivingEnv:
 
             # 환경 초기화
             try:
-                obs_array = self.reset()
+                observations = self.reset()
+                actions = np.array([np.zeros(3) for _ in range(self.num_vehicles)])
             except Exception as e:
                 print(f"Error resetting environment: {e}")
                 continue
@@ -431,20 +442,23 @@ class BasicRLDrivingEnv:
                 # 키보드 입력 처리
                 self.handle_keyboard_input()
 
-                # 랜덤 액션 테스트 (실제 학습에서는 에이전트가 결정, 다중 차량 고려)
-                actions = []
-                for _ in range(self.env.num_vehicles):
-                    # throttle_engine, throttle_brake, steering
-                    actions.append(np.array([random.uniform(0, 1), 0, random.uniform(-1, 1)]))
+                # 행동 결정
+                for i in range(self.num_vehicles):
+                    if self.active_agents[i]:
+                        action = model.predict(observations[i], deterministic=False)
+                        actions[i] = action
+                    else:
+                        actions[i] = np.array([0.0, 0.0, 0.0])
 
                 # 환경에서 한 스텝 진행
-                obs_array, reward_array, done, info = self.step(np.array(actions))
+                observations, rewards, done, info = self.step(actions)
 
                 # 보상 누적
-                for reward in reward_array:
+                for reward in rewards:
                     total_reward += reward
 
-                # info 속 collisions, outside_roads, reached_targets(id, value) 활용, 충돌 or 도착 or 도로 벗어날 시 에이전트 조작 및 학습 사용 X
+                # 활성화 차량에 대한 observation, reward를 공유 리플레이 버퍼에 추가
+                # 공유 리플레이 버퍼를 통한 학습
 
                 # 렌더링
                 self.render()
