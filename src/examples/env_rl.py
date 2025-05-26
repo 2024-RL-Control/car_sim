@@ -29,6 +29,9 @@ class BasicRLDrivingEnv:
         # 기본 CarSimulator 환경 초기화
         self.env = CarSimulatorEnv(config_path, setup=False)
 
+        self.num_vehicles = self.env.num_vehicles
+        self.active_agents = [True] * self.num_vehicles
+
         self.num_episodes = self.env.config['simulation']['num_episodes']
         self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
         self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
@@ -165,7 +168,7 @@ class BasicRLDrivingEnv:
 
         # 차량 배치 가능 공간은 외곽 영역
         # 상하좌우 네 영역 중 랜덤 선택
-        for i in range(self.env.num_vehicles):
+        for i in range(self.num_vehicles):
             placement_area = random.choice(['top', 'bottom', 'left', 'right'])
             boundary = self.vehicle_area[placement_area]
             x = random.uniform(boundary['x_min'], boundary['x_max'])
@@ -196,7 +199,7 @@ class BasicRLDrivingEnv:
         목적지 설정: 차량 시작 위치의 반대편에 목적지 설정
         """
         # 차량 시작 위치의 반대편 결정
-        for i in range(self.env.num_vehicles):
+        for i in range(self.num_vehicles):
             vehicle_placement = self.vehicle_start_position[i]['placement']
             yaw_volatility = random.uniform(-pi/6, pi/6)
             if vehicle_placement == 'top':
@@ -231,6 +234,9 @@ class BasicRLDrivingEnv:
         # 장애물, 차량, 목적지 다시 설정
         self.setup_environment()
 
+        # 에이전트 활성화 상태 초기화
+        self.active_agents = [True] * self.num_vehicles
+
         # 스텝 카운터 초기화
         self.steps = 0
 
@@ -240,31 +246,38 @@ class BasicRLDrivingEnv:
         # 초기 관측값 반환
         return obs
 
-    def step(self, action):
+    def step(self, actions):
         """
         환경에서 한 스텝 진행
 
         Args:
-            action: 에이전트의 행동 [가속도, 조향]
+            actions: 모든 차량의 행동 (num_vehicles, 3)
 
         Returns:
-            obs: 관측값
-            reward: 보상
-            done: 종료 여부
+            observations: 모든 차량의 관측값 (num_vehicles, obs_dim)
+            rewards: 모든 차량의 보상값 (num_vehicles,)
+            done: 종료 여부 bool
             info: 추가 정보
         """
         # 환경에서 스텝 진행
-        obs, reward, done, info = self.env.step(action)
+        observations, rewards, done, info = self.env.step(actions)
 
         # 스텝 카운터 증가
         self.steps += 1
 
-        # 최대 스텝 수 초과시 종료
+        # 차량 비활성화
+        for vehicle_id in range(self.num_vehicles):
+            done = info['dones'].get(vehicle_id, False)
+
+            if done and self.active_agents[vehicle_id]:
+                self.active_agents[vehicle_id] = False
+
+        # 최대 스텝에 도달하면 에피소드 종료
         if self.steps >= self.max_steps:
             done = True
             info['timeout'] = True
 
-        return obs, reward, done, info
+        return observations, rewards, done, info
 
     def _draw_boundary(self):
         # 경계(boundary)와 장애물 영역(obstacle_area) 시각화
@@ -357,14 +370,6 @@ class BasicRLDrivingEnv:
         env = Monitor(self.env, logdir)
         env = SubprocVecEnv([lambda: env for _ in range(num_cpu)])
 
-        # 학습 콜백 설정
-        checkpoint_callback = CheckpointCallback(
-            save_freq=100,          # 100 타임스텝마다 저장
-            save_path=models_dir,
-            name_prefix="basic_sac",
-            verbose=1
-        )
-
         # SAC 모델 설정
         model = SAC(
             "MlpPolicy",            # 다층 퍼셉트론 정책 사용
@@ -382,6 +387,24 @@ class BasicRLDrivingEnv:
             tensorboard_log=logdir,
             device=self.device
         )
+
+        # 학습 콜백 설정
+        checkpoint_callback = CheckpointCallback(
+            save_freq=100,          # 100 타임스텝마다 저장
+            save_path=models_dir,
+            name_prefix="basic_sac",
+            verbose=1
+        )
+
+        eval_callback = EvalCallback(
+            env,
+            best_model_save_path=models_dir,
+            name_prefix="basic_sac",
+            eval_freq=100,
+            verbose=1
+        )
+
+        callback = CallbackList([checkpoint_callback, eval_callback])
 
         # 에피소드 스텝을 관리하는 변수
         episode_rewards = []
