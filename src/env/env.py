@@ -198,17 +198,16 @@ class CarSimulatorEnv(gym.Env):
             import traceback
             traceback.print_exc()
 
-    def step(self, action):
+    def step(self, actions):
         """
         환경 스텝 실행
 
         Args:
-            action: 단일 차량 모드: [엔진, 브레이크, 조향] 명령
-                    다중 차량 모드: 차량별 [엔진, 브레이크, 조향] 명령 리스트
+            actions: 차량별 [엔진, 브레이크, 조향] 명령 (액션 리스트, 2차원 배열)
 
         Returns:
-            obs: 관측 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
-            reward: 보상
+            observations: 차량별 관측 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
+            rewards: 차량별 보상
             done: 종료 여부
             info: 추가 정보
         """
@@ -227,38 +226,28 @@ class CarSimulatorEnv(gym.Env):
         self._time_elapsed += dt
 
         # 차량 업데이트 및 충돌 감지
-        collisions, outside_roads, reached_targets = self.vehicle_manager.step(
-            action, dt, self._time_elapsed, obstacles
+        collisions, outside_roads, reached_targets, dones = self.vehicle_manager.step(
+            actions, dt, self._time_elapsed, obstacles
         )
 
         # 관측값 및 보상 계산
-        obs_array = self._get_obs()
-        reward_array = self._calculate_rewards(collisions, outside_roads, reached_targets)
+        observations = self._get_obs()
+        rewards = self._calculate_rewards(collisions, outside_roads, reached_targets)
 
         # 물리 시뮬레이션 시간 측정
         physics_time = time.time() - physics_start
         if self.renderer:
             self.renderer.set_physics_time(physics_time)
 
-        # 충돌 여부 확인
-        all_collision = all(collisions.values())
-
-        # 도로 이탈 여부 확인
-        all_outside_road = all(outside_roads.values())
-
-        # 목표 도달 여부 확인
-        all_reached_target = all(reached_targets.values())
-
-        # 종료 여부 결정, 모든 차량이 충돌 or 도로 벗어남 or 목표 도달 시 종료
-        done = all_collision or all_outside_road or all_reached_target
+        # 종료 여부 결정, 모든 차량이 종료 상태라면 종료
+        done = all(dones.values())
 
         info = {
             'collisions': collisions,
             'outside_roads': outside_roads,
             'reached_targets': reached_targets,
-            'all_collision': all_collision,
-            'all_outside_road': all_outside_road,
-            'all_reached_target': all_reached_target
+            'dones': dones,
+            'done': done
         }
 
         # 상태 기록 (리플레이용)
@@ -270,7 +259,7 @@ class CarSimulatorEnv(gym.Env):
         # 시간 업데이트
         self._last_update_time = current_time
 
-        return obs_array, reward_array, done, info
+        return observations, rewards, done, info
 
     def reset(self):
         """환경 초기화"""
