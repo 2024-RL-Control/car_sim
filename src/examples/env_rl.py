@@ -582,7 +582,7 @@ class MultiVehicleAlgorithm(SAC):
                 # 충분한 경험이 쌓이기 전에는 랜덤 행동
                 if self._n_updates < self.learning_starts:
                     actions[i] = self.rl_env.env.action_space.sample()
-                    actions[i][2] = 0.0  # 조향 안정화
+                    actions[i][1] = 0.0  # 브레이크 제거
                 else:
                     action, _ = self.predict(observations[i], deterministic=False)
                     actions[i] = action
