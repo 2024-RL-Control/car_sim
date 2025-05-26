@@ -197,8 +197,8 @@ class CarSimulatorEnv(gym.Env):
             actions: 차량별 [엔진, 브레이크, 조향] 명령 (액션 리스트, 2차원 배열)
 
         Returns:
-            observations: 차량별 관측 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
-            rewards: 차량별 보상
+            observations: 차량별 관측 (num_vehicles, obs_dim) [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
+            rewards: 차량별 보상 (num_vehicles,)
             done: 종료 여부
             info: 추가 정보
         """
@@ -348,8 +348,8 @@ class CarSimulatorEnv(gym.Env):
         Returns:
             관측값 (numpy 배열), (num_vehicles, obs_dim)
         """
-        obs_array = np.array([self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()])
-        return obs_array
+        observations = np.array([self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()])
+        return observations
 
     def _get_vehicle_observation(self, vehicle):
         """
