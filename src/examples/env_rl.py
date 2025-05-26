@@ -14,6 +14,21 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, CallbackList, BaseCallback
 from stable_baselines3.common.vec_env import DummyVecEnv
 
+class DummyEnv(gym.Env):
+    def __init__(self, rl_env):
+        self.rl_env = rl_env
+        self.observation_space = self.rl_env.env.observation_space
+        self.action_space = self.rl_env.env.action_space
+
+    def reset(self, *, seed=None, options=None):
+        observations, info = self.rl_env.reset(seed=seed, options=options)
+        return observations[0], info
+
+    def step(self, actions):
+        multi_actions = np.tile(actions, (self.rl_env.num_vehicles, 1))
+        observations, reward, done, truncated, info = self.rl_env.step(multi_actions)
+        return observations[0], reward, done, truncated, info
+
 class BasicRLDrivingEnv(gym.Env):
     """
     강화학습 기반 기초 자율주행 에이전트를 위한 환경 클래스
@@ -390,7 +405,8 @@ class BasicRLDrivingEnv(gym.Env):
         os.makedirs(log_dir, exist_ok=True)
 
         # Monitor와 DummyVecEnv로 환경 래핑
-        env = Monitor(self, log_dir)
+        dummy_env = DummyEnv(self)
+        env = Monitor(dummy_env, log_dir)
         env = DummyVecEnv([lambda: env])
 
         # SAC 하이퍼파라미터 설정
@@ -420,7 +436,7 @@ class BasicRLDrivingEnv(gym.Env):
             "MlpPolicy",
             env,
             learning_rate=learning_rate,
-            buffer_size=buffer_size,
+            buffer_size=0,
             learning_starts=learning_starts,
             batch_size=batch_size,
             tau=0.005,
@@ -443,6 +459,10 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 로거 설정
         model.set_logger(configure(log_dir))
+
+        print(model.observation_space.shape)
+        print(model.action_space.shape)
+        print(model.policy)
 
         checkpoint_callback = CheckpointCallback(
             save_freq=5000,
@@ -482,12 +502,12 @@ class MultiVehicleAlgorithm(SAC):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # 추가 속성 설정
+        self.rl_env = None
         self.active_agents = None
         self.num_vehicles = None
         self.prev_observations = None
         self.total_reward = 0
         self.episode_steps = 0
-        self.rl_env = None  # BasicRLDrivingEnv 인스턴스 저장용
 
     def set_env_info(self, rl_env):
         """
@@ -496,6 +516,10 @@ class MultiVehicleAlgorithm(SAC):
         self.rl_env = rl_env
         self.active_agents = rl_env.active_agents
         self.num_vehicles = rl_env.num_vehicles
+
+    def _excluded_save_params(self) -> list[str]:
+        # Add rl_env to excluded parameters to avoid pygame serialization issues
+        return super()._excluded_save_params() + ["rl_env"]
 
     def learn(
         self,
@@ -624,21 +648,3 @@ class MultiVehicleAlgorithm(SAC):
             self.prev_observations, _ = self.rl_env.reset()
 
         return True
-
-    def collect_rollouts(
-        self,
-        env,
-        callback,
-        train_freq,
-        replay_buffer,
-        action_noise=None,
-        learning_starts=0,
-        log_interval=None,
-    ):
-        """
-        기본 데이터 수집 비활성화 (우리 방식으로 데이터 수집)
-        """
-        from stable_baselines3.common.type_aliases import RolloutReturn
-
-        # 빈 RolloutReturn 객체 반환
-        return RolloutReturn(0, 0, True)
