@@ -314,10 +314,12 @@ class BasicRLDrivingEnv(gym.Env):
         if self.steps >= self.max_step:
             done = True
 
-        info['rewards'] = rewards.copy()
-        reward = float(np.sum(rewards))
+        info.update({
+            'episode_count': self.episode_count,
+            'rewards': rewards,  # 개별 차량별 보상
+        })
 
-        return observations, reward, done, False, info
+        return observations, np.sum(rewards), done, False, info
 
     def _draw_boundary(self):
         # 경계(boundary)와 장애물 영역(obstacle_area) 시각화
@@ -460,10 +462,6 @@ class BasicRLDrivingEnv(gym.Env):
         # 로거 설정
         model.set_logger(configure(log_dir))
 
-        print(model.observation_space.shape)
-        print(model.action_space.shape)
-        print(model.policy)
-
         checkpoint_callback = CheckpointCallback(
             save_freq=5000,
             save_path=models_dir,
@@ -503,7 +501,6 @@ class MultiVehicleAlgorithm(SAC):
         super().__init__(*args, **kwargs)
         # 추가 속성 설정
         self.rl_env = None
-        self.active_agents = None
         self.num_vehicles = None
         self.prev_observations = None
         self.total_reward = 0
@@ -514,7 +511,6 @@ class MultiVehicleAlgorithm(SAC):
         BasicRLDrivingEnv 정보 설정
         """
         self.rl_env = rl_env
-        self.active_agents = rl_env.active_agents
         self.num_vehicles = rl_env.num_vehicles
 
     def _excluded_save_params(self) -> list[str]:
@@ -559,7 +555,10 @@ class MultiVehicleAlgorithm(SAC):
             if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
                 gradient_steps = self.gradient_steps if self.gradient_steps >= 0 else 1
                 if gradient_steps > 0:
-                    self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
+                    # 배치 크기를 더 크게 설정하고 그래디언트 단계 최적화
+                    # 여러 그래디언트 단계를 한 번에 수행하여 GPU 활용도 향상
+                    effective_batch_size = min(self.batch_size * 2, self.replay_buffer.size())
+                    self.train(batch_size=effective_batch_size, gradient_steps=gradient_steps)
 
         callback.on_training_end()
 
@@ -574,20 +573,32 @@ class MultiVehicleAlgorithm(SAC):
 
         # 현재 관측값
         observations = self.prev_observations.copy()
-        actions = np.zeros((self.num_vehicles, 3))
 
-        # 각 차량별 행동 결정
-        for i in range(self.num_vehicles):
-            if self.active_agents[i]:
-                # 충분한 경험이 쌓이기 전에는 랜덤 행동
-                if self._n_updates < self.learning_starts:
-                    actions[i] = self.rl_env.env.action_space.sample()
-                    actions[i][1] = 0.0  # 브레이크 제거
+        # 벡터화된 방식으로 행동 결정
+        # 모든 차량의 행동을 한번에 계산
+        if self._n_updates < self.learning_starts:
+            # 랜덤 행동 (벡터화)
+            actions = np.zeros((self.num_vehicles, 3))
+            active_mask = np.array(self.rl_env.active_agents)
+            if active_mask.any():
+                random_actions = np.array([self.rl_env.env.action_space.sample() for _ in range(active_mask.sum())])
+                random_actions[:, 1] = 0.0  # 브레이크 제거
+                actions[active_mask] = random_actions
+        else:
+            with th.no_grad():
+                # 활성화된 에이전트만 행동 예측 (벡터화)
+                active_mask = np.array(self.rl_env.active_agents)
+                if active_mask.any():
+                    # 활성화된 에이전트의 관측값만 선택
+                    active_obs = observations[active_mask]
+                    # 배치로 한번에 예측
+                    active_obs_tensor = th.as_tensor(active_obs, device=self.device)
+                    actions_tensor, _ = self.policy.actor.action_log_prob(active_obs_tensor)
+                    # NumPy 배열로 변환
+                    actions = np.zeros((self.num_vehicles, 3))
+                    actions[active_mask] = actions_tensor.cpu().numpy()
                 else:
-                    action, _ = self.predict(observations[i], deterministic=False)
-                    actions[i] = action
-            else:
-                actions[i] = np.array([0.0, 0.0, 0.0])
+                    actions = np.zeros((self.num_vehicles, 3))
 
         # 환경에서 한 스텝 진행
         next_observations, reward, done, _, info = self.rl_env.step(actions)
@@ -602,18 +613,18 @@ class MultiVehicleAlgorithm(SAC):
         if not callback.on_step():
             return False
 
-        # 각 차량의 경험을 리플레이 버퍼에 추가
-        for i in range(self.num_vehicles):
-            if self.active_agents[i]:
-                # 단일 차량의 경험 생성
-                self.replay_buffer.add(
-                    obs=self.prev_observations[i],
-                    action=actions[i],
-                    reward=info['rewards'][i],
-                    next_obs=next_observations[i],
-                    done=done,
-                    infos=[{"terminal_observation": next_observations[i] if done else None}]
-                )
+        # 활성화된 에이전트만 경험 저장 (최적화된 반복문)
+        active_indices = np.where(np.array(self.rl_env.active_agents))[0]
+        for idx in active_indices:
+            # 단일 차량의 경험 생성
+            self.replay_buffer.add(
+                obs=self.prev_observations[idx],
+                action=actions[idx],
+                reward=info['rewards'][idx],
+                next_obs=next_observations[idx],
+                done=done,
+                infos={"terminal_observation": next_observations[idx] if done else None}
+            )
 
         # 다음 스텝을 위해 관측값 업데이트
         self.prev_observations = next_observations.copy()
@@ -639,7 +650,7 @@ class MultiVehicleAlgorithm(SAC):
             # 텐서보드 로깅
             self.logger.record("train/episode_reward", self.total_reward)
             self.logger.record("train/episode_length", self.episode_steps)
-            self.logger.record("train/active_vehicles", sum(self.active_agents))
+            self.logger.record("train/active_vehicles", sum(self.rl_env.active_agents))
             self.logger.dump(self.num_timesteps)
 
             # 초기화
