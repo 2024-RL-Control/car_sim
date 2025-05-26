@@ -5,7 +5,6 @@ simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
   num_episodes: 1000
-  max_steps: 1000   # maximum steps per episode
   num_vehicles: 1   # number of vehicles on the environment
   boundary:         # [m]
     x_min: -300
@@ -50,11 +49,11 @@ visualization:
   window_size: [1300, 800]
   scale_factor: 5                   # pixels per meter
   camera_zoom: 0.25
-  training_mode: false              # training mode, if true: fixed dt and no fps limit
+  training_mode: true              # training mode, if true: fixed dt and no fps limit
   debug_mode: false
-  visualize: true
+  visualize: false
   visualize_hud: true
-  camera_follow: false               # 카메라가 차량 추적
+  camera_follow: true               # 카메라가 차량 추적
   background_color: [0, 0, 0]       # RGB
   grid_color: [100, 100, 100]       # RGB color for grid lines
   hud_bg_color: [50, 50, 50, 180]   # RGBA

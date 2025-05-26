@@ -8,6 +8,7 @@ import os
 import torch
 from stable_baselines3 import SAC
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, CallbackList
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -92,7 +93,6 @@ class BasicRLDrivingEnv:
 
         # 스텝 카운터
         self.steps = 0
-        self.max_steps = self.env.config['simulation']['max_steps']
 
         # 에피소드 정보 저장용
         self.episode_count = 0
@@ -268,15 +268,10 @@ class BasicRLDrivingEnv:
 
         # 차량 비활성화
         for vehicle_id in range(self.num_vehicles):
-            done = info['dones'].get(vehicle_id, False)
+            vehicle_done = info['dones'].get(vehicle_id, False)
 
-            if done and self.active_agents[vehicle_id]:
+            if vehicle_done and self.active_agents[vehicle_id]:
                 self.active_agents[vehicle_id] = False
-
-        # 최대 스텝에 도달하면 에피소드 종료
-        if self.steps >= self.max_steps:
-            done = True
-            info['timeout'] = True
 
         return observations, rewards, done, info
 
@@ -407,6 +402,7 @@ class BasicRLDrivingEnv:
 
         # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
         model.replay_buffer = shared_buffer
+        model._logger = configure(log_dir, ['stdout', 'csv', 'tensorboard'])
 
         # 학습 콜백 설정
         checkpoint_callback = CheckpointCallback(
