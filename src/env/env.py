@@ -2,6 +2,7 @@
 import pygame
 import gymnasium as gym
 from gymnasium import spaces
+from math import cos
 import numpy as np
 import time
 import pickle
@@ -447,31 +448,44 @@ class CarSimulatorEnv(gym.Env):
         state = vehicle.get_state()
         rewards = self.config['simulation']['rewards']
 
+        # 1. 종료 조건에 대한 즉각적인 보상/페널티
+        if reached_target:
+            return rewards['goal_reached_reward']
+        if collision:
+            return rewards['collision_penalty']
+        if outside_road:
+            return rewards['outside_road_penalty']
+
+        # 2. 주행 과정에 대한 상세 보상
         reward = 0
 
-        # 속도 보상 (최대 속도에 가까울수록 높은 보상)
-        speed_reward = (state.vel_long / self.config['vehicle']['max_speed']) * rewards['speed_reward_factor']
-        reward += speed_reward
+        # --- 목표 지향 보상 ---
 
         # 목표 거리에 따른 보상 (가까울수록 높은 보상)
-        if state.distance_to_target > 0:
-            proximity_reward = 1.0 / (1.0 + state.distance_to_target) * rewards['distance_reward_factor']
-            reward += proximity_reward
+        goal_distance = state.scale_distance(state.distance_to_target)  # 1.0 / log(e + distance/10)로 정규화 [0 ~ 1]
+        reward += goal_distance * rewards['distance_factor']
 
-        # 방향 일치 보상 (차량이 목표를 바라볼수록 높은 보상)
-        direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * rewards['orientation_reward_factor']
-        reward += direction_reward
+        # 방향 일치 보상 (차량이 목표의 방향과 일치할수록 높은 보상)
+        yaw_diff = state.yaw_diff_to_target # -π ~ π 범위의 각도 차이
+        orientation_reward = (cos(yaw_diff) + 1) / 2  # 0 ~ 1 범위로 변환
+        reward += orientation_reward * rewards['orientation_factor']
 
-        # 충돌 패널티
-        if collision:
-            reward -= rewards['collision_penalty']
+        # --- 주행 안정성 보상 ---
 
-        # 도로 이탈 패널티
-        if outside_road:
-            reward -= rewards['outside_road_penalty']
+        # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
+        frenet_d_norm = state.scale_frenet_d(state.frenet_d) # np.tanh(d/10)로 정규화 [-1 ~ 1]
+        lane_keeping_reward = (1 - abs(frenet_d_norm))
+        reward += lane_keeping_reward * rewards['lane_keeping_factor']
 
-        # 목표 도달 보상
-        if reached_target:
-            reward += rewards['goal_reached_reward']
+        # 목표 속도 유지 보상 (도로가 제안하는 속도와 가까울수록 높은 보상)
+        max_vel = self.config['simulation']['path_planning']['max_speed']
+        current_vel = max(state.vel_long * 3.6, 0) # m/s to km/h, 음수 속도는 0으로 설정
+        target_vel = state.target_vel_long if state.target_vel_long is not None else 0  # 목표 속도가 없을 경우 0으로 설정
+        speed = abs(current_vel - target_vel) / max_vel
+        speed_reward = (1.0 - speed)
+        reward += speed_reward * rewards['speed_factor']
+
+        # 시간 경과 페널티
+        reward += rewards['time_penalty']
 
         return reward
