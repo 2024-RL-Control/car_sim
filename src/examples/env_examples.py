@@ -38,7 +38,7 @@ def manual_control():
         action = env.handle_keyboard_input()
 
         # 환경 스텝
-        _, _, done, _ = env.step(action)
+        _, _, done, _, _ = env.step(action)
 
         # 렌더링
         env.render()
@@ -129,7 +129,7 @@ def manual_control_with_goal():
         action = env.handle_keyboard_input()
 
         # 환경 스텝
-        _, _, done, info = env.step(action)
+        _, _, done, _, info = env.step(action)
 
         # 렌더링
         env.render()
@@ -235,7 +235,7 @@ def manual_control_with_obstacles():
         action = env.handle_keyboard_input()
 
         # 환경 스텝
-        _, reward, done, info = env.step(action)
+        _, reward, done, _, info = env.step(action)
 
         # 렌더링
         env.render()
