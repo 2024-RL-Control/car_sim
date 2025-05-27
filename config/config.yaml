@@ -53,7 +53,7 @@ visualization:
   training_mode: true              # training mode, if true: fixed dt and no fps limit
   debug_mode: false
   visualize: false
-  visualize_hud: true
+  visualize_hud: false
   camera_follow: true               # 카메라가 차량 추적
   background_color: [0, 0, 0]       # RGB
   grid_color: [100, 100, 100]       # RGB color for grid lines
