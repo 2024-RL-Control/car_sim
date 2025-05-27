@@ -467,14 +467,13 @@ class BasicRLDrivingEnv(gym.Env):
             save_freq=5000,
             save_path=models_dir,
             name_prefix="sac",
-            save_replay_buffer=True,
+            save_replay_buffer=False,
             save_vecnormalize=True
         )
         callback = CallbackList([checkpoint_callback])
 
         # 기본 컨트롤 정보 출력
         self.print_basic_controls()
-
 
         # learn() 메소드로 학습 시작
         model.learn(
@@ -486,6 +485,7 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 학습된 모델 저장
         model.save(os.path.join(models_dir, "sac_final"))
+        model.save_replay_buffer(os.path.join(models_dir, "sac_final_replay_buffer"))
 
         # 환경 종료
         self.close()
@@ -655,7 +655,7 @@ class MultiVehicleAlgorithm(SAC):
         # 에피소드 종료 시 처리
         if done:
             # 로깅
-            print(f"Episode {self.rl_env.episode_count}/{self.rl_env.num_episodes}, "
+            print(f"Episode {self.rl_env.episode_count}, "
                   f"Steps: {self.episode_steps}, "
                   f"Total Reward: {self.total_reward:.2f}")
 
