@@ -150,46 +150,40 @@ class BasicRLDrivingEnv(gym.Env):
         obstacle_manager.clear_obstacles()
 
         # 정적 장애물 배치
-        for _ in range(self.num_static_obstacles):
-            # 장애물 배치 가능 공간 내에 랜덤 위치 선택
-            x = random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'])
-            y = random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'])
+        n_static = self.num_static_obstacles
+        xs = np.random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'], size=n_static)
+        ys = np.random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'], size=n_static)
+        yaws = np.random.uniform(-pi/2, pi/2, size=n_static)
+        sizes = np.random.uniform(1.0, 10.0, size=n_static)
+        types = np.random.choice(['circle', 'square', 'rectangle'], size=n_static)
+        static_color = (100, 100, 200)  # 정적 장애물 색상
 
-            # 랜덤 크기의 장애물
-            size = random.uniform(1.0, 10.0)
-
-            # 장애물 유형 랜덤 선택 (원형, 정사각형, 직사각형)
-            obstacle_type = random.choice(['circle', 'square', 'rectangle'])
-            color = (100, 100, 200)
-
-            if obstacle_type == 'circle':
-                obstacle_manager.add_circle_obstacle(None, x, y, 0, 0, 0, size, color)
-            elif obstacle_type == 'square':
-                obstacle_manager.add_square_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, size, color)
+        for x, y, yaw, sz, t in zip(xs, ys, yaws, sizes, types):
+            if t == 'circle':
+                obstacle_manager.add_circle_obstacle(None, x, y, 0, 0, 0, sz, static_color)
+            elif t == 'square':
+                obstacle_manager.add_square_obstacle(None, x, y, yaw, 0, 0, sz, static_color)
             else:  # rectangle
                 width = random.uniform(1.5, 10.0)
                 height = random.uniform(1.0, 3.5)
-                obstacle_manager.add_rectangle_obstacle(None, x, y, random.uniform(-pi/2, pi/2), 0, 0, width, height, color)
+                obstacle_manager.add_rectangle_obstacle(None, x, y, yaw, 0, 0, width, height, static_color)
 
         # 동적 장애물 배치
-        for _ in range(self.num_dynamic_obstacles):
-            x = random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'])
-            y = random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'])
+        n_dynamic = self.num_dynamic_obstacles
+        xs = np.random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'], size=n_dynamic)
+        ys = np.random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'], size=n_dynamic)
+        yaws = np.random.uniform(-pi/2, pi/2, size=n_dynamic)
+        yaw_rates = np.random.uniform(-0.4, 0.4, size=n_dynamic)  # 회전 속도
+        speeds = np.random.uniform(1.0, 10.0, size=n_dynamic)
+        sizes = np.random.uniform(1.0, 10.0, size=n_dynamic)
+        types = np.random.choice(['circle', 'square'], size=n_dynamic)
+        dynamic_color = (200, 100, 100)  # 동적 장애물 색상
 
-            # 랜덤 속도, 방향 및 크기
-            speed = random.uniform(1.0, 10.0)
-            direction = random.uniform(-pi/2, pi/2)
-            size = random.uniform(1.0, 10.0)
-            yaw_rate = random.uniform(-0.4, 0.4)  # 회전 속도
-
-            # 장애물 유형 랜덤 선택
-            obstacle_type = random.choice(['circle', 'square'])
-            color = (200, 100, 100)
-
-            if obstacle_type == 'circle':
-                obstacle_manager.add_circle_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
+        for x, y, yaw, yaw_rate, speed, sz, t in zip(xs, ys, yaws, yaw_rates, speeds, sizes, types):
+            if t == 'circle':
+                obstacle_manager.add_circle_obstacle(None, x, y, yaw, yaw_rate, speed, sz, dynamic_color)
             else:  # square
-                obstacle_manager.add_square_obstacle(None, x, y, direction, yaw_rate, speed, size, color)
+                obstacle_manager.add_square_obstacle(None, x, y, yaw, yaw_rate, speed, sz, dynamic_color)
 
     def _setup_vehicle(self):
         """
