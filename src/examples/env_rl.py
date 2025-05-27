@@ -414,9 +414,14 @@ class BasicRLDrivingEnv(gym.Env):
 
         # SAC 하이퍼파라미터 설정
         buffer_size = 1000000
-        learning_rate = 3e-4
+        learning_rate = 3e-3
         batch_size = 256
         learning_starts = 10000
+        n_envs = 1
+
+        # 학습률 스케줄링 함수 정의
+        def lr_schedule(progress_remaining):
+            return learning_rate * progress_remaining  # 학습 진행에 따라 학습률 감소
 
         # 공유 리플레이 버퍼 생성
         shared_buffer = ReplayBuffer(
@@ -424,7 +429,7 @@ class BasicRLDrivingEnv(gym.Env):
             observation_space=self.env.observation_space,
             action_space=self.env.action_space,
             device=self.device,
-            n_envs=1,
+            n_envs=n_envs,
             handle_timeout_termination=False
         )
 
@@ -438,7 +443,7 @@ class BasicRLDrivingEnv(gym.Env):
         model = MultiVehicleAlgorithm(
             "MlpPolicy",
             env,
-            learning_rate=learning_rate,
+            learning_rate=lr_schedule,
             buffer_size=0,
             learning_starts=learning_starts,
             batch_size=batch_size,
@@ -461,36 +466,130 @@ class BasicRLDrivingEnv(gym.Env):
         model.set_env_info(self)
 
         # 로거 설정
-        model.set_logger(configure(log_dir))
+        model.set_logger(configure(log_dir, ["stdout", "csv", "tensorboard"]))
 
-        checkpoint_callback = CheckpointCallback(
-            save_freq=5000,
+        # 체크포인트 관리 클래스 - 오래된 체크포인트 자동 삭제
+        class CleanCheckpointCallback(CheckpointCallback):
+            def __init__(self, save_freq, save_path, name_prefix='model', max_checkpoints=5, **kwargs):
+                super().__init__(save_freq=save_freq, save_path=save_path, name_prefix=name_prefix, **kwargs)
+                self.max_checkpoints = max_checkpoints
+                self.checkpoint_files = []
+
+            def _on_step(self):
+                super_result = super()._on_step()
+
+                # 현재 체크포인트 저장 후 초과된 것들 삭제
+                if self.num_timesteps % self.save_freq == 0:
+                    checkpoint_files = [f for f in os.listdir(self.save_path)
+                                      if f.startswith(self.name_prefix) and f.endswith('.zip')]
+                    checkpoint_files.sort()
+
+                    # 오래된 체크포인트 삭제
+                    if len(checkpoint_files) > self.max_checkpoints:
+                        files_to_delete = checkpoint_files[:-self.max_checkpoints]
+                        for file in files_to_delete:
+                            try:
+                                os.remove(os.path.join(self.save_path, file))
+                                print(f"오래된 체크포인트 삭제: {file}")
+                            except Exception as e:
+                                print(f"체크포인트 삭제 실패 {file}: {e}")
+
+                return super_result
+
+        # 고급 로깅을 위한 콜백
+        class CustomLoggingCallback(BaseCallback):
+            def __init__(self, verbose=0):
+                super().__init__(verbose)
+                self.training_start = time.time()
+                self.episode_rewards = []
+                self.episode_lengths = []
+                self.learning_rates = []
+                self.gpu_memory_usage = []
+
+            def _on_step(self):
+                # GPU 메모리 사용량 추적 (가능한 경우)
+                if torch.cuda.is_available():
+                    mem_allocated = torch.cuda.memory_allocated() / (1024 ** 3)  # GB 단위
+                    self.gpu_memory_usage.append(mem_allocated)
+
+                # 현재 학습률 추적
+                if hasattr(self.model, 'learning_rate'):
+                    current_lr = self.model.learning_rate
+                    self.learning_rates.append(current_lr)
+
+                # 추가 로그 기록 (1000스텝마다)
+                if self.n_calls % 1000 == 0:
+                    elapsed_time = time.time() - self.training_start
+                    steps_per_second = self.n_calls / elapsed_time
+                    est_remaining_time = (self.locals.get('total_timesteps', 0) - self.n_calls) / steps_per_second if steps_per_second > 0 else 0
+
+                    # 학습 진행상황 상세 로깅
+                    self.logger.record("time/steps_per_second", steps_per_second)
+                    self.logger.record("time/est_remaining_hours", est_remaining_time / 3600)
+
+                    if torch.cuda.is_available():
+                        self.logger.record("resources/gpu_memory_gb", mem_allocated)
+
+                    # 메모리 상태 확인 및 청소 (가능한 경우)
+                    if torch.cuda.is_available() and mem_allocated > 3.0:  # 3GB 이상 사용 시 메모리 청소
+                        torch.cuda.empty_cache()
+                        print("\nGPU 메모리 캐시 정리 완료")
+
+                return True
+
+        # 체크포인트 콜백 설정
+        clean_checkpoint_callback = CleanCheckpointCallback(
+            save_freq=10000,  # 10000스텝마다 저장
             save_path=models_dir,
             name_prefix="sac",
-            save_replay_buffer=False,
-            save_vecnormalize=True
+            save_replay_buffer=False,  # 체크포인트에서는 리플레이 버퍼를 저장하지 않음
+            save_vecnormalize=True,
+            max_checkpoints=10  # 최대 10개의 체크포인트만 유지
         )
-        callback = CallbackList([checkpoint_callback])
 
-        # 기본 컨트롤 정보 출력
-        self.print_basic_controls()
+        # 고급 로깅 콜백
+        logging_callback = CustomLoggingCallback()
+
+        # 콜백 목록 생성
+        callback = CallbackList([clean_checkpoint_callback, logging_callback])
 
         # learn() 메소드로 학습 시작
-        model.learn(
-            total_timesteps=self.num_episodes * self.max_step,
-            callback=callback,
-            log_interval=100,
-            progress_bar=True
-        )
+        try:
+            # 기본 컨트롤 정보 출력
+            self.print_basic_controls()
 
-        # 학습된 모델 저장
-        model.save(os.path.join(models_dir, "sac_final"))
-        model.save_replay_buffer(os.path.join(models_dir, "sac_final_replay_buffer"))
+            model.learn(
+                total_timesteps=self.num_episodes * self.max_step,
+                callback=callback,
+                log_interval=100,
+                progress_bar=True
+            )
 
-        # 환경 종료
-        self.close()
+            # 학습된 모델 저장
+            model.save(os.path.join(models_dir, "sac_final"))
+            model.save_replay_buffer(os.path.join(models_dir, "sac_final_replay_buffer"))
 
-        return model
+            # 학습 완료 후 추가 로그 저장
+            print("\n\n===== 학습 완료 =====")
+            print(f"총 학습 시간: {(time.time() - logging_callback.training_start)/3600:.2f} 시간")
+
+            if torch.cuda.is_available():
+                print(f"최대 GPU 메모리 사용량: {max(logging_callback.gpu_memory_usage):.2f} GB")
+                # 메모리 정리
+                torch.cuda.empty_cache()
+
+        except Exception as e:
+            print(f"\n\n학습 중단됨: {e}")
+            # 오류 발생시에도 현재까지 학습된 모델 저장 시도
+            try:
+                model.save(os.path.join(models_dir, "sac_interrupted"))
+                model.save_replay_buffer(os.path.join(models_dir, "sac_interrupted_replay_buffer"))
+                print("중단된 모델 상태가 저장되었습니다.")
+            except Exception as save_error:
+                print(f"중단된 모델 저장 실패: {save_error}")
+        finally:
+            # 환경 종료
+            self.close()
 
 class MultiVehicleAlgorithm(SAC):
     def __init__(self, *args, **kwargs):
