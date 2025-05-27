@@ -444,10 +444,10 @@ class BasicRLDrivingEnv(gym.Env):
             batch_size=batch_size,
             tau=0.005,
             gamma=0.99,
-            train_freq=1,
+            train_freq=5,
             gradient_steps=1,
             ent_coef="auto",
-            target_update_interval=1,
+            target_update_interval=10,
             policy_kwargs=policy_kwargs,
             verbose=1,
             tensorboard_log=log_dir,
@@ -480,7 +480,7 @@ class BasicRLDrivingEnv(gym.Env):
         model.learn(
             total_timesteps=self.num_episodes * self.max_step,
             callback=callback,
-            log_interval=10,
+            log_interval=100,
             progress_bar=True
         )
 
@@ -570,10 +570,7 @@ class MultiVehicleAlgorithm(SAC):
             if self.num_timesteps > 0 and self.num_timesteps > self.learning_starts:
                 gradient_steps = self.gradient_steps if self.gradient_steps >= 0 else 1
                 if gradient_steps > 0:
-                    # 배치 크기를 더 크게 설정하고 그래디언트 단계 최적화
-                    # 여러 그래디언트 단계를 한 번에 수행하여 GPU 활용도 향상
-                    effective_batch_size = min(self.batch_size * 2, self.replay_buffer.size())
-                    self.train(batch_size=effective_batch_size, gradient_steps=gradient_steps)
+                    self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
 
         callback.on_training_end()
 
@@ -600,14 +597,14 @@ class MultiVehicleAlgorithm(SAC):
                 random_actions[:, 1] = 0.0  # 브레이크 제거
                 actions[active_mask] = random_actions
         else:
-            with th.no_grad():
+            with torch.no_grad():
                 # 활성화된 에이전트만 행동 예측 (벡터화)
                 active_mask = np.array(self.rl_env.active_agents)
                 if active_mask.any():
                     # 활성화된 에이전트의 관측값만 선택
                     active_obs = observations[active_mask]
                     # 배치로 한번에 예측
-                    active_obs_tensor = th.as_tensor(active_obs, device=self.device)
+                    active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
                     actions_tensor, _ = self.policy.actor.action_log_prob(active_obs_tensor)
                     # NumPy 배열로 변환
                     actions = np.zeros((self.num_vehicles, 3))
