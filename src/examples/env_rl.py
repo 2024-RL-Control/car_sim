@@ -295,7 +295,6 @@ class BasicRLDrivingEnv(gym.Env):
             dtype=np.float64
         )
 
-        self.num_episodes = self.env.config['simulation']['num_episodes']
         self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
         self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
 
@@ -354,7 +353,8 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 스텝 카운터
         self.steps = 0
-        self.max_step = self.env.config['simulation']['max_steps']
+        self.max_step = self.env.config['simulation']['train_max_steps']
+        self.max_episode_steps = self.env.config['simulation']['train_max_episode_steps']
 
         # 에피소드 정보 저장용
         self.episode_count = 0
@@ -537,7 +537,7 @@ class BasicRLDrivingEnv(gym.Env):
             if vehicle_done and self.active_agents[vehicle_id]:
                 self.active_agents[vehicle_id] = False
 
-        if self.steps >= self.max_step:
+        if self.steps >= self.max_episode_steps:
             done = True
 
         info.update({
@@ -715,7 +715,7 @@ class BasicRLDrivingEnv(gym.Env):
             self.print_basic_controls()
 
             model.learn(
-                total_timesteps=self.num_episodes * self.max_step,
+                total_timesteps=self.max_step,
                 callback=callback,
                 log_interval=100,
                 progress_bar=True

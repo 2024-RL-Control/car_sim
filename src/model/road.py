@@ -461,6 +461,9 @@ class PathPlanner:
         self.precision = (5, 5, 1)
         self.width = config["road_width"]
         self.config = config
+        self.default_speed = self.config['default_speed']
+        self.min_speed = self.config['min_speed']
+        self.max_speed = self.config['max_speed']
 
     def plan(self, point1, point2, obstacles, mode):
         """
@@ -478,14 +481,14 @@ class PathPlanner:
             nodes_points, paths_list = self._straight(point1, point2)
         return nodes_points, paths_list
 
-    def calculate_target_vel(self, path, default_speed=30, min_speed=5, max_speed=50):
+    def calculate_target_vel(self, path):
         """
         경로 곡률에 따른 목표 속도 계산
         최소 속도 5, 최대 속도 50
         앞부분과 마지막 부분의 곡률에 더 높은 가중치 부여
         """
         if not path or len(path) < 3:
-            return default_speed  # 기본 속도
+            return self.default_speed  # 기본 속도
 
         # 전체 경로의 가중 평균 곡률 계산
         weighted_total_curvature = 0
@@ -532,7 +535,7 @@ class PathPlanner:
                 pass
 
         if not curvatures:
-            return default_speed  # 기본 속도
+            return self.default_speed  # 기본 속도
 
         # 위치에 따른 가중치 적용
         path_length = len(path) - 2  # 곡률을 계산할 수 있는 점의 개수
@@ -556,9 +559,9 @@ class PathPlanner:
         normalized_curvature = min(avg_curvature / max_curvature, 1.0)
 
         # 속도 범위: 5 ~ 50
-        velocity = max_speed - normalized_curvature * (max_speed - min_speed)
+        velocity = self.max_speed - normalized_curvature * (self.max_speed - self.min_speed)
 
-        return max(min_speed, min(max_speed, velocity))
+        return max(self.min_speed, min(self.max_speed, velocity))
 
     def _select_options(self, nodes, sample, nb_options):
         options = []
