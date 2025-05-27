@@ -120,49 +120,6 @@ class MultiVehicleAlgorithm(SAC):
         # 제외된 저장 파라미터 목록
         return super()._excluded_save_params() + ["rl_env"]
 
-    def _add_batch_to_replay_buffer(self,
-                                    obs_batch: np.ndarray,
-                                    action_batch: np.ndarray,
-                                    reward_batch: np.ndarray,
-                                    next_obs_batch: np.ndarray,
-                                    done_batch: np.ndarray):
-        rb = self.replay_buffer
-        batch_size = obs_batch.shape[0]
-        buf_size   = rb.buffer_size
-        start      = rb.pos
-        end        = (start + batch_size) % buf_size
-
-        # 연속 구간에 쏙 들어갈 때
-        if start + batch_size <= buf_size:
-            idx = slice(start, start + batch_size)
-            rb.observations[idx]      = obs_batch
-            rb.actions[idx]           = action_batch
-            rb.rewards[idx]           = reward_batch
-            rb.next_observations[idx] = next_obs_batch
-            rb.dones[idx]             = done_batch
-        else:
-            # wrap-around 처리
-            n1 = buf_size - start
-            first  = slice(start, buf_size)
-            second = slice(0, end)
-            # 첫 구간
-            rb.observations[first]      = obs_batch[:n1]
-            rb.actions[first]           = action_batch[:n1]
-            rb.rewards[first]           = reward_batch[:n1]
-            rb.next_observations[first] = next_obs_batch[:n1]
-            rb.dones[first]             = done_batch[:n1]
-            # 두번째 구간
-            rb.observations[second]      = obs_batch[n1:]
-            rb.actions[second]           = action_batch[n1:]
-            rb.rewards[second]           = reward_batch[n1:]
-            rb.next_observations[second] = next_obs_batch[n1:]
-            rb.dones[second]             = done_batch[n1:]
-
-        # 포인터 및 full 플래그 업데이트
-        rb.pos = end
-        if rb.full or batch_size >= buf_size or end == 0:
-            rb.full = True
-
     def _reset(self):
         # 환경 리셋 (성공할 때까지 무한 시도)
         reset_success = False
@@ -264,9 +221,8 @@ class MultiVehicleAlgorithm(SAC):
         self.num_timesteps += 1
 
         # 5) 활성화된 에이전트만 경험 저장
-        active_indices = np.where(np.array(self.rl_env.active_agents))[0]
-        for idx in active_indices:
-            # 단일 차량의 경험 생성
+        active_idx = np.where(active_mask)[0]
+        for idx in active_idx:
             self.replay_buffer.add(
                 obs=self.prev_observations[idx],
                 action=actions[idx],
@@ -770,7 +726,7 @@ class BasicRLDrivingEnv(gym.Env):
             model.save_replay_buffer(os.path.join(models_dir, "sac_final_replay_buffer"))
 
             # 학습 완료 후 추가 로그 저장
-            print("\n\n===== 학습 완료 =====")
+            print("\n===== 학습 완료 =====")
             print(f"총 학습 시간: {(time.time() - logging_callback.training_start)/3600:.2f} 시간")
 
             if torch.cuda.is_available():
