@@ -381,7 +381,7 @@ class CarSimulatorEnv(gym.Env):
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
-        goal_distance = state.scale_distance(state.distance_to_target)
+        progress = state.get_progress()
         cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d)
 
@@ -396,7 +396,7 @@ class CarSimulatorEnv(gym.Env):
             scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
             scale_acc_lat,          # -1 ~ 1
-            goal_distance,          # 0 ~ 1
+            progress,               # -1 ~ 1
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
@@ -464,10 +464,10 @@ class CarSimulatorEnv(gym.Env):
 
         # --- 목표 지향 보상 ---
 
-        # 목표 거리에 따른 보상 (가까울수록 높은 보상)
-        goal_distance = state.scale_distance(state.distance_to_target)  # 1.0 / log(e + distance/10)로 정규화 [0 ~ 1]
-        goal_reward = goal_distance * rewards['distance_factor']
-        reward += goal_reward
+        # 진행률(목표 거리)에 따른 보상 (가까울수록 높은 보상)
+        progress = state.get_progress()
+        progress_reward = progress * rewards['progress_factor']
+        reward += progress_reward
 
         # # --- 주행 안정성 보상 ---
 

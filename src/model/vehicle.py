@@ -40,7 +40,8 @@ class VehicleState:
     target_x: float = 0.0         # 목표 X 좌표
     target_y: float = 0.0         # 목표 Y 좌표
     target_yaw: float = 0.0       # 목표 요각
-    distance_to_target: float = 0.0  # 목표까지의 거리
+    initial_distance_to_target: float = 0.0  # 초기 목표까지의 거리
+    distance_to_target: float = 0.0  # 남은 목표까지의 거리
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
 
     # frenet 좌표
@@ -86,6 +87,7 @@ class VehicleState:
         self.target_x = 0.0
         self.target_y = 0.0
         self.target_yaw = 0.0
+        self.initial_distance_to_target = 0.0
         self.distance_to_target = 0.0
         self.yaw_diff_to_target = 0.0
 
@@ -127,18 +129,6 @@ class VehicleState:
         new_state.throttle_brake = self.throttle_brake
         new_state.steer = self.steer
 
-        # 목적지 관련 속성 복사
-        new_state.target_x = self.target_x
-        new_state.target_y = self.target_y
-        new_state.target_yaw = self.target_yaw
-        new_state.distance_to_target = self.distance_to_target
-        new_state.yaw_diff_to_target = self.yaw_diff_to_target
-
-        # frenet 좌표 복사
-        new_state.frenet_d = self.frenet_d
-        new_state.frenet_point = self.frenet_point
-        new_state.target_vel_long = self.target_vel_long
-
         # 환경 속성 복사
         new_state.terrain_type = self.terrain_type
         return new_state
@@ -151,10 +141,13 @@ class VehicleState:
         """cos/sin 인코딩을 통한 각도 표현"""
         return cos(angle), sin(angle)
 
-    def scale_distance(self, distance):
-        """거리 정규화"""
-        return 1.0 / log(e + distance/30)
-        # return exp(-(distance))
+    def get_progress(self):
+        """거리 정규화, -1.0 ~ 1.0 범위로 목표 도달 진행률 반환"""
+        if self.initial_distance_to_target == 0:
+            return 0.0
+        raw = (self.initial_distance_to_target - self.distance_to_target) / self.initial_distance_to_target
+        progress = max(-1.0, min(1.0, raw))  # -1.0 ~ 1.0 범위로 제한
+        return progress
 
     def scale_frenet_d(self, d):
         """frenet_d 값의 연속적 스케일링 (tanh 사용)"""
@@ -572,6 +565,7 @@ class Vehicle:
         self.state.target_y = y
         self.state.target_yaw = yaw
         self._update_target_info()
+        self.state.initial_distance_to_target = self.state.distance_to_target
 
     def _check_target_reached(self, position_tolerance=None, yaw_tolerance=None):
         """

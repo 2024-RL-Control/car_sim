@@ -640,7 +640,7 @@ class BasicRLDrivingEnv(gym.Env):
 
         # SAC 하이퍼파라미터 설정
         buffer_size = 500000
-        learning_rate = 3e-3
+        learning_rate = 3e-4
         batch_size = 256
         learning_starts = 30000
         n_envs = 1
@@ -661,24 +661,24 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 신경망 아키텍처 설정
         policy_kwargs = dict(
-            net_arch=dict(pi=[128, 256, 256, 64, 32], qf=[128, 256, 256, 64, 32]),
-            activation_fn=torch.nn.LeakyReLU
+            net_arch=dict(pi=[128, 256, 256, 64], qf=[128, 256, 256, 64]),
+            activation_fn=torch.nn.ReLU
         )
 
         # 커스텀 SAC 모델 생성
         model = MultiVehicleAlgorithm(
             "MlpPolicy",
             env,
-            learning_rate=lr_schedule,
+            learning_rate=learning_rate,
             buffer_size=0,
             learning_starts=learning_starts,
             batch_size=batch_size,
-            tau=0.005,
+            tau=0.003,
             gamma=0.99,
             train_freq=5,
-            gradient_steps=1,
+            gradient_steps=2,
             ent_coef="auto",
-            target_update_interval=10,
+            target_update_interval=5,
             policy_kwargs=policy_kwargs,
             verbose=1,
             tensorboard_log=log_dir,
