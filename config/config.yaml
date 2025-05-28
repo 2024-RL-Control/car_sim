@@ -4,7 +4,7 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
-  train_max_steps: 5000000        # maximum steps for training
+  train_max_steps: 2000000
   train_max_episode_steps: 5000   # maximum steps per episode
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment
@@ -14,8 +14,8 @@ simulation:
     y_min: -300
     y_max: 300
   obstacle:
-    num_static_obstacles: 30
-    num_dynamic_obstacles: 30
+    num_static_obstacles: 0
+    num_dynamic_obstacles: 0
     buffer_distance: 10  # [m]
     boundary:            # [m]
       x_min: -280
@@ -36,14 +36,14 @@ simulation:
     min_speed: 5
     max_speed: 50
   rewards:
-    goal_reached_reward: 200.0        # reward for reaching the goal
-    collision_penalty: -150.0         # penalty for collision
-    outside_road_penalty: -150.0      # penalty for going outside the road
-    distance_factor: 0.01             # reward factor for reducing distance to goal
-    orientation_factor: 0.001         # reward factor for correct orientation towards goal
-    lane_keeping_factor: 0.004        # reward factor for staying in the lane
-    speed_factor: 0.004               # reward factor for maintaining/reaching target speed
-    time_penalty: -0.001              # penalty factor for each step taken
+    goal_reached_reward: 100.0        # reward for reaching the goal
+    collision_penalty: -50.0         # penalty for collision
+    outside_road_penalty: -50.0      # penalty for going outside the road
+    distance_factor: 0.08             # reward factor for reducing distance to goal
+    orientation_factor: 0.01         # reward factor for correct orientation towards goal
+    lane_keeping_factor: 0.03        # reward factor for staying in the lane
+    speed_factor: 0.03               # reward factor for maintaining/reaching target speed
+    time_penalty: -0.01              # penalty factor for each step taken
 
 # Visualization parameters
 visualization:
@@ -110,7 +110,6 @@ vehicle:
       angle_end: 180.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       max_range: 50.0           # 최대 감지 거리 [m]
       min_range: 0.1            # 최소 감지 거리 [m]
-      scan_rate: 10             # 스캔 주기 [Hz]
       scan_history: 0           # 스캔 히스토리 개수
 
       # 노이즈 파라미터

@@ -206,8 +206,9 @@ class CarSimulatorEnv(gym.Env):
         """
         # 프레임 시간 계산
         current_time = time.time()
-        dt = current_time - self._last_update_time
-        dt = max(min(dt, 0.1), 1e-2)  # 최소 0.01초, 최대 0.1초
+        # dt = current_time - self._last_update_time
+        # dt = max(min(dt, 0.1), 1e-2)  # 최소 0.01초, 최대 0.1초
+        dt = 0.01  # 고정된 시간 간격 (10ms)
 
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()

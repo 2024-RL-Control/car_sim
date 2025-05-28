@@ -6,6 +6,7 @@ import random
 from math import pi
 from src.env.env import CarSimulatorEnv
 import os
+import sys
 import torch
 import time
 from stable_baselines3 import SAC
@@ -638,10 +639,10 @@ class BasicRLDrivingEnv(gym.Env):
         env = DummyVecEnv([lambda: env])
 
         # SAC 하이퍼파라미터 설정
-        buffer_size = 1000000
+        buffer_size = 500000
         learning_rate = 3e-3
         batch_size = 256
-        learning_starts = 10000
+        learning_starts = 1000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의
@@ -735,7 +736,13 @@ class BasicRLDrivingEnv(gym.Env):
                 torch.cuda.empty_cache()
 
         except Exception as e:
+            exc_type, exc_obj, exc_tb = sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
             print(f"\n\n학습 중단됨: {e}")
+            print(f'file name: {str(fname)}')
+            print(f'error type: {str(exc_type)}')
+            print(f'error msg: {str(e)}')
+            print(f'line number: {str(exc_tb.tb_lineno)}')
             # 오류 발생시에도 현재까지 학습된 모델 저장 시도
             try:
                 model.save(os.path.join(models_dir, "sac_interrupted"))

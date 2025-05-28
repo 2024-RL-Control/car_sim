@@ -183,8 +183,6 @@ class LidarSensor(BaseSensor):
         self.angle_end = radians(sensor_config.get('angle_end', 180.0))
         self.max_range = float(sensor_config.get('max_range', 50.0))
         self.min_range = float(sensor_config.get('min_range', 0.1))
-        self.scan_rate = int(sensor_config.get('scan_rate', 10))
-        self.scan_interval = 1.0 / self.scan_rate if self.scan_rate > 0 else 0
 
         # 노이즈 파라미터 설정
         self.noise_params = {
@@ -251,19 +249,15 @@ class LidarSensor(BaseSensor):
         Returns:
             측정이 수행되었는지 여부 (Boolean)
         """
-        # 스캔 주기에 따른 업데이트 수행
-        if time_elapsed - self.last_scan_time >= self.scan_interval:
-            # 스캔 수행
-            self.current_data = self._perform_scan(time_elapsed, objects)
+        # 스캔 수행
+        self.current_data = self._perform_scan(time_elapsed, objects)
 
-            # 스캔 결과 히스토리 저장
-            if self.scan_history is not None:
-                self.scan_history.append(self.current_data)
+        # 스캔 결과 히스토리 저장
+        if self.scan_history is not None:
+            self.scan_history.append(self.current_data)
 
-            self.last_scan_time = time_elapsed
-            return True
-
-        return False
+        self.last_scan_time = time_elapsed
+        return True
 
     def _perform_scan(self, timestamp, objects):
         """
