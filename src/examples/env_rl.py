@@ -200,7 +200,7 @@ class MultiVehicleAlgorithm(SAC):
             actions = np.zeros((self.num_vehicles, 3))
             if active_mask.any():
                 random_actions = np.array([self.rl_env.env.action_space.sample() for _ in range(active_mask.sum())])
-                # random_actions[:, 1] = 0.0  # 브레이크 제거
+                random_actions[:, 1] = random_actions[:, 1] / 2
                 actions[active_mask] = random_actions
         else:
             with torch.no_grad():
@@ -627,8 +627,8 @@ class BasicRLDrivingEnv(gym.Env):
         자율주행 에이전트 학습 함수 (learn() 메소드 사용)
         """
         # 로그 및 모델 저장 경로 설정
-        models_dir = "./logs/model"
-        log_dir = "./logs/train"
+        models_dir = "./logs/checkpoints"
+        log_dir = "./logs/log"
 
         os.makedirs(models_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
@@ -661,7 +661,7 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 신경망 아키텍처 설정
         policy_kwargs = dict(
-            net_arch=dict(pi=[128, 256, 256, 256, 64], qf=[128, 256, 256, 256, 64, 32]),
+            net_arch=dict(pi=[128, 256, 256, 64, 32], qf=[128, 256, 256, 64, 32]),
             activation_fn=torch.nn.LeakyReLU
         )
 

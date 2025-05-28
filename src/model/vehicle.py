@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List
 from collections import deque
-from math import degrees, pi, cos, sin, log, e
+from math import degrees, pi, cos, sin, log, e, exp
 import pygame
 import numpy as np
 import time
@@ -153,7 +153,8 @@ class VehicleState:
 
     def scale_distance(self, distance):
         """거리 정규화"""
-        return 1.0 / log(e + distance/10)
+        return 1.0 / log(e + distance/30)
+        # return exp(-(distance))
 
     def scale_frenet_d(self, d):
         """frenet_d 값의 연속적 스케일링 (tanh 사용)"""

@@ -121,7 +121,7 @@ def manual_control_with_goal():
 
     # 초기 목적지 생성 (각 차량마다)
     for i in range(env.num_vehicles):
-        create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
+        create_random_goal(env, i, min_distance=550.0, max_distance=900.0)
 
     running = True
     while running:
@@ -148,7 +148,7 @@ def manual_control_with_goal():
             env.reset()
             # 초기 목적지 다시 생성
             for i in range(env.num_vehicles):
-                create_random_goal(env, i, min_distance=50.0, max_distance=100.0)
+                create_random_goal(env, i, min_distance=550.0, max_distance=900.0)
 
     # 환경 종료
     env.close()

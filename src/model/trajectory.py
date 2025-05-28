@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import numpy as np
-from math import cos, sin, atan, pi, log, e
+from math import cos, sin, atan, pi, log, e, exp
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
@@ -32,7 +32,8 @@ class TrajectoryData:
 
     def _scale_distance(self, distance):
         """거리 정규화"""
-        return 1.0 / log(e + distance/5)
+        # return 1.0 / log(e + distance/5)
+        return 1 - exp(-(distance / 30.0))
 
     def _scale_long(self, vel_long, acc_long, max_vel_long, min_vel_long, max_acc_long, min_acc_long):
         """종방향 속도 정규화"""
