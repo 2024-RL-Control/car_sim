@@ -200,7 +200,8 @@ class MultiVehicleAlgorithm(SAC):
             actions = np.zeros((self.num_vehicles, 3))
             if active_mask.any():
                 random_actions = np.array([self.rl_env.env.action_space.sample() for _ in range(active_mask.sum())])
-                random_actions[:, 1] = random_actions[:, 1] / 2
+                # random_actions[:, 1] = random_actions[:, 1] / 3
+                # random_actions[:, 2] = random_actions[:, 2] / 3
                 actions[active_mask] = random_actions
         else:
             with torch.no_grad():
@@ -642,7 +643,7 @@ class BasicRLDrivingEnv(gym.Env):
         buffer_size = 500000
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 30000
+        learning_starts = 10000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의

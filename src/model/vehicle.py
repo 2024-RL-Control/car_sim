@@ -41,7 +41,8 @@ class VehicleState:
     target_y: float = 0.0         # 목표 Y 좌표
     target_yaw: float = 0.0       # 목표 요각
     initial_distance_to_target: float = 0.0  # 초기 목표까지의 거리
-    distance_to_target: float = 0.0  # 남은 목표까지의 거리
+    prev_distance_to_target: float = 0.0  # 이전 목표까지의 거리
+    curr_distance_to_target: float = 0.0  # 남은 목표까지의 거리
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
 
     # frenet 좌표
@@ -88,7 +89,8 @@ class VehicleState:
         self.target_y = 0.0
         self.target_yaw = 0.0
         self.initial_distance_to_target = 0.0
-        self.distance_to_target = 0.0
+        self.prev_distance_to_target = 0.0
+        self.curr_distance_to_target = 0.0
         self.yaw_diff_to_target = 0.0
 
         self.frenet_d = None
@@ -145,9 +147,13 @@ class VehicleState:
         """거리 정규화, -1.0 ~ 1.0 범위로 목표 도달 진행률 반환"""
         if self.initial_distance_to_target == 0:
             return 0.0
-        raw = (self.initial_distance_to_target - self.distance_to_target) / self.initial_distance_to_target
+        raw = (self.initial_distance_to_target - self.curr_distance_to_target) / self.initial_distance_to_target
         progress = max(-1.0, min(1.0, raw))  # -1.0 ~ 1.0 범위로 제한
         return progress
+
+    def get_delta_progress(self):
+        """목표 도달 진행률 변화량 계산"""
+        return self.prev_distance_to_target - self.curr_distance_to_target
 
     def scale_frenet_d(self, d):
         """frenet_d 값의 연속적 스케일링 (tanh 사용)"""
@@ -565,7 +571,7 @@ class Vehicle:
         self.state.target_y = y
         self.state.target_yaw = yaw
         self._update_target_info()
-        self.state.initial_distance_to_target = self.state.distance_to_target
+        self.state.initial_distance_to_target = self.state.curr_distance_to_target
 
     def _check_target_reached(self, position_tolerance=None, yaw_tolerance=None):
         """
@@ -588,7 +594,7 @@ class Vehicle:
         self._update_target_info()
 
         # 거리 차이 계산
-        distance = self.state.distance_to_target
+        distance = self.state.curr_distance_to_target
         position_reached = distance <= position_tolerance
 
         # 방향 차이 계산, 목표 방향과 현재 방향의 차이 (절대값 -π ~ π 범위로)
@@ -601,9 +607,10 @@ class Vehicle:
 
     def _update_target_info(self):
         """목표 위치까지의 거리, 각도도 계산 및 업데이트"""
+        self.state.prev_distance_to_target = self.state.curr_distance_to_target
         dx = self.state.x - self.state.target_x
         dy = self.state.y - self.state.target_y
-        self.state.distance_to_target = (dx**2 + dy**2) ** 0.5
+        self.state.curr_distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
 
     def draw(self, screen, world_to_screen_func, is_active=False, debug=False):

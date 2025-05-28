@@ -486,7 +486,12 @@ class CarSimulatorEnv(gym.Env):
         speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
 
-        # 시간 경과 페널티
-        # reward += rewards['time_penalty']
+        # 정지 페널티
+        # delta = state.get_delta_progress()
+        stop = state.vel_long < 0.01  # 속도가 0.1 이하인 경우 정지로 간주, 후진 포함
+        if stop:
+            reward += rewards['stop_penalty']
 
+        # 시간 경과 페널티
+        reward += rewards['time_penalty']
         return reward
