@@ -46,6 +46,9 @@ if __name__ == "__main__":
                 print("\n=== Profiling Results (Top 30) ===")
                 print(s.getvalue())
                 print("=== End of Profiling ===\n")
+        elif selected_option == 'basic_rl_testing':
+            env = BasicRLDrivingEnv()
+            env.test()
 
         elif selected_option == 'quit':
             running = False

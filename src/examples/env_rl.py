@@ -189,10 +189,7 @@ class MultiVehicleAlgorithm(SAC):
                 if event.key == pygame.K_ESCAPE:
                     return False
 
-        # 2) 렌더링
-        self.rl_env.render()
-
-        # 3) 행동 결정
+        # 2) 행동 결정
         observations = self.prev_observations
         active_mask = np.array(self.rl_env.active_agents)
         if self._n_updates < self.learning_starts:
@@ -216,11 +213,14 @@ class MultiVehicleAlgorithm(SAC):
                     # NumPy 배열로 변환
                     actions[active_mask] = actions_tensor.cpu().numpy()
 
-        # 4) 환경 스텝 & 보상 누적
+        # 3) 환경 스텝 & 보상 누적
         next_observations, reward, done, _, info = self.rl_env.step(actions)
         self.total_reward += reward
         self.episode_steps += 1
         self.num_timesteps += 1
+
+        # 4) 렌더링
+        self.rl_env.render()
 
         # 5) 활성화된 에이전트만 경험 저장
         active_idx = np.where(active_mask)[0]
@@ -754,3 +754,61 @@ class BasicRLDrivingEnv(gym.Env):
         finally:
             # 환경 종료
             self.close()
+
+    def test(self):
+        """
+        학습된 모델을 테스트하는 함수
+        """
+        # 모델 경로 설정
+        model_path = "./logs/checkpoints/sac_final.zip"
+        if not os.path.exists(model_path):
+            print(f"모델 파일이 존재하지 않습니다: {model_path}")
+            return
+
+        max_episode = self.env.config['simulation']['eval_episode']
+
+        dummy_env = DummyEnv(self)
+        env = Monitor(dummy_env)
+        env = DummyVecEnv([lambda: env])
+
+        # 모델 로드
+        model = MultiVehicleAlgorithm.load(
+            model_path,
+            env=env,
+            device=self.device
+        )
+
+        # 테스트 루프
+        for ep in range(1, max_episode + 1):
+            observations, _ = self.reset()
+            done = False
+            total_reward = 0.0
+            steps = 0
+
+            while not done:
+                # 키보드 입력 수집 (ESC 등)
+                self.handle_keyboard_input()
+
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            return False
+
+                # 모델 예측
+                actions, _ = model.predict(observations, deterministic=True)
+
+                # 한 스텝 진행
+                observations, reward, done, truncated, info = self.step(actions)
+                total_reward += reward
+                steps += 1
+
+                # 화면 갱신
+                self.render()
+
+            # 한 에피소드 결과 출력
+            print(f"[Test] Episode {ep}/{max_episode} — Steps: {steps}, Total Reward: {total_reward:.2f}")
+
+        # 시뮬레이터 종료
+        self.close()

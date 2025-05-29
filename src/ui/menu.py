@@ -21,7 +21,8 @@ class MainMenu:
             "2. Obstacle Driving",
             "3. Goal Driving",
             "4. Basic RL Driving Training",
-            "5. Quit"
+            "5. Basic RL Driving Testing",
+            "6. Quit"
         ]
 
     def show_main_menu(self):
@@ -72,7 +73,11 @@ class MainMenu:
                         # 자율주행 학습 모드
                         pygame.quit()
                         return 'basic_rl_training'
-                    elif event.key == pygame.K_5 or event.key == pygame.K_ESCAPE:
+                    elif event.key == pygame.K_5:
+                        # 자율주행 테스트 모드
+                        pygame.quit()
+                        return 'basic_rl_testing'
+                    elif event.key == pygame.K_6 or event.key == pygame.K_ESCAPE:
                         # 종료
                         running = False
                         return 'quit'
