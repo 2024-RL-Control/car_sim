@@ -643,7 +643,7 @@ class BasicRLDrivingEnv(gym.Env):
         buffer_size = 500000
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 10000
+        learning_starts = 20000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의
@@ -662,8 +662,8 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 신경망 아키텍처 설정
         policy_kwargs = dict(
-            net_arch=dict(pi=[128, 256, 256, 64], qf=[128, 256, 256, 64]),
-            activation_fn=torch.nn.ReLU
+            net_arch=dict(pi=[256, 256, 128], qf=[256, 256, 128]),
+            activation_fn=torch.nn.GELU
         )
 
         # 커스텀 SAC 모델 생성
@@ -676,8 +676,8 @@ class BasicRLDrivingEnv(gym.Env):
             batch_size=batch_size,
             tau=0.003,
             gamma=0.99,
-            train_freq=5,
-            gradient_steps=2,
+            train_freq=3,
+            gradient_steps=1,
             ent_coef="auto",
             target_update_interval=5,
             policy_kwargs=policy_kwargs,
