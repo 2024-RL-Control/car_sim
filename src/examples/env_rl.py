@@ -640,10 +640,10 @@ class BasicRLDrivingEnv(gym.Env):
         env = DummyVecEnv([lambda: env])
 
         # SAC 하이퍼파라미터 설정
-        buffer_size = 500000
+        buffer_size = 1000000
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 20000
+        learning_starts = 50000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의
@@ -662,7 +662,7 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 신경망 아키텍처 설정
         policy_kwargs = dict(
-            net_arch=dict(pi=[256, 256, 128], qf=[256, 256, 128]),
+            net_arch=dict(pi=[512, 512, 256], qf=[512, 512, 256]),
             activation_fn=torch.nn.GELU
         )
 
