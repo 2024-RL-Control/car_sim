@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
-import pygame
-import gymnasium as gym
-import numpy as np
-import random
-from math import pi
-from src.env.env import CarSimulatorEnv
 import os
 import sys
-import torch
 import time
-from stable_baselines3 import SAC
+import torch
+import pygame
+import random
+from math import pi
+import numpy as np
+import gymnasium as gym
+from src.env.env import CarSimulatorEnv
+from ..model.sb3 import MultiVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
-from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback, CallbackList, BaseCallback
+from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.vec_env import DummyVecEnv
 
 class DummyEnv(gym.Env):
@@ -30,238 +30,6 @@ class DummyEnv(gym.Env):
         multi_actions = np.tile(actions, (self.rl_env.num_vehicles, 1))
         observations, reward, done, truncated, info = self.rl_env.step(multi_actions)
         return observations[0], reward, done, truncated, info
-
-
-class CleanCheckpointCallback(CheckpointCallback):
-    """
-    커스텀 체크포인트 콜백: 지정된 주기로 모델을 저장하고, 오래된 체크포인트를 삭제합니다.
-    """
-    def __init__(self, save_freq, save_path, name_prefix='model', max_checkpoints=5, **kwargs):
-        super().__init__(save_freq=save_freq, save_path=save_path, name_prefix=name_prefix, **kwargs)
-        self.max_checkpoints = max_checkpoints
-
-    def _on_step(self):
-        super_result = super()._on_step()
-
-        # 현재 체크포인트 저장 후 초과된 것들 삭제
-        if self.num_timesteps % self.save_freq == 0:
-            files = sorted([f for f in os.listdir(self.save_path)
-                            if f.startswith(self.name_prefix) and f.endswith('.zip')])
-            # 오래된 체크포인트 삭제
-            for old in files[:-self.max_checkpoints]:
-                try: os.remove(os.path.join(self.save_path, old))
-                except: pass
-
-        return super_result
-
-class CustomLoggingCallback(BaseCallback):
-    """
-    커스텀 로깅 콜백: 학습률, GPU 메모리 사용량, 에피소드 보상 등을 기록합니다.
-    """
-    def __init__(self, verbose=0):
-        super().__init__(verbose)
-        self.training_start = time.time()
-        self.episode_rewards = []
-        self.episode_lengths = []
-        self.learning_rates = []
-        self.gpu_memory_usage = []
-
-    def _on_step(self):
-        # GPU 메모리 사용량 추적 (가능한 경우)
-        if torch.cuda.is_available():
-            mem_allocated = torch.cuda.memory_allocated() / (1024 ** 3)  # GB 단위
-            self.gpu_memory_usage.append(mem_allocated)
-
-        # 현재 학습률 추적
-        if hasattr(self.model, 'learning_rate'):
-            current_lr = self.model.learning_rate
-            self.learning_rates.append(current_lr)
-
-        # 추가 로그 기록 (1000스텝마다)
-        if self.n_calls % 1000 == 0:
-            elapsed_time = time.time() - self.training_start
-            steps_per_second = self.n_calls / elapsed_time
-            est_remaining_time = (self.locals.get('total_timesteps', 0) - self.n_calls) / steps_per_second if steps_per_second > 0 else 0
-
-            # 학습 진행상황 상세 로깅
-            self.logger.record("time/steps_per_second", steps_per_second)
-            self.logger.record("time/est_remaining_hours", est_remaining_time / 3600)
-
-            if torch.cuda.is_available():
-                self.logger.record("resources/gpu_memory_gb", mem_allocated)
-
-            # 메모리 상태 확인 및 청소 (가능한 경우)
-            if torch.cuda.is_available() and mem_allocated > 3.0:  # 3GB 이상 사용 시 메모리 청소
-                torch.cuda.empty_cache()
-                print("\nGPU 메모리 캐시 정리 완료")
-
-        return True
-
-class MultiVehicleAlgorithm(SAC):
-    """
-    다중 차량을 위한 커스텀 강화학습 알고리즘 클래스
-    """
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # 추가 속성 설정
-        self.rl_env = None
-        self.num_vehicles = None
-        self.prev_observations = None
-        self.total_reward = 0
-        self.episode_steps = 0
-
-    def set_env_info(self, rl_env):
-        """
-        BasicRLDrivingEnv 정보 설정
-        """
-        self.rl_env = rl_env
-        self.num_vehicles = rl_env.num_vehicles
-
-    def _excluded_save_params(self) -> list[str]:
-        # 제외된 저장 파라미터 목록
-        return super()._excluded_save_params() + ["rl_env"]
-
-    def _reset(self):
-        # 환경 리셋 (성공할 때까지 무한 시도)
-        reset_success = False
-        reset_attempts = 0
-
-        while not reset_success:
-            try:
-                prev_observations, _ = self.rl_env.reset()
-                reset_success = True
-                self.prev_observations = prev_observations
-                self.total_reward = 0
-                self.episode_steps = 0
-            except Exception as e:
-                reset_attempts += 1
-                if "Failed to find rrt-dubins path" in str(e):
-                    continue
-                else:
-                    # 다른 예외는 다시 발생시키기
-                    raise
-
-    def learn(
-        self,
-        total_timesteps: int,
-        callback = None,
-        log_interval: int = 4,
-        tb_log_name: str = "run",
-        reset_num_timesteps: bool = True,
-        progress_bar: bool = False,
-    ):
-        """
-        다중 차량을 위한 학습 메소드 오버라이드
-        """
-        total_timesteps, callback = self._setup_learn(
-            total_timesteps,
-            callback,
-            reset_num_timesteps,
-            tb_log_name,
-            progress_bar,
-        )
-
-        callback.on_training_start(locals(), globals())
-
-        # 환경 초기화
-        self._reset()
-
-        while self.num_timesteps < total_timesteps:
-            continue_training = self._custom_rollout_step(callback)
-            if not continue_training:
-                break
-
-        callback.on_training_end()
-
-        return self
-
-    def _custom_rollout_step(self, callback) -> bool:
-        """
-        한 스텝 진행하고 경험 수집
-        """
-        # 1) 키보드 입력 및 이벤트 처리
-        self.rl_env.handle_keyboard_input()
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                return False
-            elif event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_ESCAPE:
-                    return False
-
-        # 2) 행동 결정
-        observations = self.prev_observations
-        active_mask = np.array(self.rl_env.active_agents)
-        if self._n_updates < self.learning_starts:
-            # 랜덤 행동 (벡터화)
-            actions = np.zeros((self.num_vehicles, 3))
-            if active_mask.any():
-                random_actions = np.array([self.rl_env.env.action_space.sample() for _ in range(active_mask.sum())])
-                # random_actions[:, 1] = random_actions[:, 1] / 3
-                # random_actions[:, 2] = random_actions[:, 2] / 3
-                actions[active_mask] = random_actions
-        else:
-            with torch.no_grad():
-                # 활성화된 에이전트만 행동 예측 (벡터화)
-                actions = np.zeros((self.num_vehicles, 3))
-                if active_mask.any():
-                    # 활성화된 에이전트의 관측값만 선택
-                    active_obs = observations[active_mask]
-                    # 배치로 한번에 예측
-                    active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
-                    actions_tensor, _ = self.policy.actor.action_log_prob(active_obs_tensor)
-                    # NumPy 배열로 변환
-                    actions[active_mask] = actions_tensor.cpu().numpy()
-
-        # 3) 환경 스텝 & 보상 누적
-        next_observations, reward, done, _, info = self.rl_env.step(actions)
-        self.total_reward += reward
-        self.episode_steps += 1
-        self.num_timesteps += 1
-
-        # 4) 렌더링
-        self.rl_env.render()
-
-        # 5) 활성화된 에이전트만 경험 저장
-        active_idx = np.where(active_mask)[0]
-        for idx in active_idx:
-            self.replay_buffer.add(
-                obs=self.prev_observations[idx],
-                action=actions[idx],
-                reward=info['rewards'][idx],
-                next_obs=next_observations[idx],
-                done=done,
-                infos={"terminal_observation": next_observations[idx] if done else None}
-            )
-
-        # 6) 콜백 업데이트 및 종료 체크
-        callback.update_locals(locals())
-        if not callback.on_step():
-            return False
-
-        # 7) 학습 트리거
-        if self.num_timesteps > self.learning_starts:
-            self.train(batch_size=self.batch_size, gradient_steps=self.gradient_steps)
-
-        # 8) 에피소드 종료 시 처리
-        if done:
-            # 로깅
-            print(f"Episode {self.rl_env.episode_count}, "
-                  f"Steps: {self.episode_steps}, "
-                  f"Total Reward: {self.total_reward:.2f}")
-
-            # 텐서보드 로깅
-            self.logger.record("train/episode_reward", self.total_reward)
-            self.logger.record("train/episode_length", self.episode_steps)
-            self.logger.record("train/active_vehicles", sum(self.rl_env.active_agents))
-            self.logger.dump(self.num_timesteps)
-
-            # 환경 초기화
-            self._reset()
-        else:
-            # 관측값 업데이트
-            self.prev_observations = next_observations
-        return True
 
 class BasicRLDrivingEnv(gym.Env):
     """
@@ -640,10 +408,10 @@ class BasicRLDrivingEnv(gym.Env):
         env = DummyVecEnv([lambda: env])
 
         # SAC 하이퍼파라미터 설정
-        buffer_size = 1000000
+        buffer_size = self.max_step // 5
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 50000
+        learning_starts = 1000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의
@@ -661,26 +429,34 @@ class BasicRLDrivingEnv(gym.Env):
         )
 
         # 신경망 아키텍처 설정
-        policy_kwargs = dict(
-            net_arch=dict(pi=[512, 512, 256], qf=[512, 512, 256]),
-            activation_fn=torch.nn.GELU
-        )
+        policy_kwargs = {
+            # 1) 기본 MLP-extractor 완전 비활성화
+            "net_arch": [],
+            "activation_fn": torch.nn.GELU,  # mu/q 헤드 내부 활성화
+
+            # 2) extractor 클래스 지정
+            "features_extractor_class": CustomFeatureExtractor,
+            "features_extractor_kwargs": {
+                "net_arch": [256, 512, 512, 512, 256, 128, 64]
+            },
+        }
 
         # 커스텀 SAC 모델 생성
         model = MultiVehicleAlgorithm(
             "MlpPolicy",
             env,
             learning_rate=learning_rate,
+            policy_kwargs=policy_kwargs,
             buffer_size=0,
             learning_starts=learning_starts,
             batch_size=batch_size,
             tau=0.003,
-            gamma=0.99,
+            gamma=0.995,
+            ent_coef="auto",
+            target_entropy = -1.5,
             train_freq=3,
             gradient_steps=1,
-            ent_coef="auto",
-            target_update_interval=5,
-            policy_kwargs=policy_kwargs,
+            target_update_interval=12,
             verbose=1,
             tensorboard_log=log_dir,
             device=self.device
@@ -694,6 +470,9 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 로거 설정
         model.set_logger(configure(log_dir, ["stdout", "csv", "tensorboard"]))
+
+        # 모델 출력
+        # print(model.policy)
 
         # 체크포인트 콜백 설정
         clean_checkpoint_callback = CleanCheckpointCallback(
@@ -777,6 +556,7 @@ class BasicRLDrivingEnv(gym.Env):
             env=env,
             device=self.device
         )
+        model.policy.eval()
 
         # 테스트 루프
         for ep in range(1, max_episode + 1):

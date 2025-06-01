@@ -378,15 +378,16 @@ class CarSimulatorEnv(gym.Env):
             관측값 (numpy 배열)
         """
         state = vehicle.get_state()
+        progress = state.get_progress()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
-        progress = state.get_progress()
         cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d)
 
         # 기본 차량 상태 (13, )
         obs = np.array([
+            progress,               # -1 ~ 1
             state.steer,            # -1 ~ 1
             state.throttle_engine,  # 0 ~ 1
             state.throttle_brake,   # 0 ~ 1
@@ -396,7 +397,6 @@ class CarSimulatorEnv(gym.Env):
             scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
             scale_acc_lat,          # -1 ~ 1
-            progress,               # -1 ~ 1
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
@@ -469,7 +469,7 @@ class CarSimulatorEnv(gym.Env):
         progress_reward = progress * rewards['progress_factor']
         reward += progress_reward
 
-        # # --- 주행 안정성 보상 ---
+        # --- 주행 안정성 보상 ---
 
         # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
         frenet_d_norm = state.scale_frenet_d(state.frenet_d) # np.tanh(d/10)로 정규화 [-1 ~ 1]
@@ -487,11 +487,11 @@ class CarSimulatorEnv(gym.Env):
         reward += speed_reward
 
         # 정지 페널티
-        # delta = state.get_delta_progress()
-        stop = state.vel_long < 0.01  # 속도가 0.1 이하인 경우 정지로 간주, 후진 포함
+        stop = state.vel_long < 0.1  # 속도가 0.1 이하인 경우 정지로 간주, 후진 포함
         if stop:
-            reward += rewards['stop_penalty']
+            delta = state.get_delta_progress()
+            if delta < 0.01:
+                reward += rewards['stop_penalty']
 
-        # 시간 경과 페널티
-        reward += rewards['time_penalty']
+        # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_reward}")
         return reward
