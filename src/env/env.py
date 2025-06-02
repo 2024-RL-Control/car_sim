@@ -304,7 +304,7 @@ class CarSimulatorEnv(gym.Env):
         """환경 종료"""
         pygame.quit()
 
-    def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
+    def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0), mode='plan'):
         """
         차량에 목적지 추가
 
@@ -322,12 +322,12 @@ class CarSimulatorEnv(gym.Env):
         goal_id = self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
         if goal_id is not None:
             vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
-            road = self.add_road(vehicle, x, y, yaw)
+            road = self.add_road(vehicle, x, y, yaw, mode=mode)
             return road
         else:
             return goal_id
 
-    def add_road(self, vehicle, x, y, yaw):
+    def add_road(self, vehicle, x, y, yaw, mode='plan'):
         """
         차량에 도로 추가
 
@@ -355,7 +355,7 @@ class CarSimulatorEnv(gym.Env):
                 raise ValueError("위치가 다른 차량과 충돌합니다")
             objects.extend(body)
 
-        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
+        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects, mode=mode)
 
     def _get_obs(self):
         """
@@ -402,14 +402,15 @@ class CarSimulatorEnv(gym.Env):
             frenet_d,               # -1 ~ 1
         ], dtype=np.float32)
 
-        # (36, ), 0 ~ 1, 정규화된 데이터
-        lidar_data = state.get_lidar_data()
         # (6, 7), (norm_distance, cos_diff, sin_diff, scale_vel_long, scale_acc_long, scale_vel_lat, scale_acc_lat)
         trajectory_data = state.get_trajectory_data(self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long, self.max_vel_lat, self.max_acc_lat)
         # if len(trajectory_data) !=0:
         #     print(trajectory_data[0][0], trajectory_data[1][0], trajectory_data[2][0])
 
-        obs = np.concatenate((obs, lidar_data, trajectory_data.flatten())) # (91, )
+        # (36, ), 0 ~ 1, 정규화된 데이터
+        lidar_data = state.get_lidar_data()
+
+        obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (91, )
         return obs
 
     def _calculate_rewards(self, collisions, outside_roads, reached_targets):

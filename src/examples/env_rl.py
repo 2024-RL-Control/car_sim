@@ -9,7 +9,7 @@ from math import pi
 import numpy as np
 import gymnasium as gym
 from src.env.env import CarSimulatorEnv
-from ..model.sb3 import MultiVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor
+from ..model.sb3 import MultiVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor, EnhancedFeatureExtractor
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
@@ -155,7 +155,7 @@ class BasicRLDrivingEnv(gym.Env):
         xs = np.random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'], size=n_static)
         ys = np.random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'], size=n_static)
         yaws = np.random.uniform(-pi/2, pi/2, size=n_static)
-        sizes = np.random.uniform(1.0, 10.0, size=n_static)
+        sizes = np.random.uniform(1.0, 5.0, size=n_static)
         types = np.random.choice(['circle', 'square', 'rectangle'], size=n_static)
         static_color = (100, 100, 200)  # 정적 장애물 색상
 
@@ -165,7 +165,7 @@ class BasicRLDrivingEnv(gym.Env):
             elif t == 'square':
                 obstacle_manager.add_square_obstacle(None, x, y, yaw, 0, 0, sz, static_color)
             else:  # rectangle
-                width = random.uniform(1.5, 10.0)
+                width = random.uniform(1.5, 5.0)
                 height = random.uniform(1.0, 3.5)
                 obstacle_manager.add_rectangle_obstacle(None, x, y, yaw, 0, 0, width, height, static_color)
 
@@ -176,7 +176,7 @@ class BasicRLDrivingEnv(gym.Env):
         yaws = np.random.uniform(-pi/2, pi/2, size=n_dynamic)
         yaw_rates = np.random.uniform(-0.4, 0.4, size=n_dynamic)  # 회전 속도
         speeds = np.random.uniform(1.0, 10.0, size=n_dynamic)
-        sizes = np.random.uniform(1.0, 10.0, size=n_dynamic)
+        sizes = np.random.uniform(1.0, 5.0, size=n_dynamic)
         types = np.random.choice(['circle', 'square'], size=n_dynamic)
         dynamic_color = (200, 100, 100)  # 동적 장애물 색상
 
@@ -411,7 +411,7 @@ class BasicRLDrivingEnv(gym.Env):
         buffer_size = self.max_step // 5
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 1000
+        learning_starts = 100000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의
@@ -435,10 +435,11 @@ class BasicRLDrivingEnv(gym.Env):
             "activation_fn": torch.nn.GELU,  # mu/q 헤드 내부 활성화
 
             # 2) extractor 클래스 지정
-            "features_extractor_class": CustomFeatureExtractor,
+            "features_extractor_class": EnhancedFeatureExtractor,
             "features_extractor_kwargs": {
-                "net_arch": [256, 512, 512, 512, 256, 128, 64]
+                "net_arch": [256, 256, 256, 256, 128, 64]
             },
+            "share_features_extractor": True,
         }
 
         # 커스텀 SAC 모델 생성
@@ -452,8 +453,7 @@ class BasicRLDrivingEnv(gym.Env):
             batch_size=batch_size,
             tau=0.003,
             gamma=0.995,
-            ent_coef="auto",
-            target_entropy = -1.5,
+            ent_coef=0.1,
             train_freq=3,
             gradient_steps=1,
             target_update_interval=12,
@@ -472,7 +472,7 @@ class BasicRLDrivingEnv(gym.Env):
         model.set_logger(configure(log_dir, ["stdout", "csv", "tensorboard"]))
 
         # 모델 출력
-        # print(model.policy)
+        print(model.policy)
 
         # 체크포인트 콜백 설정
         clean_checkpoint_callback = CleanCheckpointCallback(

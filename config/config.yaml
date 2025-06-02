@@ -9,19 +9,19 @@ simulation:
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment
   boundary:         # [m]
-    x_min: -150
-    x_max: 150
-    y_min: -150
-    y_max: 150
+    x_min: -100
+    x_max: 100
+    y_min: -100
+    y_max: 100
   obstacle:
-    num_static_obstacles: 30
-    num_dynamic_obstacles: 10
+    num_static_obstacles: 5
+    num_dynamic_obstacles: 5
     buffer_distance: 10  # [m]
     boundary:            # [m]
-      x_min: -130
-      x_max: 130
-      y_min: -130
-      y_max: 130
+      x_min: -80
+      x_max: 80
+      y_min: -80
+      y_max: 80
   path_planning:
     max_iterations: 1000          # maximum iterations for path planning
     base_step_size: 0.1           # Base for variable RRT step [m]
@@ -36,13 +36,13 @@ simulation:
     min_speed: 5
     max_speed: 50
   rewards:
-    goal_reached_reward: 200.0        # reward for reaching the goal
-    collision_penalty: -150.0          # penalty for collision
-    outside_road_penalty: -150.0       # penalty for going outside the road
-    progress_factor: 0.1              # reward factor for reducing distance to goal
-    lane_keeping_factor: 0.05          # reward factor for staying in the lane
-    speed_factor: 0.1                 # reward factor for maintaining/reaching target speed
-    stop_penalty: -0.1                # penalty for stopping
+    goal_reached_reward: 100.0        # reward for reaching the goal
+    collision_penalty: -50.0          # penalty for collision
+    outside_road_penalty: -50.0       # penalty for going outside the road
+    progress_factor: 1.0              # reward factor for reducing distance to goal
+    lane_keeping_factor: 0.25          # reward factor for staying in the lane
+    speed_factor: 0.5                 # reward factor for maintaining/reaching target speed
+    stop_penalty: -0.25               # penalty for stopping
 
 # Visualization parameters
 visualization:
