@@ -277,9 +277,6 @@ class PPOVehicleAlgorithm(PPO):
         self.total_reward = 0.0
         self._is_new_episode = True
 
-        if hasattr(self, "rollout_buffer"):
-            self.rollout_buffer.reset()
-
     def _custom_rollout_step(self, callback: BaseCallback, n_steps: int) -> bool:
         """
         실제 rollouts를 수집하는 함수.
@@ -333,7 +330,7 @@ class PPOVehicleAlgorithm(PPO):
 
             # 3) 환경 스텝: BasicRLDrivingEnv.step(actions)
             next_observations, reward, done, _, info = self.rl_env.step(actions)
-            self.num_timesteps += active_mask.sum()    # 활성 에이전트 수만큼 timesteps 증가
+            self.num_timesteps += 1
             self.episode_steps += 1
             self.total_reward += reward
 
@@ -343,8 +340,6 @@ class PPOVehicleAlgorithm(PPO):
             # 5) 활성 에이전트마다 RolloutBuffer에 transition 추가
             active_indices = np.where(active_mask)[0]
             for idx in active_indices:
-                if self.rollout_buffer.full:
-                    return True
                 # 개별 차량(obs, action, reward, done, value, log_prob)을 rollout buffer에 저장
                 self.rollout_buffer.add(
                     obs=self.prev_observations[idx].copy(),
@@ -355,6 +350,8 @@ class PPOVehicleAlgorithm(PPO):
                     log_prob=log_probs[idx],
                 )
                 step_count += 1
+                if step_count >= n_steps:
+                    return True
 
             # 6) 내부 상태 갱신
             if self._is_new_episode:
@@ -415,6 +412,7 @@ class PPOVehicleAlgorithm(PPO):
                 break
 
             self.train()
+            self.rollout_buffer.reset()
 
         callback.on_training_end()
         return self
