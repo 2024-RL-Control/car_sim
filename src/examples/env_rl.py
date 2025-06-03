@@ -9,7 +9,7 @@ from math import pi
 import numpy as np
 import gymnasium as gym
 from src.env.env import CarSimulatorEnv
-from ..model.sb3 import SACVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor, EnhancedFeatureExtractor
+from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor, EnhancedFeatureExtractor
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
@@ -303,7 +303,9 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 차량 비활성화
         for vehicle_id in range(self.num_vehicles):
-            vehicle_done = info['dones'].get(vehicle_id, False)
+            truncated = info['truncated'].get(vehicle_id, False)
+            terminated = info['terminated'].get(vehicle_id, False)
+            vehicle_done = truncated or terminated
 
             if vehicle_done and self.active_agents[vehicle_id]:
                 self.active_agents[vehicle_id] = False
@@ -412,7 +414,7 @@ class BasicRLDrivingEnv(gym.Env):
         buffer_size = self.max_step // 5
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 500000
+        learning_starts = 100000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의
@@ -455,8 +457,8 @@ class BasicRLDrivingEnv(gym.Env):
             tau=0.003,
             gamma=0.995,
             ent_coef=0.1,
-            train_freq=3,
-            gradient_steps=1,
+            train_freq=10,
+            gradient_steps=5,
             target_update_interval=12,
             verbose=1,
             tensorboard_log=log_dir,
@@ -499,7 +501,6 @@ class BasicRLDrivingEnv(gym.Env):
             model.learn(
                 total_timesteps=self.max_step,
                 callback=callback,
-                log_interval=100,
                 progress_bar=True
             )
 
@@ -528,6 +529,126 @@ class BasicRLDrivingEnv(gym.Env):
             try:
                 model.save(os.path.join(models_dir, "sac_interrupted"))
                 model.save_replay_buffer(os.path.join(models_dir, "sac_interrupted_replay_buffer"))
+                print("중단된 모델 상태가 저장되었습니다.")
+            except Exception as save_error:
+                print(f"중단된 모델 저장 실패: {save_error}")
+        finally:
+            # 환경 종료
+            self.close()
+
+    def learn_ppo(self):
+        """
+        자율주행 에이전트 학습 함수 (learn() 메소드 사용)
+        """
+        # 로그 및 모델 저장 경로 설정
+        models_dir = "./logs/checkpoints"
+        log_dir = "./logs/log"
+
+        os.makedirs(models_dir, exist_ok=True)
+        os.makedirs(log_dir, exist_ok=True)
+
+        # Monitor와 DummyVecEnv로 환경 래핑
+        dummy_env = DummyEnv(self)
+        env = Monitor(dummy_env, log_dir)
+        env = DummyVecEnv([lambda: env])
+
+        # SAC 하이퍼파라미터 설정
+        n_steps       = 1024
+        batch_size    = 256
+        n_epochs      = 1
+        gamma         = 0.99
+        gae_lambda    = 0.95
+        clip_range    = 0.2
+        learning_rate = 3e-4
+
+        # 신경망 아키텍처 설정
+        policy_kwargs = {
+            # 1) 기본 MLP-extractor 완전 비활성화
+            "net_arch": [],
+            "activation_fn": torch.nn.GELU,  # mu/q 헤드 내부 활성화
+
+            # 2) extractor 클래스 지정
+            "features_extractor_class": CustomFeatureExtractor,
+            "features_extractor_kwargs": {
+                "net_arch": [256, 256, 256, 256, 128, 64]
+            },
+            "share_features_extractor": True,
+        }
+
+        # 커스텀 PPO 모델 생성
+        model = PPOVehicleAlgorithm(
+            policy="MlpPolicy",
+            env=env,
+            learning_rate=learning_rate,
+            n_steps=n_steps,
+            batch_size=batch_size,
+            n_epochs=n_epochs,
+            gamma=gamma,
+            gae_lambda=gae_lambda,
+            clip_range=clip_range,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            tensorboard_log=log_dir,
+            device=self.device,
+        )
+
+        # 환경 정보 설정
+        model.set_env_info(self)
+
+        # 로거 설정
+        model.set_logger(configure(log_dir, ["stdout", "csv", "tensorboard"]))
+
+        # 모델 출력
+        print(model.policy)
+
+        # 체크포인트 콜백 설정
+        clean_checkpoint_callback = CleanCheckpointCallback(
+            save_freq=10000,  # 10000스텝마다 저장
+            save_path=models_dir,
+            name_prefix="ppo",
+            max_checkpoints=10  # 최대 10개의 체크포인트만 유지
+        )
+
+        # 고급 로깅 콜백
+        logging_callback = CustomLoggingCallback()
+
+        # 콜백 목록 생성
+        callback = CallbackList([clean_checkpoint_callback, logging_callback])
+
+        # learn() 메소드로 학습 시작
+        try:
+            # 기본 컨트롤 정보 출력
+            self.print_basic_controls()
+
+            model.learn(
+                total_timesteps=self.max_step,
+                callback=callback,
+                progress_bar=True
+            )
+
+            # 학습된 모델 저장
+            model.save(os.path.join(models_dir, "ppo_final"))
+
+            # 학습 완료 후 추가 로그 저장
+            print("\n===== 학습 완료 =====")
+            print(f"총 학습 시간: {(time.time() - logging_callback.training_start)/3600:.2f} 시간")
+
+            if torch.cuda.is_available():
+                print(f"최대 GPU 메모리 사용량: {max(logging_callback.gpu_memory_usage):.2f} GB")
+                # 메모리 정리
+                torch.cuda.empty_cache()
+
+        except Exception as e:
+            exc_type, exc_obj, exc_tb = sys.exc_info()
+            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+            print(f"\n\n학습 중단됨: {e}")
+            print(f'file name: {str(fname)}')
+            print(f'error type: {str(exc_type)}')
+            print(f'error msg: {str(e)}')
+            print(f'line number: {str(exc_tb.tb_lineno)}')
+            # 오류 발생시에도 현재까지 학습된 모델 저장 시도
+            try:
+                model.save(os.path.join(models_dir, "ppo_interrupted"))
                 print("중단된 모델 상태가 저장되었습니다.")
             except Exception as save_error:
                 print(f"중단된 모델 저장 실패: {save_error}")

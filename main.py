@@ -26,7 +26,7 @@ if __name__ == "__main__":
             manual_control_with_obstacles()
         elif selected_option == 'goal':
             manual_control_with_goal()
-        elif selected_option == 'basic_rl_training':
+        elif selected_option == 'basic_rl_training(sac)':
             env = BasicRLDrivingEnv()
 
             if is_profiling:
@@ -46,6 +46,9 @@ if __name__ == "__main__":
                 print("\n=== Profiling Results (Top 30) ===")
                 print(s.getvalue())
                 print("=== End of Profiling ===\n")
+        elif selected_option == 'basic_rl_training(ppo)':
+            env = BasicRLDrivingEnv()
+            env.learn_ppo()
         elif selected_option == 'basic_rl_testing':
             env = BasicRLDrivingEnv()
             env.test()

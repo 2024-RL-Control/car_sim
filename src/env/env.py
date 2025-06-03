@@ -220,7 +220,7 @@ class CarSimulatorEnv(gym.Env):
         self._time_elapsed += dt
 
         # 차량 업데이트 및 충돌 감지
-        collisions, outside_roads, reached_targets, dones = self.vehicle_manager.step(
+        collisions, outside_roads, reached_targets, terminated, truncated = self.vehicle_manager.step(
             actions, dt, self._time_elapsed, obstacles
         )
 
@@ -233,15 +233,15 @@ class CarSimulatorEnv(gym.Env):
         if self.renderer:
             self.renderer.set_physics_time(physics_time)
 
-        # 종료 여부 결정, 모든 차량이 종료 상태라면 종료
-        done = all(dones.values())
+        # 종료 여부 결정, 모든 차량이 종료 및 중단 상태라면 종료
+        done = all(terminated.values()) or all(truncated.values())
 
         info = {
             'collisions': collisions,
             'outside_roads': outside_roads,
             'reached_targets': reached_targets,
-            'dones': dones,
-            'done': done
+            'terminated': terminated,
+            'truncated': truncated
         }
 
         # 상태 기록 (리플레이용)

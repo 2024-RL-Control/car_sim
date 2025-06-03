@@ -85,8 +85,8 @@ class SACVehicleAlgorithm(SAC):
         self.num_vehicles = None
         self.prev_observations = None
         self.prev_active_mask = None
-        self.total_reward = 0
         self.episode_steps = 0
+        self.total_reward = 0
 
     def set_env_info(self, rl_env):
         """
@@ -101,58 +101,20 @@ class SACVehicleAlgorithm(SAC):
 
     def _reset(self):
         # 환경 리셋 (성공할 때까지 무한 시도)
-        reset_success = False
-        reset_attempts = 0
+        success = False
 
-        while not reset_success:
+        while not success:
             try:
                 prev_observations, _ = self.rl_env.reset()
-                reset_success = True
-                self.prev_observations = prev_observations
-                self.prev_active_mask = np.array(self.rl_env.active_agents)
-                self.total_reward = 0
-                self.episode_steps = 0
+                success = True
             except Exception as e:
-                reset_attempts += 1
-                if "Failed to find rrt-dubins path" in str(e):
-                    continue
-                else:
-                    # 다른 예외는 다시 발생시키기
-                    raise
+                print(f"Reset failed: {e}")
+                continue
 
-    def learn(
-        self,
-        total_timesteps: int,
-        callback = None,
-        log_interval: int = 4,
-        tb_log_name: str = "run",
-        reset_num_timesteps: bool = True,
-        progress_bar: bool = False,
-    ):
-        """
-        다중 차량을 위한 학습 메소드 오버라이드
-        """
-        total_timesteps, callback = self._setup_learn(
-            total_timesteps,
-            callback,
-            reset_num_timesteps,
-            tb_log_name,
-            progress_bar,
-        )
-
-        callback.on_training_start(locals(), globals())
-
-        # 환경 초기화
-        self._reset()
-
-        while self.num_timesteps < total_timesteps:
-            continue_training = self._custom_rollout_step(callback)
-            if not continue_training:
-                break
-
-        callback.on_training_end()
-
-        return self
+        self.prev_observations = prev_observations
+        self.prev_active_mask = np.array(self.rl_env.active_agents)
+        self.episode_steps = 0
+        self.total_reward = 0.0
 
     def _custom_rollout_step(self, callback) -> bool:
         """
@@ -160,7 +122,6 @@ class SACVehicleAlgorithm(SAC):
         """
         # 1) 키보드 입력 및 이벤트 처리
         self.rl_env.handle_keyboard_input()
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 return False
@@ -169,34 +130,32 @@ class SACVehicleAlgorithm(SAC):
                     return False
 
         # 2) 행동 결정
-        observations = self.prev_observations
         active_mask = self.prev_active_mask
+        actions = np.zeros((self.num_vehicles, 3))
         if self._n_updates < self.learning_starts:
             # 랜덤 행동 (벡터화)
-            actions = np.zeros((self.num_vehicles, 3))
             if active_mask.any():
-                random_actions = np.array([self.rl_env.env.action_space.sample() for _ in range(active_mask.sum())])
+                random_actions = np.stack([self.rl_env.env.action_space.sample() for _ in range(active_mask.sum())])
                 random_actions[:, 1] = random_actions[:, 1] / 5
                 # random_actions[:, 2] = random_actions[:, 2] / 3
                 actions[active_mask] = random_actions
         else:
-            with torch.no_grad():
-                # 활성화된 에이전트만 행동 예측 (벡터화)
-                actions = np.zeros((self.num_vehicles, 3))
-                if active_mask.any():
-                    # 활성화된 에이전트의 관측값만 선택
-                    active_obs = observations[active_mask]
-                    # 배치로 한번에 예측
-                    active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
+            # 활성화된 에이전트만 행동 예측 (벡터화)
+            if active_mask.any():
+                # 활성화된 에이전트의 관측값만 선택
+                active_obs = self.prev_observations[active_mask]
+                # 배치로 한번에 예측
+                active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
+                with torch.no_grad():
                     actions_tensor, _ = self.policy.actor.action_log_prob(active_obs_tensor)
-                    # NumPy 배열로 변환
-                    actions[active_mask] = actions_tensor.cpu().numpy()
+                # NumPy 배열로 변환
+                actions[active_mask] = actions_tensor.cpu().numpy()
 
         # 3) 환경 스텝 & 보상 누적
         next_observations, reward, done, _, info = self.rl_env.step(actions)
-        self.total_reward += reward
         self.episode_steps += 1
         self.num_timesteps += 1
+        self.total_reward += reward
 
         # 4) 렌더링
         self.rl_env.render()
@@ -213,14 +172,14 @@ class SACVehicleAlgorithm(SAC):
                 infos={"terminal_observation": next_observations[idx] if done else None}
             )
 
-        # 6) 콜백 업데이트 및 종료 체크
+        # 6) 내부 상태 갱신
+        self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
+        self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
+
+        # 7) 콜백 업데이트 및 종료 체크
         callback.update_locals(locals())
         if not callback.on_step():
             return False
-
-        # 7) 학습 트리거
-        if self.num_timesteps > self.learning_starts:
-            self.train(batch_size=self.batch_size, gradient_steps=self.gradient_steps)
 
         # 8) 에피소드 종료 시 처리
         if done:
@@ -237,12 +196,228 @@ class SACVehicleAlgorithm(SAC):
 
             # 환경 초기화
             self._reset()
-        else:
-            # 관측값 업데이트
-            self.prev_observations = next_observations
-            # 활성화 마스크 업데이트
-            self.prev_active_mask = np.array(self.rl_env.active_agents)
+
         return True
+
+    def learn(
+        self,
+        total_timesteps: int,
+        callback = None,
+        tb_log_name: str = "SAC",
+        reset_num_timesteps: bool = True,
+        progress_bar: bool = False,
+        **kwargs
+    ):
+        """
+        다중 차량을 위한 학습 메소드 오버라이드
+        """
+        total_timesteps, callback = self._setup_learn(
+            total_timesteps=total_timesteps,
+            callback=callback,
+            tb_log_name=tb_log_name,
+            reset_num_timesteps=reset_num_timesteps,
+            progress_bar=progress_bar,
+            **kwargs,
+        )
+
+        callback.on_training_start(locals(), globals())
+
+        # 환경 초기화
+        self._reset()
+
+        while self.num_timesteps < total_timesteps:
+            continue_training = self._custom_rollout_step(callback)
+            if not continue_training:
+                break
+
+            if self.num_timesteps > self.learning_starts and self.num_timesteps % self.train_freq.frequency == 0:
+                self.train(batch_size=self.batch_size, gradient_steps=self.gradient_steps)
+
+        callback.on_training_end()
+        return self
+
+class PPOVehicleAlgorithm(PPO):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 추가 속성 설정
+        self.rl_env = None
+        self.num_vehicles = None
+        self.prev_observations = None
+        self.prev_active_mask = None
+        self.episode_steps = 0
+        self.total_reward = 0
+        self._is_new_episode = True
+
+    def set_env_info(self, rl_env):
+        """
+        BasicRLDrivingEnv 정보 설정
+        """
+        self.rl_env = rl_env
+        self.num_vehicles = rl_env.num_vehicles
+
+    def _excluded_save_params(self) -> list[str]:
+        # 제외된 저장 파라미터 목록
+        return super()._excluded_save_params() + ["rl_env"]
+
+    def _reset(self):
+        # 환경 리셋 (성공할 때까지 무한 시도)
+        success = False
+
+        while not success:
+            try:
+                prev_observations, _ = self.rl_env.reset()
+                success = True
+            except Exception as e:
+                print(f"Reset failed: {e}")
+                continue
+
+        self.prev_observations = prev_observations
+        self.prev_active_mask = np.array(self.rl_env.active_agents)
+        self.episode_steps = 0
+        self.total_reward = 0.0
+        self._is_new_episode = True
+
+        if hasattr(self, "rollout_buffer"):
+            self.rollout_buffer.reset()
+
+    def _custom_rollout_step(self, callback: BaseCallback, n_steps: int) -> bool:
+        """
+        실제 rollouts를 수집하는 함수.
+        - n_steps가 되거나 에피소드 종료(done)가 발생하면 True를 리턴하여 학습으로 넘어가게 함.
+        - callback이 False를 반환하면 False 리턴하여 학습 루프를 빠져나감.
+
+        매 스텝마다:
+        1) 키보드 이벤트 처리리
+        2) 활성 에이전트(active_mask)만 policy.forward()를 통해 행동(action), value, log_prob 계산
+        3) self.rl_env.step(actions)를 호출하여 (next_obs, reward, done, info) 획득 및 self.num_timesteps, self.episode_steps, self.total_reward 갱신
+        4) 렌더링
+        5) 활성 에이전트 하나하나에 대해 rollout_buffer.add(...) 호출
+        6) self.prev_observations, self.prev_active_mask 갱신
+        7) callback.on_step() 확인
+        8) done=True이면 에피소드 종료 처리 후 즉시 학습으로 넘어감
+        """
+        step_count = 0
+        # 수집한 transition 개수(Active agent 기준) 혹은, 활성 스텝을 셀 수도 있음
+        # 여기서는 Active agent 하나당 한 개 transition으로 본다.
+        while step_count < n_steps:
+            # 1) 키보드 이벤트 처리
+            self.rl_env.handle_keyboard_input()
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    return False
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    return False
+
+            # 2) 행동(action), 값(value), 로그 확률(log_prob) 계산
+            active_mask = self.prev_active_mask
+            actions = np.zeros((self.num_vehicles, self.action_space.shape[-1]), dtype=np.float32)
+            values = torch.zeros((self.num_vehicles,), dtype=torch.float32, device=self.device)
+            log_probs = torch.zeros((self.num_vehicles,), dtype=torch.float32, device=self.device)
+
+            # 활성 에이전트에 한해서만 정책 네트워크를 통과
+            if active_mask.any():
+                active_obs = self.prev_observations[active_mask]
+                active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
+                with torch.no_grad():
+                    actions_tensor, values_tensor, log_prob_tensor = self.policy.forward(active_obs_tensor)
+
+                # NumPy 및 형태 변환환
+                actions_np = actions_tensor.cpu().numpy()
+                values_tensor = values_tensor.view(-1)
+                log_prob_tensor = log_prob_tensor.view(-1)
+
+                # 활성 에이전트 위치에 해당 값들을 대입
+                actions[active_mask] = actions_np
+                values[active_mask] = values_tensor
+                log_probs[active_mask] = log_prob_tensor
+
+            # 3) 환경 스텝: BasicRLDrivingEnv.step(actions)
+            next_observations, reward, done, _, info = self.rl_env.step(actions)
+            self.num_timesteps += active_mask.sum()    # 활성 에이전트 수만큼 timesteps 증가
+            self.episode_steps += 1
+            self.total_reward += reward
+
+            # 4) 렌더링
+            self.rl_env.render()
+
+            # 5) 활성 에이전트마다 RolloutBuffer에 transition 추가
+            active_indices = np.where(active_mask)[0]
+            for idx in active_indices:
+                if self.rollout_buffer.full:
+                    return True
+                # 개별 차량(obs, action, reward, done, value, log_prob)을 rollout buffer에 저장
+                self.rollout_buffer.add(
+                    obs=self.prev_observations[idx].copy(),
+                    action=actions[idx].copy(),
+                    reward=info['rewards'][idx],
+                    episode_start = self._is_new_episode,
+                    value=values[idx],
+                    log_prob=log_probs[idx],
+                )
+                step_count += 1
+
+            # 6) 내부 상태 갱신
+            if self._is_new_episode:
+                self._is_new_episode = False
+            self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
+            self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
+
+            # 7) 콜백 업데이트 및 종료 체크
+            callback.update_locals(locals())
+            if not callback.on_step():
+                return False
+
+            # 8) 에피소드 종료시점 처리
+            if done:
+                # 로깅
+                print(f"Episode {self.rl_env.episode_count}, "
+                    f"Steps: {self.episode_steps}, "
+                    f"Total Reward: {self.total_reward:.2f}")
+
+                # 텐서보드 로깅
+                self.logger.record("train/episode_reward", self.total_reward)
+                self.logger.record("train/episode_length", self.episode_steps)
+                self.logger.record("train/active_vehicles", sum(self.rl_env.active_agents))
+                self.logger.dump(self.num_timesteps)
+
+                # 환경 초기화
+                self._reset()
+
+        # n_steps만큼 Transition을 모았으면, 학습 단계로 넘어간다.
+        return True
+
+    def learn(
+            self,
+            total_timesteps: int,
+            callback: BaseCallback = None,
+            tb_log_name: str = "PPO",
+            reset_num_timesteps: bool = True,
+            progress_bar: bool = False,
+            **kwargs
+    ):
+        total_timesteps, callback = self._setup_learn(
+            total_timesteps=total_timesteps,
+            callback=callback,
+            tb_log_name=tb_log_name,
+            reset_num_timesteps=reset_num_timesteps,
+            progress_bar=progress_bar,
+            **kwargs,
+        )
+
+        callback.on_training_start(locals(), globals())
+
+        self._reset()
+        n_steps = self.n_steps
+
+        while self.num_timesteps < total_timesteps:
+            continue_training = self._custom_rollout_step(callback, n_steps)
+            if not continue_training:
+                break
+
+            self.train()
+
+        callback.on_training_end()
+        return self
 
 class ResidualLayerNormMLP(nn.Module):
     """
