@@ -9,7 +9,7 @@ from math import pi
 import numpy as np
 import gymnasium as gym
 from src.env.env import CarSimulatorEnv
-from ..model.sb3 import MultiVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor, EnhancedFeatureExtractor
+from ..model.sb3 import SACVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor, EnhancedFeatureExtractor
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
@@ -290,12 +290,13 @@ class BasicRLDrivingEnv(gym.Env):
 
         Returns:
             observations: 모든 차량의 관측값 (num_vehicles, obs_dim)
-            reward: 모든 차량의 보상값의 합
+            reward: 모든 차량의 평균 보상
             done: 종료 여부 bool
             info: 추가 정보
         """
         # 환경에서 스텝 진행
         observations, rewards, done, _, info = self.env.step(actions)
+        average_reward = np.mean(rewards)
 
         # 스텝 카운터 증가
         self.steps += 1
@@ -315,7 +316,7 @@ class BasicRLDrivingEnv(gym.Env):
             'rewards': rewards,  # 개별 차량별 보상
         })
 
-        return observations, np.sum(rewards), done, False, info
+        return observations, average_reward, done, False, info
 
     def _draw_boundary(self):
         # 경계(boundary)와 장애물 영역(obstacle_area) 시각화
@@ -411,7 +412,7 @@ class BasicRLDrivingEnv(gym.Env):
         buffer_size = self.max_step // 5
         learning_rate = 3e-4
         batch_size = 256
-        learning_starts = 100000
+        learning_starts = 500000
         n_envs = 1
 
         # 학습률 스케줄링 함수 정의
@@ -443,7 +444,7 @@ class BasicRLDrivingEnv(gym.Env):
         }
 
         # 커스텀 SAC 모델 생성
-        model = MultiVehicleAlgorithm(
+        model = SACVehicleAlgorithm(
             "MlpPolicy",
             env,
             learning_rate=learning_rate,

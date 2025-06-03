@@ -36,13 +36,12 @@ simulation:
     min_speed: 5
     max_speed: 50
   rewards:
-    goal_reached_reward: 100.0        # reward for reaching the goal
-    collision_penalty: -50.0          # penalty for collision
-    outside_road_penalty: -50.0       # penalty for going outside the road
-    progress_factor: 1.0              # reward factor for reducing distance to goal
-    lane_keeping_factor: 0.25          # reward factor for staying in the lane
-    speed_factor: 0.5                 # reward factor for maintaining/reaching target speed
-    stop_penalty: -0.25               # penalty for stopping
+    goal_reached_reward: 400.0        # reward for reaching the goal
+    collision_penalty: -200.0          # penalty for collision
+    outside_road_penalty: -200.0       # penalty for going outside the road
+    progress_factor: 0.4              # reward factor for reducing distance to goal
+    lane_keeping_factor: 0.2          # reward factor for staying in the lane
+    speed_factor: 0.4                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
@@ -132,9 +131,9 @@ physics:
     ice: 0.1        # 얼음
   min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
   min_turning_radius: 6.0       # meters, minimum turning radius for vehicle dynamics
-  throttle_response_rate: 2.0   # 1/s
-  steering_response_rate: 6.0   # 1/s
-  min_steer_speed_factor: 0.5   # minimum steering speed factor
+  throttle_response_rate: 4.0   # 1/s
+  steering_response_rate: 7.0   # 1/s
+  min_steer_speed_factor: 0.8   # minimum steering speed factor
   max_steer_speed_factor: 0.2   # maximum steering speed factor
   steer_speed_threshold: 15.0   # m/s, threshold for steering speed factor
   # Pacejka Magic Formula coefficients

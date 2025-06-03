@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import pygame
 import numpy as np
-from stable_baselines3 import SAC
+from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 
@@ -74,7 +74,7 @@ class CustomLoggingCallback(BaseCallback):
 
         return True
 
-class MultiVehicleAlgorithm(SAC):
+class SACVehicleAlgorithm(SAC):
     """
     다중 차량을 위한 커스텀 강화학습 알고리즘 클래스
     """

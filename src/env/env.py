@@ -484,6 +484,8 @@ class CarSimulatorEnv(gym.Env):
         speed_diff = current_vel - target_vel
         sigma = 10.0
         speed_norm = exp(-((speed_diff**2) / (2 * sigma**2))) # 가우시안 커널
+        if speed_norm < 1e-4:
+            speed_norm = 0
         speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
 
@@ -491,8 +493,7 @@ class CarSimulatorEnv(gym.Env):
         stop = state.vel_long < 0.1  # 속도가 0.1 이하인 경우 정지로 간주, 후진 포함
         if stop:
             delta = state.get_delta_progress()
-            if delta < 0.01:
-                reward += rewards['stop_penalty']
+            reward += -abs(delta)
 
-        # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_reward}")
+        # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, Delta: {-abs(delta) if stop else 0}")
         return reward
