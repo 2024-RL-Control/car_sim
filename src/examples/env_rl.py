@@ -552,7 +552,7 @@ class BasicRLDrivingEnv(gym.Env):
         env = DummyVecEnv([lambda: env])
 
         # 모델 로드
-        model = MultiVehicleAlgorithm.load(
+        model = SACVehicleAlgorithm.load(
             model_path,
             env=env,
             device=self.device
