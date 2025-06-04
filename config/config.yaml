@@ -4,8 +4,8 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
-  train_max_steps: 5000000
-  train_max_episode_steps: 5000   # maximum steps per episode
+  train_max_steps: 15000000
+  train_max_episode_steps: 10000   # maximum steps per episode
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment
   boundary:         # [m]
@@ -92,7 +92,7 @@ vehicle:
 
   # Powertrain Parameters
   max_accel: 4.0         # 최대 가속도 [m/s²]
-  max_brake: 6.0         # 최대 제동 [m/s²]
+  max_brake: 4.0         # 최대 제동 [m/s²]
   max_speed: 65.0        # 최대 속도 [m/s] (약 234 km/h)
   min_speed: -20.0       # 최소 속도 [m/s] (약 -72 km/h)
   max_vel_lat: 23.0      # 최대 횡방향 속도 [m/s], 종방향 속도에 대한 휴리스틱 값

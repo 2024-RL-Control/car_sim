@@ -552,10 +552,10 @@ class BasicRLDrivingEnv(gym.Env):
         env = Monitor(dummy_env, log_dir)
         env = DummyVecEnv([lambda: env])
 
-        # SAC 하이퍼파라미터 설정
+        # PPO 하이퍼파라미터 설정
         n_steps       = 1024
-        batch_size    = 256
-        n_epochs      = 1
+        batch_size    = 64
+        n_epochs      = 5
         gamma         = 0.99
         gae_lambda    = 0.95
         clip_range    = 0.2
@@ -568,7 +568,7 @@ class BasicRLDrivingEnv(gym.Env):
             "activation_fn": torch.nn.GELU,  # mu/q 헤드 내부 활성화
 
             # 2) extractor 클래스 지정
-            "features_extractor_class": CustomFeatureExtractor,
+            "features_extractor_class": EnhancedFeatureExtractor,
             "features_extractor_kwargs": {
                 "net_arch": [256, 256, 256, 256, 128, 64]
             },
@@ -674,6 +674,65 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 모델 로드
         model = SACVehicleAlgorithm.load(
+            model_path,
+            env=env,
+            device=self.device
+        )
+        model.policy.eval()
+
+        # 테스트 루프
+        for ep in range(1, max_episode + 1):
+            observations, _ = self.reset()
+            done = False
+            total_reward = 0.0
+            steps = 0
+
+            while not done:
+                # 키보드 입력 수집 (ESC 등)
+                self.handle_keyboard_input()
+
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        return False
+                    elif event.type == pygame.KEYDOWN:
+                        if event.key == pygame.K_ESCAPE:
+                            return False
+
+                # 모델 예측
+                actions, _ = model.predict(observations, deterministic=True)
+
+                # 한 스텝 진행
+                observations, reward, done, truncated, info = self.step(actions)
+                total_reward += reward
+                steps += 1
+
+                # 화면 갱신
+                self.render()
+
+            # 한 에피소드 결과 출력
+            print(f"[Test] Episode {ep}/{max_episode} — Steps: {steps}, Total Reward: {total_reward:.2f}")
+
+        # 시뮬레이터 종료
+        self.close()
+
+    def test_ppo(self):
+        """
+        학습된 모델을 테스트하는 함수
+        """
+        # 모델 경로 설정
+        model_path = "./logs/checkpoints/ppo_final.zip"
+        if not os.path.exists(model_path):
+            print(f"모델 파일이 존재하지 않습니다: {model_path}")
+            return
+
+        max_episode = self.env.config['simulation']['eval_episode']
+
+        dummy_env = DummyEnv(self)
+        env = Monitor(dummy_env)
+        env = DummyVecEnv([lambda: env])
+
+        # 모델 로드
+        model = PPOVehicleAlgorithm.load(
             model_path,
             env=env,
             device=self.device
