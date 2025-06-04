@@ -39,9 +39,9 @@ simulation:
     goal_reached_reward: 400.0        # reward for reaching the goal
     collision_penalty: -200.0          # penalty for collision
     outside_road_penalty: -200.0       # penalty for going outside the road
-    progress_factor: 0.4              # reward factor for reducing distance to goal
+    progress_factor: 0.5              # reward factor for reducing distance to goal
     lane_keeping_factor: 0.2          # reward factor for staying in the lane
-    speed_factor: 0.4                 # reward factor for maintaining/reaching target speed
+    speed_factor: 0.3                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
