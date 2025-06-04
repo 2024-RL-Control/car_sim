@@ -467,8 +467,8 @@ class BasicRLDrivingEnv(gym.Env):
         elif algorithm == 'ppo':
             # PPO 하이퍼파라미터 설정
             n_steps       = 1024
-            batch_size    = 64
-            n_epochs      = 5
+            batch_size    = 128
+            n_epochs      = 3
             gamma         = 0.99
             gae_lambda    = 0.95
             clip_range    = 0.2
