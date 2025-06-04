@@ -394,7 +394,7 @@ class BasicRLDrivingEnv(gym.Env):
         print("  Tab: Switch between vehicles")
         print("  ESC: Quit")
 
-    def learn(self):
+    def learn(self, algorithm='sac'):
         """
         자율주행 에이전트 학습 함수 (learn() 메소드 사용)
         """
@@ -410,27 +410,6 @@ class BasicRLDrivingEnv(gym.Env):
         env = Monitor(dummy_env, log_dir)
         env = DummyVecEnv([lambda: env])
 
-        # SAC 하이퍼파라미터 설정
-        buffer_size = self.max_step // 5
-        learning_rate = 3e-4
-        batch_size = 256
-        learning_starts = 100000
-        n_envs = 1
-
-        # 학습률 스케줄링 함수 정의
-        def lr_schedule(progress_remaining):
-            return learning_rate * progress_remaining  # 학습 진행에 따라 학습률 감소
-
-        # 공유 리플레이 버퍼 생성
-        shared_buffer = ReplayBuffer(
-            buffer_size=buffer_size,
-            observation_space=self.env.observation_space,
-            action_space=self.env.action_space,
-            device=self.device,
-            n_envs=n_envs,
-            handle_timeout_termination=False
-        )
-
         # 신경망 아키텍처 설정
         policy_kwargs = {
             # 1) 기본 MLP-extractor 완전 비활성화
@@ -438,35 +417,79 @@ class BasicRLDrivingEnv(gym.Env):
             "activation_fn": torch.nn.GELU,  # mu/q 헤드 내부 활성화
 
             # 2) extractor 클래스 지정
-            "features_extractor_class": EnhancedFeatureExtractor,
+            "features_extractor_class": CustomFeatureExtractor,
             "features_extractor_kwargs": {
-                "net_arch": [256, 256, 256, 256, 128, 64]
+                "net_arch": [512, 512, 512, 256, 128, 64]
             },
             "share_features_extractor": True,
         }
 
-        # 커스텀 SAC 모델 생성
-        model = SACVehicleAlgorithm(
-            "MlpPolicy",
-            env,
-            learning_rate=learning_rate,
-            policy_kwargs=policy_kwargs,
-            buffer_size=0,
-            learning_starts=learning_starts,
-            batch_size=batch_size,
-            tau=0.003,
-            gamma=0.995,
-            ent_coef=0.1,
-            train_freq=10,
-            gradient_steps=5,
-            target_update_interval=12,
-            verbose=1,
-            tensorboard_log=log_dir,
-            device=self.device
-        )
+        if algorithm == 'sac':
+            # SAC 하이퍼파라미터 설정
+            buffer_size = self.max_step // 5
+            learning_rate = 3e-4
+            batch_size = 256
+            learning_starts = 100000
+            n_envs = 1
 
-        # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
-        model.replay_buffer = shared_buffer
+            # 공유 리플레이 버퍼 생성
+            shared_buffer = ReplayBuffer(
+                buffer_size=buffer_size,
+                observation_space=self.env.observation_space,
+                action_space=self.env.action_space,
+                device=self.device,
+                n_envs=n_envs,
+                handle_timeout_termination=False
+            )
+
+            # 커스텀 SAC 모델 생성
+            model = SACVehicleAlgorithm(
+                "MlpPolicy",
+                env,
+                learning_rate=learning_rate,
+                policy_kwargs=policy_kwargs,
+                buffer_size=0,
+                learning_starts=learning_starts,
+                batch_size=batch_size,
+                tau=0.003,
+                gamma=0.995,
+                ent_coef=0.1,
+                train_freq=10,
+                gradient_steps=5,
+                target_update_interval=12,
+                verbose=1,
+                tensorboard_log=log_dir,
+                device=self.device
+            )
+
+            # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
+            model.replay_buffer = shared_buffer
+        elif algorithm == 'ppo':
+            # PPO 하이퍼파라미터 설정
+            n_steps       = 1024
+            batch_size    = 64
+            n_epochs      = 5
+            gamma         = 0.99
+            gae_lambda    = 0.95
+            clip_range    = 0.2
+            learning_rate = 3e-4
+
+            # 커스텀 PPO 모델 생성
+            model = PPOVehicleAlgorithm(
+                policy="MlpPolicy",
+                env=env,
+                learning_rate=learning_rate,
+                n_steps=n_steps,
+                batch_size=batch_size,
+                n_epochs=n_epochs,
+                gamma=gamma,
+                gae_lambda=gae_lambda,
+                clip_range=clip_range,
+                policy_kwargs=policy_kwargs,
+                verbose=1,
+                tensorboard_log=log_dir,
+                device=self.device,
+            )
 
         # 환경 정보 설정
         model.set_env_info(self)
@@ -481,7 +504,7 @@ class BasicRLDrivingEnv(gym.Env):
         clean_checkpoint_callback = CleanCheckpointCallback(
             save_freq=10000,  # 10000스텝마다 저장
             save_path=models_dir,
-            name_prefix="sac",
+            name_prefix=algorithm,
             save_replay_buffer=False,  # 체크포인트에서는 리플레이 버퍼를 저장하지 않음
             save_vecnormalize=True,
             max_checkpoints=10  # 최대 10개의 체크포인트만 유지
@@ -505,8 +528,11 @@ class BasicRLDrivingEnv(gym.Env):
             )
 
             # 학습된 모델 저장
-            model.save(os.path.join(models_dir, "sac_final"))
-            model.save_replay_buffer(os.path.join(models_dir, "sac_final_replay_buffer"))
+            if algorithm == 'sac':
+                model.save(os.path.join(models_dir, "sac_final"))
+                model.save_replay_buffer(os.path.join(models_dir, "sac_final_replay_buffer"))
+            elif algorithm == 'ppo':
+                model.save(os.path.join(models_dir, "ppo_final"))
 
             # 학습 완료 후 추가 로그 저장
             print("\n===== 학습 완료 =====")
@@ -527,8 +553,11 @@ class BasicRLDrivingEnv(gym.Env):
             print(f'line number: {str(exc_tb.tb_lineno)}')
             # 오류 발생시에도 현재까지 학습된 모델 저장 시도
             try:
-                model.save(os.path.join(models_dir, "sac_interrupted"))
-                model.save_replay_buffer(os.path.join(models_dir, "sac_interrupted_replay_buffer"))
+                if algorithm == 'sac':
+                    model.save(os.path.join(models_dir, "sac_interrupted"))
+                    model.save_replay_buffer(os.path.join(models_dir, "sac_interrupted_replay_buffer"))
+                elif algorithm == 'ppo':
+                    model.save(os.path.join(models_dir, "ppo_interrupted"))
                 print("중단된 모델 상태가 저장되었습니다.")
             except Exception as save_error:
                 print(f"중단된 모델 저장 실패: {save_error}")
@@ -536,207 +565,35 @@ class BasicRLDrivingEnv(gym.Env):
             # 환경 종료
             self.close()
 
-    def learn_ppo(self):
+    def test(self, algorithm='sac'):
         """
-        자율주행 에이전트 학습 함수 (learn() 메소드 사용)
+        학습된 모델을 테스트하는 함수
         """
-        # 로그 및 모델 저장 경로 설정
-        models_dir = "./logs/checkpoints"
-        log_dir = "./logs/log"
+        # 모델 경로 설정
+        model_path = f"./logs/checkpoints/{algorithm}_final.zip"
+        if not os.path.exists(model_path):
+            print(f"모델 파일이 존재하지 않습니다: {model_path}")
+            return
 
-        os.makedirs(models_dir, exist_ok=True)
-        os.makedirs(log_dir, exist_ok=True)
+        max_episode = self.env.config['simulation']['eval_episode']
 
-        # Monitor와 DummyVecEnv로 환경 래핑
         dummy_env = DummyEnv(self)
-        env = Monitor(dummy_env, log_dir)
+        env = Monitor(dummy_env)
         env = DummyVecEnv([lambda: env])
 
-        # PPO 하이퍼파라미터 설정
-        n_steps       = 1024
-        batch_size    = 64
-        n_epochs      = 5
-        gamma         = 0.99
-        gae_lambda    = 0.95
-        clip_range    = 0.2
-        learning_rate = 3e-4
-
-        # 신경망 아키텍처 설정
-        policy_kwargs = {
-            # 1) 기본 MLP-extractor 완전 비활성화
-            "net_arch": [],
-            "activation_fn": torch.nn.GELU,  # mu/q 헤드 내부 활성화
-
-            # 2) extractor 클래스 지정
-            "features_extractor_class": EnhancedFeatureExtractor,
-            "features_extractor_kwargs": {
-                "net_arch": [256, 256, 256, 256, 128, 64]
-            },
-            "share_features_extractor": True,
-        }
-
-        # 커스텀 PPO 모델 생성
-        model = PPOVehicleAlgorithm(
-            policy="MlpPolicy",
-            env=env,
-            learning_rate=learning_rate,
-            n_steps=n_steps,
-            batch_size=batch_size,
-            n_epochs=n_epochs,
-            gamma=gamma,
-            gae_lambda=gae_lambda,
-            clip_range=clip_range,
-            policy_kwargs=policy_kwargs,
-            verbose=1,
-            tensorboard_log=log_dir,
-            device=self.device,
-        )
-
-        # 환경 정보 설정
-        model.set_env_info(self)
-
-        # 로거 설정
-        model.set_logger(configure(log_dir, ["stdout", "csv", "tensorboard"]))
-
-        # 모델 출력
-        print(model.policy)
-
-        # 체크포인트 콜백 설정
-        clean_checkpoint_callback = CleanCheckpointCallback(
-            save_freq=10000,  # 10000스텝마다 저장
-            save_path=models_dir,
-            name_prefix="ppo",
-            max_checkpoints=10  # 최대 10개의 체크포인트만 유지
-        )
-
-        # 고급 로깅 콜백
-        logging_callback = CustomLoggingCallback()
-
-        # 콜백 목록 생성
-        callback = CallbackList([clean_checkpoint_callback, logging_callback])
-
-        # learn() 메소드로 학습 시작
-        try:
-            # 기본 컨트롤 정보 출력
-            self.print_basic_controls()
-
-            model.learn(
-                total_timesteps=self.max_step,
-                callback=callback,
-                progress_bar=True
+        # 모델 로드
+        if algorithm == 'sac':
+            model = SACVehicleAlgorithm.load(
+                model_path,
+                env=env,
+                device=self.device
             )
-
-            # 학습된 모델 저장
-            model.save(os.path.join(models_dir, "ppo_final"))
-
-            # 학습 완료 후 추가 로그 저장
-            print("\n===== 학습 완료 =====")
-            print(f"총 학습 시간: {(time.time() - logging_callback.training_start)/3600:.2f} 시간")
-
-            if torch.cuda.is_available():
-                print(f"최대 GPU 메모리 사용량: {max(logging_callback.gpu_memory_usage):.2f} GB")
-                # 메모리 정리
-                torch.cuda.empty_cache()
-
-        except Exception as e:
-            exc_type, exc_obj, exc_tb = sys.exc_info()
-            fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print(f"\n\n학습 중단됨: {e}")
-            print(f'file name: {str(fname)}')
-            print(f'error type: {str(exc_type)}')
-            print(f'error msg: {str(e)}')
-            print(f'line number: {str(exc_tb.tb_lineno)}')
-            # 오류 발생시에도 현재까지 학습된 모델 저장 시도
-            try:
-                model.save(os.path.join(models_dir, "ppo_interrupted"))
-                print("중단된 모델 상태가 저장되었습니다.")
-            except Exception as save_error:
-                print(f"중단된 모델 저장 실패: {save_error}")
-        finally:
-            # 환경 종료
-            self.close()
-
-    def test(self):
-        """
-        학습된 모델을 테스트하는 함수
-        """
-        # 모델 경로 설정
-        model_path = "./logs/checkpoints/sac_final.zip"
-        if not os.path.exists(model_path):
-            print(f"모델 파일이 존재하지 않습니다: {model_path}")
-            return
-
-        max_episode = self.env.config['simulation']['eval_episode']
-
-        dummy_env = DummyEnv(self)
-        env = Monitor(dummy_env)
-        env = DummyVecEnv([lambda: env])
-
-        # 모델 로드
-        model = SACVehicleAlgorithm.load(
-            model_path,
-            env=env,
-            device=self.device
-        )
-        model.policy.eval()
-
-        # 테스트 루프
-        for ep in range(1, max_episode + 1):
-            observations, _ = self.reset()
-            done = False
-            total_reward = 0.0
-            steps = 0
-
-            while not done:
-                # 키보드 입력 수집 (ESC 등)
-                self.handle_keyboard_input()
-
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        return False
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_ESCAPE:
-                            return False
-
-                # 모델 예측
-                actions, _ = model.predict(observations, deterministic=True)
-
-                # 한 스텝 진행
-                observations, reward, done, truncated, info = self.step(actions)
-                total_reward += reward
-                steps += 1
-
-                # 화면 갱신
-                self.render()
-
-            # 한 에피소드 결과 출력
-            print(f"[Test] Episode {ep}/{max_episode} — Steps: {steps}, Total Reward: {total_reward:.2f}")
-
-        # 시뮬레이터 종료
-        self.close()
-
-    def test_ppo(self):
-        """
-        학습된 모델을 테스트하는 함수
-        """
-        # 모델 경로 설정
-        model_path = "./logs/checkpoints/ppo_final.zip"
-        if not os.path.exists(model_path):
-            print(f"모델 파일이 존재하지 않습니다: {model_path}")
-            return
-
-        max_episode = self.env.config['simulation']['eval_episode']
-
-        dummy_env = DummyEnv(self)
-        env = Monitor(dummy_env)
-        env = DummyVecEnv([lambda: env])
-
-        # 모델 로드
-        model = PPOVehicleAlgorithm.load(
-            model_path,
-            env=env,
-            device=self.device
-        )
+        elif algorithm == 'ppo':
+            model = PPOVehicleAlgorithm.load(
+                model_path,
+                env=env,
+                device=self.device
+            )
         model.policy.eval()
 
         # 테스트 루프

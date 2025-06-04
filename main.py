@@ -33,7 +33,7 @@ if __name__ == "__main__":
                 profiler = cProfile.Profile()
                 profiler.enable()
 
-            env.learn()
+            env.learn(algorithm='sac')
 
             if is_profiling:
                 profiler.disable()
@@ -48,10 +48,10 @@ if __name__ == "__main__":
                 print("=== End of Profiling ===\n")
         elif selected_option == 'basic_rl_training(ppo)':
             env = BasicRLDrivingEnv()
-            env.learn_ppo()
+            env.learn(algorithm='ppo')
         elif selected_option == 'basic_rl_testing':
             env = BasicRLDrivingEnv()
-            env.test()
+            env.test(algorithm='sac')
 
         elif selected_option == 'quit':
             running = False
