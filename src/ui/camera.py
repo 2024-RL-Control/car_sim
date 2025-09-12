@@ -16,6 +16,7 @@ class Camera:
         self._camera_pos = (0, 0)    # 카메라 위치 (카메라가 차량을 따라가지 않을 때 사용)
         self._camera_offset = (0, 0)  # 카메라 오프셋 (팬/줌 기능용)
 
+        self._init_camera_follow = self.config['visualization']['camera_follow']
         self._init_camera_zoom = self.config['visualization']['camera_zoom']
 
         self._keys_state = {
@@ -23,44 +24,64 @@ class Camera:
             pygame.K_c: False
         }
 
-    def world_to_screen(self, x, y, vehicle=None):
+    def world_to_screen(self, world_points, cam_point=None):
         """
-        월드 좌표 → 화면 좌표 변환
+        월드 좌표 리스트 → 화면 좌표 리스트 변환
         월드: 원점 중앙, Y축 위로 증가
         화면: 원점 좌상단, Y축 아래로 증가
 
-        항상 현재 활성 차량이 화면 중앙에 오도록 변환
+        카메라 추적 모드시 활성 차량을 화면 중앙에 오도록 변환
+        정적 카메라 모드시 카메라 위치를 원점으로 설정
 
         Args:
-            x, y: 변환할 월드 좌표
-            vehicle: 카메라 위치를 가져올 차량 객체
+            world_points: 변환할 월드 좌표들의 리스트 또는 NumPy 배열. 각 요소는 (x, y) 튜플 또는 [x, y] 형태
+            cam_point: 카메라 위치 (x, y) 튜플 또는 [x, y] 형태
         """
+        if isinstance(world_points, np.ndarray):
+            world_points_arr = world_points
+        else:
+            world_points_arr = np.array(world_points)
+
+        flag = False
+        if world_points_arr.ndim == 1: # 단일 좌표가 [x,y] 형태로 들어온 경우 2D 배열로 만듦: [x,y] -> [[x,y]]
+            flag = True
+            world_points_arr = world_points_arr.reshape(-1, 2)
+
+        xs = world_points_arr[:, 0]
+        ys = world_points_arr[:, 1]
+
         # 카메라 위치 결정
-        if self.config['visualization']['camera_follow'] and vehicle is not None:
+        if self.config['visualization']['camera_follow'] and cam_point is not None:
             # 카메라 추적 모드가 켜져 있고 차량이 주어진 경우, 차량 위치 사용
-            cam_x = vehicle.state.x
-            cam_y = vehicle.state.y
+            cam_x = cam_point[0]
+            cam_y = cam_point[1]
             self._camera_pos = (cam_x, cam_y)
         else:
-            # 카메라 추적 모드가 꺼져 있거나 차량이 없는 경우, 카메라 위치를 원점으로 설정
+            # 카메라 추적 모드가 꺼져 있거나 차량이 없는 경우, 기존 카메라 위치 사용
             cam_x, cam_y = self._camera_pos
 
         # 줌 처리
         scale = self.config['visualization']['scale_factor'] * self.config['visualization']['camera_zoom']
 
         # 월드 좌표를 카메라 기준으로 상대화
-        rel_x = x - cam_x
-        rel_y = y - cam_y
+        rel_xs = xs - cam_x
+        rel_ys = ys - cam_y
 
         # 스케일 적용 및 화면 중앙 기준으로 변환
-        screen_x = rel_x * scale + self.config['visualization']['window_width']/2
-        screen_y = self.config['visualization']['window_height']/2 - rel_y * scale
+        screen_xs = rel_xs * scale + self.config['visualization']['window_width']/2
+        screen_ys = self.config['visualization']['window_height']/2 - rel_ys * scale
 
         # 카메라 오프셋 적용 (수동 카메라 조작용)
-        screen_x += self._camera_offset[0]
-        screen_y += self._camera_offset[1]
+        screen_xs += self._camera_offset[0]
+        screen_ys += self._camera_offset[1]
 
-        return (int(screen_x), int(screen_y))
+        # (int, int) 튜플의 배열로 변환
+        screen_points_arr = np.vstack((screen_xs, screen_ys)).T.astype(int)
+
+        if flag:
+            return tuple(screen_points_arr[0]) # 단일 입력 시 단일 (x,y) 튜플 반환
+        else:
+            return screen_points_arr.tolist() # 리스트 입력 시 [(x1,y1), (x2,y2), ...] 반환
 
     def handle_camera_controls(self, pressed_keys):
         """
@@ -100,7 +121,7 @@ class Camera:
             if self.config['visualization']['camera_follow']:
                 self.config['visualization']['camera_zoom'] = 1.5
             else:
-                self.config['visualization']['camera_zoom'] = 0.25
+                self.config['visualization']['camera_zoom'] = self._init_camera_zoom
             self._camera_pos = (0, 0)
             self._camera_offset = (0, 0)
         self._keys_state[pygame.K_c] = pressed_keys[pygame.K_c]
@@ -109,7 +130,8 @@ class Camera:
         """카메라 설정 초기화"""
         self._camera_pos = (0, 0)
         self._camera_offset = (0, 0)
-        self.config['visualization']['camera_zoom'] = self._init_camera_zoom
+        # self.config['visualization']['camera_follow'] = self._init_camera_follow
+        # self.config['visualization']['camera_zoom'] = self._init_camera_zoom
         self._keys_state = {
             pygame.K_r: False,
             pygame.K_c: False

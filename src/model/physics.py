@@ -33,11 +33,11 @@ class InputProcessor:
         target_throttle_engine = engine_input
         target_throttle_brake  = brake_input
 
-        # 목표 조향각 계산 (입력 * 최대 조향각)
-        target_steer = steer_input * np.radians(config['max_steer'])
+        # 최대 조향각 (라디안)
+        max_steer_rad = np.radians(config['max_steer'])
 
-        # 속도에 따른 조향 응답 조정 (고속에서 조향이 느려지도록)
-        steer_speed_factor = cls._calculate_steer_speed_factor(state.vel_long, physics_config)
+        # 목표 조향각 계산 (입력 * 최대 조향각)
+        target_steer = steer_input * max_steer_rad
 
         # 스로틀 응답 지연 (점진적 변화)
         throttle_response_rate = physics_config['throttle_response_rate']
@@ -45,11 +45,13 @@ class InputProcessor:
         state.throttle_brake  += (target_throttle_brake  - state.throttle_brake ) * throttle_response_rate * dt
 
         # 조향 응답 지연 (점진적 변화, 속도에 따라 조정)
+        # 속도에 따른 조향 응답 조정 (고속에서 조향이 느려지도록)
+        steer_speed_factor = cls._calculate_steer_speed_factor(state.vel_long, physics_config)
         steering_response_rate = physics_config['steering_response_rate'] * steer_speed_factor
         state.steer += (target_steer - state.steer) * steering_response_rate * dt
 
         # 조향각 제한
-        state.steer = np.clip(state.steer, -np.radians(config['max_steer']), np.radians(config['max_steer']))
+        state.steer = np.clip(state.steer, -max_steer_rad, max_steer_rad)
 
     @classmethod
     def _calculate_steer_speed_factor(cls, speed, physics_config):
@@ -64,19 +66,25 @@ class InputProcessor:
         Returns:
             조향 응답 계수 (0 ~ 1)
         """
+        # 설정값 미리 로드
+        min_speed_thresh = physics_config['min_speed_threshold']
+        steer_speed_thresh = physics_config['steer_speed_threshold']
+        min_steer_factor = physics_config['min_steer_speed_factor']
+        max_steer_factor = physics_config['max_steer_speed_factor']
+
         # 절대 속도 사용 (후진 시에도 동일하게 적용)
         abs_speed = abs(speed)
 
-        if abs_speed < physics_config['min_speed_threshold']:
+        if abs_speed < min_speed_thresh:
             # 정지 상태에 가까우면 최대 응답률
-            return physics_config['min_steer_speed_factor']
-        elif abs_speed >= physics_config['steer_speed_threshold']:
+            return min_steer_factor
+        elif abs_speed >= steer_speed_thresh:
             # 고속에서는 최소 응답률
-            return physics_config['max_steer_speed_factor']
+            return max_steer_factor
         else:
             # 중간 속도에서는 선형 보간
-            t = abs_speed / physics_config['steer_speed_threshold']
-            return physics_config['min_steer_speed_factor'] * (1-t) + physics_config['max_steer_speed_factor'] * t
+            t = abs_speed / steer_speed_thresh
+            return min_steer_factor * (1 - t) + max_steer_factor * t
 
 
 class ForceCalculator:
@@ -290,6 +298,35 @@ class PhysicsEngine:
             StateUpdater.update_vehicle_state(
                 state, acc_long, acc_lat, yaw_rate, substep_dt, vehicle_config, physics_config
             )
+
+        # 과거 궤적 업데이트
+        if not predict:
+            state.update_history_trajectory()
+
+    @classmethod
+    def update_single_step(cls, state, action, dt, physics_config, vehicle_config, predict=False):
+        """
+        차량 상태 업데이트
+
+        Args:
+            state: 차량 상태 객체 (VehicleState)
+            action: 제어 입력 배열 [throttle_engine, throttle_brake, steering] ([0, 1], [0, 1], [-1, 1]) 범위
+            dt: 시간 간격 [s]
+            physics_config: 물리 설정
+            vehicle_config: 차량 설정
+        """
+        # 입력 처리
+        InputProcessor.process_inputs(state, action, dt, vehicle_config, physics_config)
+
+        # 물리 업데이트 (힘 계산)
+        acc_long, acc_lat, yaw_rate = ForceCalculator.calculate_forces(
+            state, dt, physics_config, vehicle_config
+        )
+
+        # 상태 업데이트
+        StateUpdater.update_vehicle_state(
+            state, acc_long, acc_lat, yaw_rate, dt, vehicle_config, physics_config
+        )
 
         # 과거 궤적 업데이트
         if not predict:

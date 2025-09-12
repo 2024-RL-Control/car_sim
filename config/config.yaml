@@ -4,44 +4,44 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
-  num_episodes: 1000
-  max_steps: 1000   # maximum steps per episode
-  num_vehicles: 1   # number of vehicles on the environment
+  train_max_steps: 15000000
+  train_max_episode_steps: 10000   # maximum steps per episode
+  eval_episode: 10  # number of episodes for evaluation
+  num_vehicles: 1  # number of vehicles on the environment
   boundary:         # [m]
-    x_min: -300
-    x_max: 300
-    y_min: -300
-    y_max: 300
+    x_min: -100
+    x_max: 100
+    y_min: -100
+    y_max: 100
   obstacle:
-    num_static_obstacles: 40
-    num_dynamic_obstacles: 60
+    num_static_obstacles: 5
+    num_dynamic_obstacles: 5
     buffer_distance: 10  # [m]
     boundary:            # [m]
-      x_min: -280
-      x_max: 280
-      y_min: -280
-      y_max: 280
+      x_min: -80
+      x_max: 80
+      y_min: -80
+      y_max: 80
   path_planning:
-    max_iterations: 5000          # maximum iterations for path planning
+    max_iterations: 1000          # maximum iterations for path planning
     base_step_size: 0.1           # Base for variable RRT step [m]
     min_step_factor: 1.0          # Min multiplier for base_step_size
     max_step_factor: 5.0          # Max multiplier for base_step_size
     goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
     goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
     road_width: 6.0               # Default road width [m]
-    min_radius: 6.5               # minimum turning radius for path planning [m]
+    min_radius: 8.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 30
     min_speed: 5
     max_speed: 50
   rewards:
-    outside_road_penalty: 5.0         # penalty for going outside the road
-    goal_reached_reward: 10.0         # reward for reaching the goal
-    collision_penalty: 10.0           # penalty for collision
-    time_penalty_factor: 0.01         # penalty factor for each step taken
-    distance_reward_factor: 0.1       # reward factor for reducing distance to goal
-    orientation_reward_factor: 0.05   # reward factor for correct orientation towards goal
-    speed_reward_factor: 0.02         # reward factor for maintaining/reaching target speed
+    goal_reached_reward: 400.0        # reward for reaching the goal
+    collision_penalty: -200.0          # penalty for collision
+    outside_road_penalty: -200.0       # penalty for going outside the road
+    progress_factor: 0.5              # reward factor for reducing distance to goal
+    lane_keeping_factor: 0.2          # reward factor for staying in the lane
+    speed_factor: 0.3                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
@@ -50,11 +50,11 @@ visualization:
   window_size: [1300, 800]
   scale_factor: 5                   # pixels per meter
   camera_zoom: 0.25
-  training_mode: false              # training mode, if true: fixed dt and no fps limit
+  training_mode: true              # training mode, if true: fixed dt and no fps limit
   debug_mode: false
-  visualize: true
-  visualize_hud: true
-  camera_follow: false               # 카메라가 차량 추적
+  visualize: false
+  visualize_hud: false
+  camera_follow: true               # 카메라가 차량 추적
   background_color: [0, 0, 0]       # RGB
   grid_color: [100, 100, 100]       # RGB color for grid lines
   hud_bg_color: [50, 50, 50, 180]   # RGBA
@@ -92,7 +92,7 @@ vehicle:
 
   # Powertrain Parameters
   max_accel: 4.0         # 최대 가속도 [m/s²]
-  max_brake: 6.0         # 최대 제동 [m/s²]
+  max_brake: 4.0         # 최대 제동 [m/s²]
   max_speed: 65.0        # 최대 속도 [m/s] (약 234 km/h)
   min_speed: -20.0       # 최소 속도 [m/s] (약 -72 km/h)
   max_vel_lat: 23.0      # 최대 횡방향 속도 [m/s], 종방향 속도에 대한 휴리스틱 값
@@ -108,7 +108,6 @@ vehicle:
       angle_end: 180.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       max_range: 50.0           # 최대 감지 거리 [m]
       min_range: 0.1            # 최소 감지 거리 [m]
-      scan_rate: 10             # 스캔 주기 [Hz]
       scan_history: 0           # 스캔 히스토리 개수
 
       # 노이즈 파라미터
@@ -132,9 +131,9 @@ physics:
     ice: 0.1        # 얼음
   min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
   min_turning_radius: 6.0       # meters, minimum turning radius for vehicle dynamics
-  throttle_response_rate: 2.0   # 1/s
-  steering_response_rate: 6.0   # 1/s
-  min_steer_speed_factor: 0.5   # minimum steering speed factor
+  throttle_response_rate: 4.0   # 1/s
+  steering_response_rate: 7.0   # 1/s
+  min_steer_speed_factor: 0.8   # minimum steering speed factor
   max_steer_speed_factor: 0.2   # maximum steering speed factor
   steer_speed_threshold: 15.0   # m/s, threshold for steering speed factor
   # Pacejka Magic Formula coefficients

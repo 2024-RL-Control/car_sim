@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import pygame
 import numpy as np
+from math import pi
 import math
 import random
 from collections import deque
@@ -27,7 +28,7 @@ class Node:
         pygame 시각화 메소드
         debug 모드 시 노드 id 같이 출력
         """
-        screen_pos = world_to_screen_func(self.x, self.y)
+        screen_pos = world_to_screen_func((self.x, self.y))
         pygame.draw.circle(screen, color, (int(screen_pos[0]), int(screen_pos[1])), radius)
         if debug:
             font = pygame.font.SysFont(None, 12)
@@ -88,6 +89,12 @@ class Link:
         self.mode = mode
         self._sampled_points = None
         self._sample_step = None
+
+        self._cached_center_world_line = []
+        self._cached_left_world_line = []
+        self._cached_right_world_line = []
+        self._calculate_cached_world_lines()
+
         Link._id_iter += 1
 
     def get_target_vel(self):
@@ -116,7 +123,10 @@ class Link:
             dist = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)
 
             # 필요한 샘플 수 계산
-            num_samples = max(2, int(dist / step_size))
+            if(dist < 1e-3):
+                num_samples = 2
+            else:
+                num_samples = max(2, int(dist / step_size))
 
             # 두 점 사이를 균등하게 나누어 샘플링
             for j in range(num_samples):
@@ -138,6 +148,65 @@ class Link:
         self._sample_step = step_size
         return result
 
+    def _calculate_cached_world_lines(self):
+        """Calculates and caches the world coordinates of road lines (center, left, right)."""
+        if not self.path or len(self.path) == 0:
+            self._cached_center_world_line = []
+            self._cached_left_world_line = []
+            self._cached_right_world_line = []
+            return
+
+        _center_world_line = []
+        _left_world_line = []
+        _right_world_line = []
+        half_width = self.width / 2
+
+        if len(self.path) == 1:
+            p_world = self.path[0]
+            _center_world_line.append((p_world[0], p_world[1]))
+            _left_world_line.append((p_world[0], p_world[1]))
+            _right_world_line.append((p_world[0], p_world[1]))
+        else:
+            for i in range(len(self.path) - 1):
+                p1_world = self.path[i]
+                p2_world = self.path[i+1]
+
+                # 선분의 방향 벡터
+                dx = p2_world[0] - p1_world[0]
+                dy = p2_world[1] - p1_world[1]
+                length = math.sqrt(dx*dx + dy*dy)
+                if length < 0.01:
+                    continue
+
+                # 방향 벡터를 정규화
+                dx_norm, dy_norm = (dx/length, dy/length)
+                perpx, perpy = -dy_norm, dx_norm # 수직 벡터 (시계 방향으로 90도 회전)
+
+                _center_world_line.append((p1_world[0], p1_world[1]))
+                _left_world_line.append((p1_world[0] + perpx * half_width, p1_world[1] + perpy * half_width))
+                _right_world_line.append((p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width))
+
+            # 마지막 점 (P_{N-1})의 수직 벡터를 사용하여 마지막 세그먼트 (P_{N-2} -> P_{N-1})
+            p1_world = self.path[-2]
+            p2_world = self.path[-1]
+
+            dx = p2_world[0] - p1_world[0]
+            dy = p2_world[1] - p1_world[1]
+            length = math.sqrt(dx*dx + dy*dy)
+            if length > 0.01:
+                dx_norm, dy_norm = (dx/length, dy/length)
+                perpx, perpy = -dy_norm, dx_norm
+
+                last_p_world = self.path[-1]
+                _center_world_line.append((last_p_world[0], last_p_world[1]))
+                _left_world_line.append((last_p_world[0] + perpx * half_width, last_p_world[1] + perpy * half_width))
+                _right_world_line.append((last_p_world[0] - perpx * half_width, last_p_world[1] - perpy * half_width))
+
+        self._cached_center_world_line = _center_world_line
+        self._cached_left_world_line = _left_world_line
+        self._cached_right_world_line = _right_world_line
+
+
     def draw(self, screen, world_to_screen_func, debug=False):
         """
         pygame 시각화 메소드
@@ -145,42 +214,19 @@ class Link:
         path를 중심선으로 고정 너비(self.width)의 도로 시각화
         debug 모드 시 중심선과 연결된 노드 id 출력
         """
-        if not self.path or len(self.path) < 2:
+        if len(self._cached_center_world_line) < 1:
             return
 
         road_color = (100, 100, 100)  # 회색
         line_color = (255, 255, 0)  # 노란색
 
-        left = []
-        right = []
-        center = []
-        half_width = self.width / 2
+        center_screen = world_to_screen_func(self._cached_center_world_line)
+        left_screen = world_to_screen_func(self._cached_left_world_line)
+        right_screen = world_to_screen_func(self._cached_right_world_line)
 
-        # 도로 그리기
-        for i in range(len(self.path) - 1):
-            p1_world = self.path[i]
-            p2_world = self.path[i+1]
-
-            # 선분의 방향 벡터
-            dx = p2_world[0] - p1_world[0]
-            dy = p2_world[1] - p1_world[1]
-            length = math.sqrt(dx*dx + dy*dy)
-            if length < 0.01:
-                continue
-
-            # 방향 벡터를 정규화
-            dx_norm, dy_norm = dx/length, dy/length
-
-            # 수직 방향 벡터 (시계 방향으로 90도 회전)
-            perpx, perpy = -dy_norm, dx_norm
-
-            center.append(world_to_screen_func(p1_world[0], p1_world[1]))
-            left.append(world_to_screen_func(p1_world[0] + perpx * half_width, p1_world[1] + perpy * half_width))
-            right.append(world_to_screen_func(p1_world[0] - perpx * half_width, p1_world[1] - perpy * half_width))
-
-        pygame.draw.lines(screen, road_color, False, center, 2)
-        pygame.draw.lines(screen, line_color, False, left, 2)
-        pygame.draw.lines(screen, line_color, False, right, 2)
+        pygame.draw.lines(screen, road_color, False, center_screen, 2)
+        pygame.draw.lines(screen, line_color, False, left_screen, 2)
+        pygame.draw.lines(screen, line_color, False, right_screen, 2)
 
         # 디버그 모드 출력
         if debug:
@@ -190,7 +236,7 @@ class Link:
             font = pygame.font.SysFont(None, 12)
             text = font.render(f"{self.id}: {self.start.id}->{self.end.id}", True, (255, 255, 255))
             mid_point_world = self.path[len(self.path)//2]
-            mid_point_screen = world_to_screen_func(mid_point_world[0], mid_point_world[1])
+            mid_point_screen = world_to_screen_func((mid_point_world[0], mid_point_world[1]))
             screen.blit(text, (int(mid_point_screen[0]), int(mid_point_screen[1]) - 20))
 
     def get_serializable_state(self):
@@ -204,7 +250,10 @@ class Link:
             "path": self.path,
             "target_vel": self.target_vel,
             "width": self.width,
-            "mode": self.mode
+            "mode": self.mode,
+            "cached_center_world_line": self._cached_center_world_line,
+            "cached_left_world_line": self._cached_left_world_line,
+            "cached_right_world_line": self._cached_right_world_line
         }
 
     def load_from_serialized(self, data, nodes_dict):
@@ -215,6 +264,9 @@ class Link:
         self.target_vel = data["target_vel"]
         self.width = data["width"]
         self.mode = data["mode"]
+        self._cached_center_world_line = data["cached_center_world_line"]
+        self._cached_left_world_line = data["cached_left_world_line"]
+        self._cached_right_world_line = data["cached_right_world_line"]
         self._sampled_points = None
         self._sample_step = None
 
@@ -409,33 +461,34 @@ class PathPlanner:
         self.precision = (5, 5, 1)
         self.width = config["road_width"]
         self.config = config
+        self.default_speed = self.config['default_speed']
+        self.min_speed = self.config['min_speed']
+        self.max_speed = self.config['max_speed']
 
     def plan(self, point1, point2, obstacles, mode):
         """
         경로 계획 메소드
+
+        Returns:
+            nodes_points: node points list, 2D array
+            paths_list: path list, 2D array
         """
-        nodes_points = [] # node points list, 2D array
-        paths_list = [] # path list, 2D array
         if mode == 'plan':
             nodes_points, paths_list = self._rrt_with_dubins(point1, point2, obstacles)
         elif mode == 'curve':
-            nodes_points.append(point1)
-            nodes_points.append(point2)
-            paths_list.append(self._quadratic_bezier_curve(point1, point2))
+            nodes_points, paths_list = self._quadratic_bezier_curve(point1, point2)
         else:
-            nodes_points.append(point1)
-            nodes_points.append(point2)
-            paths_list.append(self._straight(point1, point2))
+            nodes_points, paths_list = self._straight(point1, point2)
         return nodes_points, paths_list
 
-    def calculate_target_vel(self, path, default_speed=30, min_speed=5, max_speed=50):
+    def calculate_target_vel(self, path):
         """
         경로 곡률에 따른 목표 속도 계산
         최소 속도 5, 최대 속도 50
         앞부분과 마지막 부분의 곡률에 더 높은 가중치 부여
         """
         if not path or len(path) < 3:
-            return default_speed  # 기본 속도
+            return self.default_speed  # 기본 속도
 
         # 전체 경로의 가중 평균 곡률 계산
         weighted_total_curvature = 0
@@ -482,7 +535,7 @@ class PathPlanner:
                 pass
 
         if not curvatures:
-            return default_speed  # 기본 속도
+            return self.default_speed  # 기본 속도
 
         # 위치에 따른 가중치 적용
         path_length = len(path) - 2  # 곡률을 계산할 수 있는 점의 개수
@@ -506,9 +559,9 @@ class PathPlanner:
         normalized_curvature = min(avg_curvature / max_curvature, 1.0)
 
         # 속도 범위: 5 ~ 50
-        velocity = max_speed - normalized_curvature * (max_speed - min_speed)
+        velocity = self.max_speed - normalized_curvature * (self.max_speed - self.min_speed)
 
-        return max(min_speed, min(max_speed, velocity))
+        return max(self.min_speed, min(self.max_speed, velocity))
 
     def _select_options(self, nodes, sample, nb_options):
         options = []
@@ -517,20 +570,20 @@ class PathPlanner:
         options.sort(key=lambda x: x[1])
         return options[:nb_options]
 
-    def _is_collision_path(self, path_points, obstacles, collision_dist):
+    def _is_collision_path(self, path_points, obstacles_array, collision_dist):
         """Checks if any point in path_points collides with obstacles."""
-        if path_points is None or len(path_points) == 0:
+        if path_points is None or len(path_points) == 0 or len(obstacles_array) == 0:
             return False
-        for point in path_points:
-            point_coords = (point[0], point[1])
-            for obstacle in obstacles:
-                obs_center = np.array([obstacle[0], obstacle[1]])
-                obs_effective_radius = obstacle[2] + collision_dist
 
-                dist_sq = (point_coords[0] - obs_center[0])**2 + (point_coords[1] - obs_center[1])**2
-                if dist_sq < obs_effective_radius**2:
-                    return True
-        return False
+        path_coords = path_points # Shape: (N, 2)
+        obstacles_center = obstacles_array[:, :2] # Shape: (M, 2)
+        obstacles_effective_radii_sq = (obstacles_array[:, 2] + collision_dist)**2 # Shape: (M,)
+
+        diff = path_coords[:, np.newaxis, :] - obstacles_center[np.newaxis, :, :] # Shape: (N, M, 2)
+        dist_sq_matrix = np.sum(diff**2, axis=2) # Shape: (N, M)
+        collision_matrix = dist_sq_matrix < obstacles_effective_radii_sq[np.newaxis, :] # Shape: (N, M)
+
+        return np.any(collision_matrix)
 
     def _reconstruct_path(self, root_pos, goal_reached_pos, rrt_nodes_map, rrt_edges_map):
         """
@@ -538,13 +591,13 @@ class PathPlanner:
         Returns a list of (x, y, yaw) waypoints.
         """
         if goal_reached_pos is None or goal_reached_pos not in rrt_nodes_map:
-            return [], []
+            raise ValueError("Path reconstruction error: Goal reached position is None or not in RRT nodes map.")
 
         if goal_reached_pos == root_pos:
             edge_for_start_goal = rrt_edges_map.get((root_pos, root_pos))
             if edge_for_start_goal and edge_for_start_goal.path:
                 return [root_pos], [list(edge_for_start_goal.path)]
-            return [root_pos], []
+            raise ValueError("Path reconstruction error: Missing edge or path segment from root to root.")
 
         path_nodes = deque([goal_reached_pos])
         path_segments = deque()
@@ -553,15 +606,13 @@ class PathPlanner:
         while current_pos != root_pos:
             node_data = rrt_nodes_map.get(current_pos)
             if node_data is None or node_data.parent_pos is None:
-                print("Path reconstruction error: Inconsistent tree or orphaned node.")
-                return [], []
+                raise ValueError("Path reconstruction error: Inconsistent tree or orphaned node.")
 
             parent_pos = node_data.parent_pos
             edge = rrt_edges_map.get((parent_pos, current_pos))
 
             if edge is None or not edge.path:
-                print(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
-                return [], []
+                raise ValueError(f"Path reconstruction error: Missing edge or path segment from {parent_pos} to {current_pos}.")
 
             path_nodes.appendleft(parent_pos)
             path_segments.appendleft(list(edge.path))
@@ -590,6 +641,7 @@ class PathPlanner:
         goal = point2
         root = start
         collision_dist = self.width / 2.0
+        obstacles_array = np.array(obstacles)
 
         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
 
@@ -614,7 +666,7 @@ class PathPlanner:
                                                                          opt_data[1],
                                                                          opt_data[2])
 
-                if self._is_collision_path(path_segment_points, obstacles, collision_dist):
+                if self._is_collision_path(path_segment_points, obstacles_array, collision_dist):
                     break
 
                 parent_rrt_node = nodes[node_from_option]
@@ -634,8 +686,11 @@ class PathPlanner:
                         break
                 break
 
-        # 경로를 찾지 못한 경우, 직선 경로로 대체
-        return self._straight(start, goal)
+        # # 경로를 찾지 못한 경우, 직선 경로로 대체
+        # return self._straight(start, goal)
+
+        raise Exception("Failed to find rrt-dubins path")
+
 
     def _straight(self, point1, point2):
         """
@@ -644,6 +699,7 @@ class PathPlanner:
         # 시작점과 끝점
         start = (point1[0], point1[1], point1[2])
         end = (point2[0], point2[1], point2[2])
+        nodes_points = [start, end]
         path = []
 
         # 방향 계산
@@ -668,7 +724,7 @@ class PathPlanner:
 
             path.append((x, y, yaw))
 
-        return path
+        return nodes_points, [path]
 
     def _quadratic_bezier_curve(self, point1, point2):
         """
@@ -677,6 +733,7 @@ class PathPlanner:
         # 시작점과 끝점
         start = (point1[0], point1[1], point1[2])
         end = (point2[0], point2[1], point2[2])
+        nodes_points = [start, end]
 
         # 시작 방향 및 끝 방향의 단위 벡터
         start_dir = (math.cos(start[2]), math.sin(start[2]))
@@ -770,7 +827,7 @@ class PathPlanner:
 
             path.append((x, y, yaw))
 
-        return path
+        return nodes_points, [path]
 
 
 class RoadNetworkManager:
@@ -788,6 +845,7 @@ class RoadNetworkManager:
         self.half_width = self.width / 2.0
         self.nodes = []
         self.links = []
+        self._node_coords = np.array([]).reshape(0, 2)
 
     def add_node(self, point):
         """노드 추가"""
@@ -797,6 +855,7 @@ class RoadNetworkManager:
 
         new_node = Node(point[0], point[1], point[2])
         self.nodes.append(new_node)
+        self._node_coords = np.vstack((self._node_coords, np.array([new_node.x, new_node.y])))
         return new_node
 
     def make_link(self, point1, point2, obstacles=[], mode='plan'):
@@ -849,16 +908,13 @@ class RoadNetworkManager:
         if not self.nodes:
             return None
 
-        min_dist = float('inf')
-        closest_node = None
+        node_coords = self._node_coords # Shape: (K, 2)
+        target_point = np.array([x, y]) # Shape: (2,)
 
-        for node in self.nodes:
-            dist = math.sqrt((node.x - x)**2 + (node.y - y)**2)
-            if dist < min_dist:
-                min_dist = dist
-                closest_node = node
+        dist_sq_vector = np.sum((node_coords - target_point)**2, axis=1) # Shape: (K,)
+        min_dist_idx = np.argmin(dist_sq_vector)
 
-        return closest_node
+        return self.nodes[min_dist_idx]
 
     def _find_link_by_node(self, node):
         """노드가 포함된 모든 링크 찾기"""
@@ -880,20 +936,16 @@ class RoadNetworkManager:
         # 링크의 경로 샘플링
         sampled_points = link.sample(0.5)
 
-        if not sampled_points:
+        if len(sampled_points) == 0:
             return None, float('inf')
 
-        # 가장 가까운 포인트 찾기
-        min_dist = float('inf')
-        closest_point = None
+        point_coords = np.array(sampled_points) # Shape: (K, 3)
+        target_point = np.array([x, y]) # Shape: (2,)
 
-        for point in sampled_points:
-            dist = math.sqrt((point[0] - x)**2 + (point[1] - y)**2)
-            if dist < min_dist:
-                min_dist = dist
-                closest_point = point
+        dist_sq_vector = np.sum((point_coords[:, :2] - target_point)**2, axis=1) # Shape: (K,)
+        min_dist_idx = np.argmin(dist_sq_vector)
 
-        return closest_point, min_dist
+        return sampled_points[min_dist_idx], math.sqrt(dist_sq_vector[min_dist_idx])
 
     def get_vehicle_update_data(self, vehicle_position=(0,0,0)):
         """
@@ -918,10 +970,9 @@ class RoadNetworkManager:
         # 가장 가까운 링크와 포인트 및 평균 목표 속도 계산
         min_weighted_dist = float('inf')
         closest_point = None
-        closest_link = None
         average_target_vel = 0
 
-        yaw_weight = 2.0
+        yaw_weight = 1.5
 
         for link in links:
             point, dist = self._get_closest_point(x, y, link)
@@ -936,35 +987,13 @@ class RoadNetworkManager:
             if weighted_dist < min_weighted_dist:
                 min_weighted_dist = weighted_dist
                 closest_point = point
-                closest_link = link
             average_target_vel += link.get_target_vel()
 
         if (links):
             average_target_vel /= len(links)
 
-        # 추가적으로 근처의 다른 링크도 확인
-        for link in self.links:
-            if link in links:
-                continue
-
-            point, dist = self._get_closest_point(x, y, link)
-            if point is None:
-                continue
-
-            point_yaw = point[2]
-            yaw_diff = abs(self._normalize_angle(yaw - point_yaw))
-
-            weighted_dist = dist * (1 + yaw_diff * yaw_weight)
-
-            if weighted_dist < min_weighted_dist:
-                min_weighted_dist = weighted_dist
-                closest_point = point
-                closest_link = link
-
         if not closest_point:
             return None, None, None, False
-
-        closest_point  # 가장 가까운 포인트 저장
 
         # Frenet 좌표계의 d 계산 (차량이 경로에서 좌/우로 얼마나 떨어져 있는지)
         # 차량과 경로 포인트 사이의 벡터
@@ -988,11 +1017,7 @@ class RoadNetworkManager:
 
     def _normalize_angle(self, angle):
         """각도를 -pi~pi 범위로 정규화"""
-        while angle > math.pi:
-            angle -= 2.0 * math.pi
-        while angle < -math.pi:
-            angle += 2.0 * math.pi
-        return angle
+        return (angle + pi) % (2 * pi) - pi
 
     def get_serializable_state(self):
         """
@@ -1030,6 +1055,7 @@ class RoadNetworkManager:
             node.load_from_serialized(node_data)
             self.nodes.append(node)
             nodes_dict[node.id] = node
+            self._node_coords = np.vstack((self._node_coords, np.array([node.x, node.y])))
         # 노드 ID 이터레이터 복원
         Node._id_iter = data.get("node_id_iter", 0)
 
@@ -1044,6 +1070,7 @@ class RoadNetworkManager:
         """노드와 링크 초기화"""
         self.nodes = []
         self.links = []
+        self._node_coords = np.array([]).reshape(0, 2)
         Node._id_iter = 0  # 노드 ID 초기화
         Link._id_iter = 0  # 링크 ID 초기화
 

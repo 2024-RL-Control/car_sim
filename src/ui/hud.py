@@ -61,10 +61,11 @@ class HUD:
         # 목적지 정보 추가
         goal = vehicle.get_current_goal()
         if goal:
-            distance = state.distance_to_target
+            distance = state.curr_distance_to_target
             yaw_diff = np.degrees(state.yaw_diff_to_target)
             hud.extend([
                 f"Target: ({state.target_x:.1f}, {state.target_y:.1f})",
+                f"Progress: {state.get_progress():.2f}%",
                 f"Distance to target: {distance:.2f}m",
                 f"Heading diff: {yaw_diff:.1f}°"
             ])
@@ -113,7 +114,7 @@ class HUD:
         screen.blit(speed_text, speed_rect)
         screen.blit(kmh_text, kmh_rect)
 
-    def draw_target_direction_arrows(self, screen, vehicles, active_vehicle_idx, world_to_screen):
+    def draw_target_direction_arrows(self, screen, vehicles, active_vehicle_idx, world_to_screen_func):
         """
         각 차량의 목표 방향 화살표 그리기
 
@@ -121,7 +122,7 @@ class HUD:
             screen: pygame 화면 객체
             vehicles: 차량 리스트
             active_vehicle_idx: 활성 차량 인덱스
-            world_to_screen: 월드 좌표를 화면 좌표로 변환하는 함수
+            world_to_screen_func: 월드 좌표를 화면 좌표로 변환하는 함수
         """
         if not vehicles:
             return
@@ -133,8 +134,8 @@ class HUD:
             goal = vehicle.get_current_goal()
             if goal:
                 # 차량 위치와 목표 위치를 화면 좌표로 변환
-                vehicle_pos = world_to_screen(vehicle.state.x, vehicle.state.y)
-                target_pos = world_to_screen(vehicle.state.target_x, vehicle.state.target_y)
+                vehicle_pos = world_to_screen_func((vehicle.state.x, vehicle.state.y))
+                target_pos = world_to_screen_func((vehicle.state.target_x, vehicle.state.target_y))
 
                 # 화살표 그리기 (차량에서 목표로)
                 # 화살표 색상은 활성 차량이면 밝은 노란색, 아니면 어두운 노란색

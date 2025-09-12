@@ -183,8 +183,6 @@ class LidarSensor(BaseSensor):
         self.angle_end = radians(sensor_config.get('angle_end', 180.0))
         self.max_range = float(sensor_config.get('max_range', 50.0))
         self.min_range = float(sensor_config.get('min_range', 0.1))
-        self.scan_rate = int(sensor_config.get('scan_rate', 10))
-        self.scan_interval = 1.0 / self.scan_rate if self.scan_rate > 0 else 0
 
         # 노이즈 파라미터 설정
         self.noise_params = {
@@ -251,19 +249,15 @@ class LidarSensor(BaseSensor):
         Returns:
             측정이 수행되었는지 여부 (Boolean)
         """
-        # 스캔 주기에 따른 업데이트 수행
-        if time_elapsed - self.last_scan_time >= self.scan_interval:
-            # 스캔 수행
-            self.current_data = self._perform_scan(time_elapsed, objects)
+        # 스캔 수행
+        self.current_data = self._perform_scan(time_elapsed, objects)
 
-            # 스캔 결과 히스토리 저장
-            if self.scan_history is not None:
-                self.scan_history.append(self.current_data)
+        # 스캔 결과 히스토리 저장
+        if self.scan_history is not None:
+            self.scan_history.append(self.current_data)
 
-            self.last_scan_time = time_elapsed
-            return True
-
-        return False
+        self.last_scan_time = time_elapsed
+        return True
 
     def _perform_scan(self, timestamp, objects):
         """
@@ -498,14 +492,14 @@ class LidarSensor(BaseSensor):
 
         # 센서 위치
         sensor_x, sensor_y, _ = self.current_data.sensor_pose
-        sensor_screen_pos = world_to_screen_func(sensor_x, sensor_y)
+        sensor_screen_pos = world_to_screen_func((sensor_x, sensor_y))
 
         # 센서 본체 그리기
         pygame.draw.circle(screen, self.sensor_color, sensor_screen_pos, 3)
 
         # 현재 스캔 결과 그리기
         for i, hit in enumerate(self.current_data.ranges):
-            hit_screen_pos = world_to_screen_func(hit.hit_x, hit.hit_y)
+            hit_screen_pos = world_to_screen_func((hit.hit_x, hit.hit_y))
 
 
             # 감지 실패(최대 거리)인 경우와 성공한 경우 색상 다르게
@@ -522,7 +516,7 @@ class LidarSensor(BaseSensor):
             if self.scan_history:
                 for scan in self.scan_history:
                     for hit in scan.ranges:
-                        hit_screen_pos = world_to_screen_func(hit.hit_x, hit.hit_y)
+                        hit_screen_pos = world_to_screen_func((hit.hit_x, hit.hit_y))
                         # 작은 반투명 점으로 히스토리 표시
                         pygame.draw.circle(screen, self.sensor_history_data_color, hit_screen_pos, 1)
 

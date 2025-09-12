@@ -2,6 +2,7 @@
 import pygame
 import gymnasium as gym
 from gymnasium import spaces
+from math import cos, exp
 import numpy as np
 import time
 import pickle
@@ -81,27 +82,22 @@ class CarSimulatorEnv(gym.Env):
         # Pygame 초기화
         self._init_pygame()
 
-        # 차량 조작 공간 - 각 차량마다 별도 액션
-        self.action_space = spaces.Tuple([
-            spaces.Box(
-                low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
-                high=np.array([1.0, 1.0,  1.0]),
-                dtype=np.float64
-            ) for _ in range(self.num_vehicles)
-        ])
+        # 각 차량의 조작 공간
+        self.action_space = spaces.Box(
+            low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
+            high=np.array([1.0, 1.0,  1.0]),
+            shape=(3,),
+            dtype=np.float64
+        )
 
-        # 관측 공간 - 각 차량마다 별도 관측
-        # 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
+        # 각 차량의 관측 공간, 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
         obs_dim = 91  # 13(기본상태) + 36(LIDAR) + 42(궤적)
-
-        self.observation_space = spaces.Tuple([
-            spaces.Box(
-                low=-1.0,
-                high=1.0,
-                shape=(obs_dim,),
-                dtype=np.float64
-            ) for _ in range(self.num_vehicles)
-        ])
+        self.observation_space = spaces.Box(
+            low=-1.0,
+            high=1.0,
+            shape=(obs_dim,),
+            dtype=np.float64
+        )
 
     def _init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
@@ -195,24 +191,24 @@ class CarSimulatorEnv(gym.Env):
             import traceback
             traceback.print_exc()
 
-    def step(self, action):
+    def step(self, actions):
         """
         환경 스텝 실행
 
         Args:
-            action: 단일 차량 모드: [엔진, 브레이크, 조향] 명령
-                    다중 차량 모드: 차량별 [엔진, 브레이크, 조향] 명령 리스트
+            actions: 차량별 [엔진, 브레이크, 조향] 명령 (액션 리스트, 2차원 배열)
 
         Returns:
-            obs: 관측 [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
-            reward: 보상
+            observations: 차량별 관측 (num_vehicles, obs_dim) [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
+            rewards: 차량별 보상 (num_vehicles,)
             done: 종료 여부
             info: 추가 정보
         """
         # 프레임 시간 계산
         current_time = time.time()
-        dt = current_time - self._last_update_time
-        dt = max(min(dt, 0.1), 1e-4)  # 최소 0.0001초, 최대 0.1초
+        # dt = current_time - self._last_update_time
+        # dt = max(min(dt, 0.1), 1e-2)  # 최소 0.01초, 최대 0.1초
+        dt = 0.05  # 고정된 시간 간격 (10ms)
 
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()
@@ -224,38 +220,28 @@ class CarSimulatorEnv(gym.Env):
         self._time_elapsed += dt
 
         # 차량 업데이트 및 충돌 감지
-        collisions, outside_roads, reached_targets = self.vehicle_manager.step(
-            action, dt, self._time_elapsed, obstacles
+        collisions, outside_roads, reached_targets, terminated, truncated = self.vehicle_manager.step(
+            actions, dt, self._time_elapsed, obstacles
         )
 
         # 관측값 및 보상 계산
-        obs_array = self._get_obs()
-        reward_array = self._calculate_rewards(collisions, outside_roads, reached_targets)
+        observations = self._get_obs()
+        rewards = self._calculate_rewards(collisions, outside_roads, reached_targets)
 
         # 물리 시뮬레이션 시간 측정
         physics_time = time.time() - physics_start
         if self.renderer:
             self.renderer.set_physics_time(physics_time)
 
-        # 충돌 여부 확인
-        all_collision = all(collisions.values())
-
-        # 도로 이탈 여부 확인
-        all_outside_road = all(outside_roads.values())
-
-        # 목표 도달 여부 확인
-        all_reached_target = all(reached_targets.values())
-
-        # 종료 여부 결정, 모든 차량이 충돌 or 도로 벗어남 or 목표 도달 시 종료
-        done = all_collision or all_outside_road or all_reached_target
+        # 종료 여부 결정, 모든 차량이 종료 및 중단 상태라면 종료
+        done = all(terminated.values()) or all(truncated.values())
 
         info = {
             'collisions': collisions,
             'outside_roads': outside_roads,
             'reached_targets': reached_targets,
-            'all_collision': all_collision,
-            'all_outside_road': all_outside_road,
-            'all_reached_target': all_reached_target
+            'terminated': terminated,
+            'truncated': truncated
         }
 
         # 상태 기록 (리플레이용)
@@ -267,10 +253,23 @@ class CarSimulatorEnv(gym.Env):
         # 시간 업데이트
         self._last_update_time = current_time
 
-        return obs_array, reward_array, done, info
+        return observations, rewards, done, False, info
 
-    def reset(self):
-        """환경 초기화"""
+    def reset(self, *, seed=None, options=None):
+        """환경 초기화
+
+        Args:
+            seed: 환경의 난수 생성기 시드
+            options: 추가 옵션 딕셔너리
+
+        Returns:
+            observation: 초기 관측값
+            info: 추가 정보 딕셔너리
+        """
+        # 시드가 제공되면 설정
+        if seed is not None:
+            np.random.seed(seed)
+
         # 차량 초기화
         self.vehicle_manager.reset_vehicle()
 
@@ -305,7 +304,7 @@ class CarSimulatorEnv(gym.Env):
         """환경 종료"""
         pygame.quit()
 
-    def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0)):
+    def add_goal_for_vehicle(self, vehicle_id, x, y, yaw=0.0, radius=1.0, color=(0, 255, 0), mode='plan'):
         """
         차량에 목적지 추가
 
@@ -323,12 +322,12 @@ class CarSimulatorEnv(gym.Env):
         goal_id = self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
         if goal_id is not None:
             vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
-            road = self.add_road(vehicle, x, y, yaw)
+            road = self.add_road(vehicle, x, y, yaw, mode=mode)
             return road
         else:
             return goal_id
 
-    def add_road(self, vehicle, x, y, yaw):
+    def add_road(self, vehicle, x, y, yaw, mode='plan'):
         """
         차량에 도로 추가
 
@@ -356,7 +355,7 @@ class CarSimulatorEnv(gym.Env):
                 raise ValueError("위치가 다른 차량과 충돌합니다")
             objects.extend(body)
 
-        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects)
+        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects, mode=mode)
 
     def _get_obs(self):
         """
@@ -365,8 +364,8 @@ class CarSimulatorEnv(gym.Env):
         Returns:
             관측값 (numpy 배열), (num_vehicles, obs_dim)
         """
-        obs_array = np.array([self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()])
-        return obs_array
+        observations = np.array([self._get_vehicle_observation(vehicle) for vehicle in self.vehicle_manager.get_all_vehicles()])
+        return observations
 
     def _get_vehicle_observation(self, vehicle):
         """
@@ -379,15 +378,16 @@ class CarSimulatorEnv(gym.Env):
             관측값 (numpy 배열)
         """
         state = vehicle.get_state()
+        progress = state.get_progress()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
-        goal_distance = state.scale_distance(state.distance_to_target)
         cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d)
 
         # 기본 차량 상태 (13, )
         obs = np.array([
+            progress,               # -1 ~ 1
             state.steer,            # -1 ~ 1
             state.throttle_engine,  # 0 ~ 1
             state.throttle_brake,   # 0 ~ 1
@@ -397,18 +397,20 @@ class CarSimulatorEnv(gym.Env):
             scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
             scale_acc_lat,          # -1 ~ 1
-            goal_distance,          # 0 ~ 1
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
         ], dtype=np.float32)
 
-        # (36, ), 0 ~ 1, 정규화된 데이터
-        lidar_data = state.get_lidar_data()
         # (6, 7), (norm_distance, cos_diff, sin_diff, scale_vel_long, scale_acc_long, scale_vel_lat, scale_acc_lat)
         trajectory_data = state.get_trajectory_data(self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long, self.max_vel_lat, self.max_acc_lat)
+        # if len(trajectory_data) !=0:
+        #     print(trajectory_data[0][0], trajectory_data[1][0], trajectory_data[2][0])
 
-        obs = np.concatenate((obs, lidar_data, trajectory_data.flatten())) # (91, )
+        # (36, ), 0 ~ 1, 정규화된 데이터
+        lidar_data = state.get_lidar_data()
+
+        obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (91, )
         return obs
 
     def _calculate_rewards(self, collisions, outside_roads, reached_targets):
@@ -450,31 +452,48 @@ class CarSimulatorEnv(gym.Env):
         state = vehicle.get_state()
         rewards = self.config['simulation']['rewards']
 
+        # 1. 종료 조건에 대한 즉각적인 보상/페널티
+        if reached_target:
+            return rewards['goal_reached_reward']
+        if collision:
+            return rewards['collision_penalty']
+        if outside_road:
+            return rewards['outside_road_penalty']
+
+        # 2. 주행 과정에 대한 상세 보상
         reward = 0
 
-        # 속도 보상 (최대 속도에 가까울수록 높은 보상)
-        speed_reward = (state.vel_long / self.config['vehicle']['max_speed']) * rewards['speed_reward_factor']
+        # --- 목표 지향 보상 ---
+
+        # 진행률(목표 거리)에 따른 보상 (가까울수록 높은 보상)
+        progress = state.get_progress()
+        progress_reward = progress * rewards['progress_factor']
+        reward += progress_reward
+
+        # --- 주행 안정성 보상 ---
+
+        # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
+        frenet_d_norm = state.scale_frenet_d(state.frenet_d) # np.tanh(d/10)로 정규화 [-1 ~ 1]
+        frenet_d_norm = min(abs(frenet_d_norm) / 0.3 , 1.0)  # 절대값으로 변환하여 0.3을 기준으로 정규화
+        lane_keeping_reward = (1 - frenet_d_norm) * rewards['lane_keeping_factor']
+        reward += lane_keeping_reward
+
+        # 목표 속도 유지 보상 (도로가 제안하는 속도와 가까울수록 높은 보상)
+        current_vel = state.vel_long * 3.6 # m/s to km/h
+        target_vel = state.target_vel_long or 0  # 목표 속도가 없을 경우 0으로 설정
+        speed_diff = current_vel - target_vel
+        sigma = 10.0
+        speed_norm = exp(-((speed_diff**2) / (2 * sigma**2))) # 가우시안 커널
+        if speed_norm < 1e-4:
+            speed_norm = 0
+        speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
 
-        # 목표 거리에 따른 보상 (가까울수록 높은 보상)
-        if state.distance_to_target > 0:
-            proximity_reward = 1.0 / (1.0 + state.distance_to_target) * rewards['distance_reward_factor']
-            reward += proximity_reward
+        # 정지 페널티
+        stop = state.vel_long < 0.1  # 속도가 0.1 이하인 경우 정지로 간주, 후진 포함
+        if stop:
+            delta = state.get_delta_progress()
+            reward += -abs(delta)
 
-        # 방향 일치 보상 (차량이 목표를 바라볼수록 높은 보상)
-        direction_reward = (1.0 - abs(state.yaw_diff_to_target) / np.pi) * rewards['orientation_reward_factor']
-        reward += direction_reward
-
-        # 충돌 패널티
-        if collision:
-            reward -= rewards['collision_penalty']
-
-        # 도로 이탈 패널티
-        if outside_road:
-            reward -= rewards['outside_road_penalty']
-
-        # 목표 도달 보상
-        if reached_target:
-            reward += rewards['goal_reached_reward']
-
+        # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, Delta: {-abs(delta) if stop else 0}")
         return reward

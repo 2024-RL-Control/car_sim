@@ -64,11 +64,16 @@ class BaseObstacle:
         self.yaw_rate = yaw_rate
         self.vel = vel
 
+    def _normalize_angle(self, angle):
+        """[-π, π] 범위로 각도 정규화"""
+        return (angle + pi) % (2 * pi) - pi
+
     def update(self, dt: float):
         """객체 상태 업데이트: 이동 및 회전"""
         # 회전 업데이트
-        self.yaw += self.yaw_rate * dt
-        self.yaw = (self.yaw + pi) % (2 * pi) - pi  # [-π, π] 범위로 정규화
+        if abs(self.yaw_rate) > 0.001:
+            self.yaw += self.yaw_rate * dt
+            self.yaw = self._normalize_angle(self.yaw)
 
         # 이동 업데이트 (현재 방향으로)
         if abs(self.vel) > 0.001:  # 속도가 있는 경우만
@@ -84,10 +89,10 @@ class BaseObstacle:
         # 외접원 (색상: bounding_circle_colors[0])
         for circle in self.outer_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
-            circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
+            circle_pos = world_to_screen_func((world_pos[0], world_pos[1]))
 
             # 반지름을 화면 스케일로 변환
-            x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
+            x2 = world_to_screen_func((world_pos[0] + circle.radius, world_pos[1]))
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
             pygame.draw.circle(screen, self.bounding_circle_colors[0], circle_pos, screen_radius, 1)
@@ -95,10 +100,10 @@ class BaseObstacle:
         # 중간원 (색상: bounding_circle_colors[1])
         for circle in self.middle_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
-            circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
+            circle_pos = world_to_screen_func((world_pos[0], world_pos[1]))
 
             # 반지름을 화면 스케일로 변환
-            x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
+            x2 = world_to_screen_func((world_pos[0] + circle.radius, world_pos[1]))
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
             pygame.draw.circle(screen, self.bounding_circle_colors[1], circle_pos, screen_radius, 1)
@@ -106,10 +111,10 @@ class BaseObstacle:
         # 내접원 (색상: bounding_circle_colors[2])
         for circle in self.inner_circles:
             world_pos = circle.get_world_position(self.x, self.y, self.yaw)
-            circle_pos = world_to_screen_func(world_pos[0], world_pos[1])
+            circle_pos = world_to_screen_func((world_pos[0], world_pos[1]))
 
             # 반지름을 화면 스케일로 변환
-            x2 = world_to_screen_func(world_pos[0] + circle.radius, world_pos[1])
+            x2 = world_to_screen_func((world_pos[0] + circle.radius, world_pos[1]))
             screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(circle_pos))))
 
             pygame.draw.circle(screen, self.bounding_circle_colors[2], circle_pos, screen_radius, 1)
@@ -167,10 +172,10 @@ class CircleObstacle(BaseObstacle):
     def draw(self, screen, world_to_screen_func, debug: bool = False):
         """원형 객체 렌더링"""
         # 객체 중심 위치를 화면 좌표로 변환
-        screen_pos = world_to_screen_func(self.x, self.y)
+        screen_pos = world_to_screen_func((self.x, self.y))
 
         # 반지름을 화면 스케일로 변환
-        x2 = world_to_screen_func(self.x + self.radius, self.y)
+        x2 = world_to_screen_func((self.x + self.radius, self.y))
         screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(screen_pos))))
 
         # 원형 객체 그리기
@@ -228,7 +233,7 @@ class SquareObstacle(BaseObstacle):
         ]
 
         # 꼭지점 변환 (월드 좌표 → 화면 좌표)
-        screen_corners = []
+        world_corners = []
         for dx, dy in corners:
             # 회전 변환
             rotated_x = dx * cos(self.yaw) - dy * sin(self.yaw)
@@ -239,9 +244,10 @@ class SquareObstacle(BaseObstacle):
             world_y = self.y + rotated_y
 
             # 화면 좌표
-            screen_corners.append(world_to_screen_func(world_x, world_y))
+            world_corners.append((world_x, world_y))
 
         # 정사각형 그리기
+        screen_corners = world_to_screen_func(world_corners)
         pygame.draw.polygon(screen, self.color, screen_corners, 2)
 
         # 디버그 모드: 경계 원 표시
@@ -328,7 +334,7 @@ class RectangleObstacle(BaseObstacle):
         ]
 
         # 꼭지점 변환 (월드 좌표 → 화면 좌표)
-        screen_corners = []
+        world_corners = []
         for dx, dy in corners:
             # 회전 변환
             rotated_x = dx * cos(self.yaw) - dy * sin(self.yaw)
@@ -339,9 +345,10 @@ class RectangleObstacle(BaseObstacle):
             world_y = self.y + rotated_y
 
             # 화면 좌표
-            screen_corners.append(world_to_screen_func(world_x, world_y))
+            world_corners.append((world_x, world_y))
 
         # 직사각형 그리기
+        screen_corners = world_to_screen_func(world_corners)
         pygame.draw.polygon(screen, self.color, screen_corners, 2)
 
         # 디버그 모드: 경계 원 표시
@@ -374,10 +381,10 @@ class Goal(BaseObstacle):
     def draw(self, screen, world_to_screen_func, is_current: bool = False, debug: bool = False):
         """목적지 렌더링"""
         # 객체 중심 위치를 화면 좌표로 변환
-        screen_pos = world_to_screen_func(self.x, self.y)
+        screen_pos = world_to_screen_func((self.x, self.y))
 
         # 반지름을 화면 스케일로 변환
-        x2 = world_to_screen_func(self.x + self.radius, self.y)
+        x2 = world_to_screen_func((self.x + self.radius, self.y))
         screen_radius = max(1, int(np.linalg.norm(np.array(x2) - np.array(screen_pos))))
 
         original_color = self.color
