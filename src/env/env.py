@@ -36,6 +36,8 @@ class CarSimulatorEnv(gym.Env):
         # config.yaml에서 설정 로드
         self.config = load_config(config_path)
 
+        self.fixed_dt = self.config['simulation']['dt']
+
         self.max_vel_long = self.config['vehicle']['max_speed']
         self.min_vel_long = self.config['vehicle']['min_speed']
         self.max_acc_long = self.config['vehicle']['max_accel']
@@ -91,13 +93,20 @@ class CarSimulatorEnv(gym.Env):
         )
 
         # 각 차량의 관측 공간, 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
-        obs_dim = 30  # 13(기본상태) + 13(LIDAR) + 4(궤적)
+        self.obs_dim = self._calculate_obs_dim()
         self.observation_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(obs_dim,),
+            shape=(self.obs_dim,),
             dtype=np.float64
         )
+
+    def _calculate_obs_dim(self):
+        """관측 차원 동적 계산"""
+        vehicle_state_dim = self.config['simulation']['observation']['vehicle_state_dim']  # 차량 상태 데이터
+        lidar_dim = self.config['simulation']['observation']['lidar_dim']  # 라이다 데이터
+        trajectory_dim = self.config['simulation']['observation']['trajectory_dim']  # 경로 데이터
+        return vehicle_state_dim + lidar_dim + trajectory_dim
 
     def _init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
@@ -208,7 +217,7 @@ class CarSimulatorEnv(gym.Env):
         current_time = time.time()
         # dt = current_time - self._last_update_time
         # dt = max(min(dt, 0.1), 1e-2)  # 최소 0.01초, 최대 0.1초
-        dt = 0.025  # 고정된 시간 간격 (10ms)
+        dt = self.fixed_dt  # 설정 가능한 시간 간격
 
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()
