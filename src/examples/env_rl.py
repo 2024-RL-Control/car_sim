@@ -187,7 +187,7 @@ class BasicRLDrivingEnv(gym.Env):
         xs = np.random.uniform(self.obstacle_area['x_min'], self.obstacle_area['x_max'], size=n_dynamic)
         ys = np.random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'], size=n_dynamic)
         yaws = np.random.uniform(-pi/2, pi/2, size=n_dynamic)
-        yaw_rates = np.random.uniform(-0.4, 0.4, size=n_dynamic)  # 회전 속도
+        yaw_rates = np.random.uniform(-0.2, 0.2, size=n_dynamic)  # 회전 속도
         speeds = np.random.uniform(1.0, 3.0, size=n_dynamic)
         sizes = np.random.uniform(1.0, 3.0, size=n_dynamic)
         types = np.random.choice(['circle', 'square'], size=n_dynamic)
