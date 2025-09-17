@@ -347,7 +347,7 @@ class Dubins:
         dist_intercenter = dist(center_0, center_2)
         intercenter = (center_2 - center_0)/2
         psia = np.arctan2(intercenter[1], intercenter[0])
-        if 2*self.radius < dist_intercenter > 4*self.radius:
+        if dist_intercenter < 2*self.radius or dist_intercenter > 4*self.radius:
             return (float('inf'), (0, 0, 0), False)
         gamma = 2*np.arcsin(dist_intercenter/(4*self.radius))
         beta_0 = (psia-start[2]+np.pi/2+(np.pi-gamma)/2)%(2*np.pi)
@@ -361,7 +361,7 @@ class Dubins:
         dist_intercenter = dist(center_0, center_2)
         intercenter = (center_2 - center_0)/2
         psia = np.arctan2(intercenter[1], intercenter[0])
-        if 2*self.radius < dist_intercenter > 4*self.radius:
+        if dist_intercenter < 2*self.radius or dist_intercenter > 4*self.radius:
             return (float('inf'), (0, 0, 0), False)
         gamma = 2*np.arcsin(dist_intercenter/(4*self.radius))
         beta_0 = -((-psia+(start[2]+np.pi/2)+(np.pi-gamma)/2)%(2*np.pi))
@@ -500,9 +500,9 @@ class PathPlanner:
             p2 = path[i]
             p3 = path[i+1]
 
-            # 세 점을 이용한 곡률 계산
+            # 세 점을 이용한 곡률 계산 (외적 공식 사용)
             try:
-                # 두 벡터 사이의 각도 변화로 곡률 근사
+                # 두 벡터 계산
                 v1 = (p2[0] - p1[0], p2[1] - p1[1])
                 v2 = (p3[0] - p2[0], p3[1] - p2[1])
 
@@ -513,26 +513,15 @@ class PathPlanner:
                 if len_v1 < 0.01 or len_v2 < 0.01:
                     continue
 
-                # 정규화된 벡터
-                v1_norm = (v1[0]/len_v1, v1[1]/len_v1)
-                v2_norm = (v2[0]/len_v2, v2[1]/len_v2)
+                # 2D 외적 계산 |v1 × v2|
+                cross_product = abs(v1[0] * v2[1] - v1[1] * v2[0])
 
-                # 내적 계산
-                dot_product = v1_norm[0]*v2_norm[0] + v1_norm[1]*v2_norm[1]
-                dot_product = max(-1.0, min(1.0, dot_product))  # 도메인 제한 (-1 ~ 1)
-
-                # 각도 변화 (라디안)
-                angle_change = math.acos(dot_product)
-
-                # 이동 거리
-                dist = (len_v1 + len_v2) / 2
-
-                # 곡률 = 각도 변화 / 이동 거리
-                curvature = angle_change / dist
+                # 곡률 공식: κ = 2 * |v1 × v2| / (|v1| * |v2| * (|v1| + |v2|))
+                curvature = 2 * cross_product / (len_v1 * len_v2 * (len_v1 + len_v2))
                 curvatures.append((i, curvature))  # 인덱스와 곡률 저장
-            except:
-                # 곡률 계산 오류 시 무시
-                pass
+            except (ValueError, ZeroDivisionError) as e:
+                # 곡률 계산 오류 시 무시 (0으로 나누기, 도메인 오류 등)
+                continue
 
         if not curvatures:
             return self.default_speed  # 기본 속도
@@ -544,9 +533,9 @@ class PathPlanner:
             # 경로 위치에 따른 상대적 위치 (0~1)
             relative_pos = (idx - 1) / (path_length - 1) if path_length > 1 else 0.5
 
-            # 가중치 계산: 앞부분(시작)과 뒷부분(끝)에 더 높은 가중치 부여
-            # 중앙은 가중치 1, 시작과 끝은 가중치 3으로 설정
-            weight = 3 - 4 * relative_pos if relative_pos < 0.5 else 1 + 4 * (relative_pos - 0.5)
+            # 가중치 계산: U자 형태로 시작과 끝에 높은 가중치 부여
+            # weight = 1 + 2 * (2 * |relative_pos - 0.5|) = 1 + 4 * |relative_pos - 0.5|
+            weight = 1 + 4 * abs(relative_pos - 0.5)
 
             weighted_total_curvature += curvature * weight
             total_weights += weight
@@ -686,10 +675,9 @@ class PathPlanner:
                         break
                 break
 
-        # # 경로를 찾지 못한 경우, 직선 경로로 대체
-        # return self._straight(start, goal)
-
-        raise Exception("Failed to find rrt-dubins path")
+        # 경로를 찾지 못한 경우, 직선 경로로 대체
+        print(f"Warning: RRT failed to find path, falling back to straight line path")
+        return self._straight(start, goal)
 
 
     def _straight(self, point1, point2):
@@ -702,26 +690,20 @@ class PathPlanner:
         nodes_points = [start, end]
         path = []
 
-        # 방향 계산
+        # 직선 경로의 방향 계산
         dx = end[0] - start[0]
         dy = end[1] - start[1]
         yaw = math.atan2(dy, dx)
 
-        # 5개 지점으로 경로 생성 (부드러운 시각화를 위해)
+        # 5개 지점으로 직선 경로 생성 (부드러운 시각화를 위해)
         for i in range(5):
             t = i / 4  # 0 ~ 1
 
-            # 이차 베지에 곡선 공식: B(t) = (1-t)²P₀ + 2(1-t)tP₁ + t²P₂
-            x = (1-t)**2 * start[0] + 2*(1-t)*t * ((start[0] + end[0]) / 2) + t**2 * end[0]
-            y = (1-t)**2 * start[1] + 2*(1-t)*t * ((start[1] + end[1]) / 2) + t**2 * end[1]
+            # 직선 보간: P(t) = (1-t)*P₀ + t*P₁
+            x = (1-t) * start[0] + t * end[0]
+            y = (1-t) * start[1] + t * end[1]
 
-            # yaw 계산 (접선의 방향)
-            # 접선 벡터 = dB/dt = 2(1-t)(P₁-P₀) + 2t(P₂-P₁)
-            dx = 2*(1-t)*(end[0] - start[0]) + 2*t*(end[0] - ((start[0] + end[0]) / 2))
-            dy = 2*(1-t)*(end[1] - start[1]) + 2*t*(end[1] - ((start[1] + end[1]) / 2))
-
-            yaw = math.atan2(dy, dx)
-
+            # 직선 경로이므로 yaw는 일정함
             path.append((x, y, yaw))
 
         return nodes_points, [path]
