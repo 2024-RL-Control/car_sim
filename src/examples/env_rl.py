@@ -90,33 +90,8 @@ class BasicRLDrivingEnv(gym.Env):
         # 버퍼 거리 (차량과 장애물 공간 사이 여유)
         self.buffer_distance = self.env.config['simulation']['obstacle']['buffer_distance']
 
-        # 차량 배치 가능 공간
-        self.vehicle_area = {
-            'left': {
-                'x_min': self.boundary['x_min'],
-                'x_max': self.obstacle_area['x_min'] - self.buffer_distance,
-                'y_min': self.boundary['y_min'],
-                'y_max': self.boundary['y_max']
-            },
-            'right': {
-                'x_min': self.obstacle_area['x_max'] + self.buffer_distance,
-                'x_max': self.boundary['x_max'],
-                'y_min': self.boundary['y_min'],
-                'y_max': self.boundary['y_max']
-            },
-            'top': {
-                'x_min': self.boundary['x_min'],
-                'x_max': self.boundary['x_max'],
-                'y_min': self.obstacle_area['y_max'] + self.buffer_distance,
-                'y_max': self.boundary['y_max']
-            },
-            'bottom': {
-                'x_min': self.boundary['x_min'],
-                'x_max': self.boundary['x_max'],
-                'y_min': self.boundary['y_min'],
-                'y_max': self.obstacle_area['y_min'] - self.buffer_distance
-            }
-        }
+        # 차량 배치 가능 공간 계산
+        self.vehicle_area = self._calculate_vehicle_areas()
 
         # 초기화 시 장애물 및 목적지 설정
         self.setup_environment()
@@ -128,6 +103,44 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 에피소드 정보 저장용
         self.episode_count = 0
+
+    def _calculate_vehicle_areas(self):
+        """차량 배치 가능 영역 계산"""
+        areas = {}
+
+        # 좌측 영역
+        areas['left'] = {
+            'x_min': self.boundary['x_min'],
+            'x_max': self.obstacle_area['x_min'] - self.buffer_distance,
+            'y_min': self.boundary['y_min'],
+            'y_max': self.boundary['y_max']
+        }
+
+        # 우측 영역
+        areas['right'] = {
+            'x_min': self.obstacle_area['x_max'] + self.buffer_distance,
+            'x_max': self.boundary['x_max'],
+            'y_min': self.boundary['y_min'],
+            'y_max': self.boundary['y_max']
+        }
+
+        # 상단 영역
+        areas['top'] = {
+            'x_min': self.boundary['x_min'],
+            'x_max': self.boundary['x_max'],
+            'y_min': self.obstacle_area['y_max'] + self.buffer_distance,
+            'y_max': self.boundary['y_max']
+        }
+
+        # 하단 영역
+        areas['bottom'] = {
+            'x_min': self.boundary['x_min'],
+            'x_max': self.boundary['x_max'],
+            'y_min': self.boundary['y_min'],
+            'y_max': self.obstacle_area['y_min'] - self.buffer_distance
+        }
+
+        return areas
 
     def setup_environment(self):
         """
@@ -274,7 +287,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 에피소드 카운터 증가
         self.episode_count += 1
 
-        # 초기 행동으로 0을 사용하여 첫 번째 스텝 실행
+        # 초기 행동으로 0을 사용하여 첫 번째 스텝 실행 (LIDAR, 궤적 데이터 초기화 필요)
         actions = np.zeros((self.num_vehicles, 3))
         observations, _, _, _, _ = self.step(actions)
 
