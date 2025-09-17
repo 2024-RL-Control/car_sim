@@ -98,8 +98,10 @@ class Camera:
 
         # 카메라 리셋
         if pressed_keys[pygame.K_r] and not self._keys_state[pygame.K_r]:
+            self.config['visualization']['camera_follow'] = self._init_camera_follow
             self.config['visualization']['camera_zoom'] = self._init_camera_zoom
             self._camera_offset = (0, 0)
+            self._camera_pos = (0, 0)
         self._keys_state[pygame.K_r] = pressed_keys[pygame.K_r]
 
         # 카메라 팬
