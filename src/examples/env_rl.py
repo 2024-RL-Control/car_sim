@@ -9,7 +9,7 @@ from math import pi
 import numpy as np
 import gymnasium as gym
 from src.env.env import CarSimulatorEnv
-from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor, EnhancedFeatureExtractor
+from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
@@ -188,8 +188,8 @@ class BasicRLDrivingEnv(gym.Env):
         ys = np.random.uniform(self.obstacle_area['y_min'], self.obstacle_area['y_max'], size=n_dynamic)
         yaws = np.random.uniform(-pi/2, pi/2, size=n_dynamic)
         yaw_rates = np.random.uniform(-0.4, 0.4, size=n_dynamic)  # 회전 속도
-        speeds = np.random.uniform(1.0, 10.0, size=n_dynamic)
-        sizes = np.random.uniform(1.0, 5.0, size=n_dynamic)
+        speeds = np.random.uniform(1.0, 3.0, size=n_dynamic)
+        sizes = np.random.uniform(1.0, 3.0, size=n_dynamic)
         types = np.random.choice(['circle', 'square'], size=n_dynamic)
         dynamic_color = (200, 100, 100)  # 동적 장애물 색상
 
@@ -209,11 +209,12 @@ class BasicRLDrivingEnv(gym.Env):
         # 차량 배치 가능 공간은 외곽 영역
         # 상하좌우 네 영역 중 랜덤 선택
         for i in range(self.num_vehicles):
-            placement_area = random.choice(['top', 'bottom', 'left', 'right'])
+            # placement_area = random.choice(['top', 'bottom', 'left', 'right'])
+            placement_area = 'left'
             boundary = self.vehicle_area[placement_area]
             x = random.uniform(boundary['x_min'], boundary['x_max'])
             y = random.uniform(boundary['y_min'], boundary['y_max'])
-            yaw_volatility = random.uniform(-pi/6, pi/6)
+            yaw_volatility = random.uniform(-pi/7, pi/7)
 
             if placement_area == 'top':
                 yaw = -pi/2 + yaw_volatility  # 아래쪽 방향
@@ -241,7 +242,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 차량 시작 위치의 반대편 결정
         for i in range(self.num_vehicles):
             vehicle_placement = self.vehicle_start_position[i]['placement']
-            yaw_volatility = random.uniform(-pi/6, pi/6)
+            yaw_volatility = random.uniform(-pi/7, pi/7)
             if vehicle_placement == 'top':
                 boundary = self.vehicle_area['bottom']
                 yaw = pi/2 + yaw_volatility
@@ -250,16 +251,16 @@ class BasicRLDrivingEnv(gym.Env):
                 yaw = -pi/2 + yaw_volatility
             elif vehicle_placement == 'left':
                 boundary = self.vehicle_area['right']
-                yaw = pi + yaw_volatility
+                yaw = 0 + yaw_volatility
             else:  # right
                 boundary = self.vehicle_area['left']
-                yaw = 0 + yaw_volatility
+                yaw = pi + yaw_volatility
 
             x = random.uniform(boundary['x_min'], boundary['x_max'])
             y = random.uniform(boundary['y_min'], boundary['y_max'])
 
             # 차량에 목적지 추가
-            self.env.add_goal_for_vehicle(i, x, y, yaw, radius=2.0)
+            self.env.add_goal_for_vehicle(i, x, y, yaw, radius=4.0)
 
     def reset(self, *, seed=None, options=None):
         """
@@ -425,24 +426,26 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 신경망 아키텍처 설정
         policy_kwargs = {
-            # 1) 기본 MLP-extractor 완전 비활성화
-            "net_arch": [],
-            "activation_fn": torch.nn.GELU,  # mu/q 헤드 내부 활성화
+            # 정책 및 가치 네트워크 아키텍처
+            "net_arch": [64, 32, 32, 32],
+            # 활성화 함수
+            "activation_fn": torch.nn.GELU,
 
-            # 2) extractor 클래스 지정
+            # 커스텀 추출기
             "features_extractor_class": CustomFeatureExtractor,
+            # 추출기 아키텍처
             "features_extractor_kwargs": {
-                "net_arch": [64, 64, 64, 64]
+                "net_arch": [64, 128, 128, 128]
             },
             "share_features_extractor": True,
         }
 
         if algorithm == 'sac':
-            # SAC 하이퍼파라미터 설정
-            buffer_size = self.max_step // 5
-            learning_rate = 3e-4
+            # SAC 하이퍼파라미터 설정 (최적화)
+            buffer_size = self.max_step // 2  # 더 큰 버퍼
+            learning_rate = 1e-3  # 더 높은 학습률
             batch_size = 256
-            learning_starts = 100000
+            learning_starts = 10000  # 더 빠른 학습 시작
             n_envs = 1
 
             # 공유 리플레이 버퍼 생성
@@ -478,14 +481,14 @@ class BasicRLDrivingEnv(gym.Env):
             # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
             model.replay_buffer = shared_buffer
         elif algorithm == 'ppo':
-            # PPO 하이퍼파라미터 설정
-            n_steps       = 1024
-            batch_size    = 128
-            n_epochs      = 3
-            gamma         = 0.99
+            # PPO 하이퍼파라미터 설정 (최적화)
+            n_steps       = 2048  # 더 많은 스텝
+            batch_size    = 256   # 더 큰 배치 크기
+            n_epochs      = 5     # 더 많은 에포크
+            gamma         = 0.995 # 더 긴 시간 지평선
             gae_lambda    = 0.95
             clip_range    = 0.2
-            learning_rate = 3e-4
+            learning_rate = 5e-4  # 더 높은 학습률
 
             # 커스텀 PPO 모델 생성
             model = PPOVehicleAlgorithm(

@@ -419,11 +419,14 @@ class PPOVehicleAlgorithm(PPO):
 
 class ResidualLayerNormMLP(nn.Module):
     """
-    MLP with LayerNorm, Residual Connections, and Normal Init (mean=0, std=0.02) + GELU Activation
+    MLP with LayerNorm, Residual Connections, and Orthogonal Init + GELU Activation
+    Improved version with proper residual connections and SB3-recommended initialization
     """
     def __init__(self, input_dim: int, net_arch: list[int]):
         super().__init__()
         self.blocks = nn.ModuleList()
+        self.projections = nn.ModuleList()
+
         in_dim = input_dim
         for hidden_dim in net_arch:
             block = nn.Sequential(
@@ -432,60 +435,40 @@ class ResidualLayerNormMLP(nn.Module):
                 nn.GELU()
             )
             self.blocks.append(block)
+
+            # Add projection layer for residual connection when dimensions don't match
+            if in_dim != hidden_dim:
+                projection = nn.Linear(in_dim, hidden_dim)
+                self.projections.append(projection)
+            else:
+                self.projections.append(None)
+
             in_dim = hidden_dim
+
         # Apply weight initialization
         self.apply(self._init_weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        for block in self.blocks:
+        for i, (block, projection) in enumerate(zip(self.blocks, self.projections)):
             residual = x
             x = block(x)
-            if residual.shape == x.shape:
-                x = x + residual
+
+            # Apply projection if dimensions don't match, otherwise direct residual
+            if projection is not None:
+                residual = projection(residual)
+
+            x = x + residual
         return x
 
     @staticmethod
     def _init_weights(m):
-        # Normal initialization for Linear layers: N(0, 0.02^2)
+        # Orthogonal initialization for Linear layers (SB3 recommended)
         if isinstance(m, nn.Linear):
-            nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            # GELU는 gain이 정의되어 있지 않아서 기본값 1.0 사용 (또는 tanh 근사)
+            nn.init.orthogonal_(m.weight, gain=1.0)
             if m.bias is not None:
                 nn.init.zeros_(m.bias)
         elif isinstance(m, nn.LayerNorm):
-            nn.init.ones_(m.weight)
-            nn.init.zeros_(m.bias)
-
-class LidarConvNet(nn.Module):
-    """
-    1D CNN for Lidar Data
-    """
-    def __init__(self, input_dim: int, output_dim: int):
-        super().__init__()
-        self.lidar_dim = input_dim
-        self.encoder = nn.Sequential(
-            nn.Conv1d(1, 1, kernel_size=3, padding=1, groups=1),
-            nn.Conv1d(1, output_dim, kernel_size=1),
-            nn.BatchNorm1d(output_dim),
-            nn.GELU(),
-            nn.AvgPool1d(kernel_size=4, stride=4),
-            nn.AdaptiveAvgPool1d(1),
-        )
-
-        # 가중치 초기화
-        self.apply(self._init_weights)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x.unsqueeze(1)         # (B, 1, L)
-        x = self.encoder(x)        # (B, out_dim, 1)
-        return x[..., 0]           # (B, out_dim)
-
-    @staticmethod
-    def _init_weights(m):
-        if isinstance(m, nn.Conv1d):
-            nn.init.normal_(m.weight, mean=0.0, std=0.02)
-            if m.bias is not None:
-                nn.init.zeros_(m.bias)
-        elif isinstance(m, nn.BatchNorm1d):
             nn.init.ones_(m.weight)
             nn.init.zeros_(m.bias)
 
@@ -499,39 +482,3 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, obs):
         x = self.flatten(obs)
         return self.mlp(x)
-
-class EnhancedFeatureExtractor(BaseFeaturesExtractor):
-    """
-    차량 상태, 궤적 데이터, LIDAR 데이터를 별도로 처리하는 향상된 특성 추출기
-    - 차량 상태: MLP
-    - 궤적 데이터: MLP
-    - LIDAR 데이터: 1D CNN
-    """
-    def __init__(self, obs_space, net_arch: list[int]):
-        # 입력 차원 정의
-        self.vehicle_state_dim = 13
-        self.trajectory_dim = 42
-        self.lidar_dim = 36
-        self.lidar_out = 8
-        self.feature_dim = net_arch[-1] + self.lidar_out
-        super().__init__(obs_space, features_dim=self.feature_dim)
-
-        self.flatten = nn.Flatten()
-
-        # 차량 상태 및 궤적 데이터 처리 네트워크
-        self.mlp = ResidualLayerNormMLP(self.vehicle_state_dim + self.trajectory_dim, net_arch)
-
-        # LIDAR 데이터 처리 네트워크 (1D CNN)
-        self.cnn = LidarConvNet(self.lidar_dim, self.lidar_out)
-
-    def forward(self, obs):
-        # 입력 분리
-        mlp_input = obs[:, :(self.vehicle_state_dim + self.trajectory_dim)]
-        cnn_input = obs[:, (self.vehicle_state_dim + self.trajectory_dim):]
-
-        # 각 네트워크 통과
-        mlp_features = self.mlp(mlp_input)
-        cnn_features = self.cnn(cnn_input)
-
-        # 최종 특성 결합
-        return torch.cat([mlp_features, cnn_features], dim=1)

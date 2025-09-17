@@ -394,30 +394,33 @@ class CarSimulatorEnv(gym.Env):
         cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d)
 
-        # 기본 차량 상태 (13, )
+        # 기본 차량 상태 (8, )
         obs = np.array([
             progress,               # -1 ~ 1
-            state.steer,            # -1 ~ 1
-            state.throttle_engine,  # 0 ~ 1
-            state.throttle_brake,   # 0 ~ 1
+            # state.steer,            # -1 ~ 1
+            # state.throttle_engine,  # 0 ~ 1
+            # state.throttle_brake,   # 0 ~ 1
             cos_yaw,                # -1 ~ 1
             sin_yaw,                # -1 ~ 1
             scale_vel_long,         # -1 ~ 1
-            scale_acc_long,         # -1 ~ 1
+            # scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
-            scale_acc_lat,          # -1 ~ 1
+            # scale_acc_lat,          # -1 ~ 1
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
         ], dtype=np.float32)
 
         # (2, 2), (cos_diff, sin_diff)
-        trajectory_data = state.get_trajectory_data()
+        # trajectory_data = state.get_trajectory_data()
+
+        # obs = np.concatenate((obs, trajectory_data.flatten()))
 
         # (13, ), 0 ~ 1, 정규화된 데이터
         lidar_data = state.get_lidar_data()
+        obs = np.concatenate((obs, lidar_data))
 
-        obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (30, )
+        # obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (27, )
         return obs
 
     def _calculate_rewards(self, collisions, outside_roads, reached_targets):
