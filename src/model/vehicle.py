@@ -57,11 +57,10 @@ class VehicleState:
     history_trajectory: deque = field(default_factory=lambda: deque(maxlen=500))
 
     # 궤적 데이터
-    polynomial_trajectory: List[TrajectoryData] = field(default_factory=list)
     physics_trajectory: List[TrajectoryData] = field(default_factory=list)
 
     # 상태 이력 (최근 N개 상태 기록)
-    state_history: deque = field(default_factory=lambda: deque(maxlen=100))
+    state_history: deque = field(default_factory=lambda: deque(maxlen=20))
 
     # 환경 속성
     terrain_type: str = "asphalt"  # 현재 지형 유형
@@ -100,7 +99,6 @@ class VehicleState:
         self.lidar_data.clear()
 
         self.history_trajectory.clear()
-        self.polynomial_trajectory.clear()
         self.physics_trajectory.clear()
 
         self.state_history.clear()
@@ -157,9 +155,12 @@ class VehicleState:
 
     def scale_frenet_d(self, d):
         """frenet_d 값의 연속적 스케일링 (tanh 사용)"""
+        # if d is None:
+        #     return 0.0
+        # return np.tanh(d/10)
         if d is None:
             return 0.0
-        return np.tanh(d/10)
+        return d / 3.0     # 도로 폭이 6m인 경우 -1.0 ~ 1.0 범위
 
     def scale_long(self, vel_long, acc_long, max_vel, min_vel, max_acc, min_acc):
         """종방향 속도 정규화"""
@@ -236,9 +237,8 @@ class VehicleState:
         }
         self.state_history.append(state_snapshot)
 
-    def update_trajectory(self, polynomial_trajectory, physics_trajectory):
+    def update_trajectory(self, physics_trajectory):
         """궤적 업데이트"""
-        self.polynomial_trajectory = polynomial_trajectory
         self.physics_trajectory = physics_trajectory
 
     def get_position(self):
@@ -249,57 +249,30 @@ class VehicleState:
         """차량 뒷바퀴 위치 반환"""
         return (self.rear_axle_x, self.rear_axle_y, self.yaw)
 
-    def get_trajectory_data(self, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat):
+    def get_trajectory_data(self):
         """차량 궤적 데이터 반환, 각 지점의 상대적 위치로 변환
 
         각 궤적에서 시작, 중간, 마지막 데이터만 추출
         """
-        polynomial_trajectory = self.polynomial_trajectory
         physics_trajectory = self.physics_trajectory
         data_list = []
 
-        # 다항식 궤적에서 초반, 중반, 마지막 데이터 추출
-        if polynomial_trajectory:
-            traj_len = len(polynomial_trajectory)
-            x, y, yaw = self.get_position()
-            # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
-            start_idx = 0
-            mid_idx = traj_len // 2
-            end_idx = traj_len - 1
-
-            # 선택된 지점의 데이터만 추가
-            if start_idx < traj_len:
-                data = polynomial_trajectory[start_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
-                data_list.append(data)
-
-            if mid_idx < traj_len and mid_idx != start_idx:
-                data = polynomial_trajectory[mid_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
-                data_list.append(data)
-
-            if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
-                data = polynomial_trajectory[end_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
-                data_list.append(data)
-
-        # 물리 기반 궤적에서 초반, 중반, 마지막 데이터 추출
+        # 물리 기반 궤적에서 중반, 마지막 데이터 추출
         if physics_trajectory:
             traj_len = len(physics_trajectory)
             x, y, yaw = self.get_rear_axle_position()
-            # 초반(0%), 중반(50%), 마지막(100%) 지점 인덱스 계산
+            # 중반(50%), 마지막(100%) 지점 인덱스 계산
             start_idx = 0
             mid_idx = traj_len // 2
             end_idx = traj_len - 1
 
             # 선택된 지점의 데이터만 추가
-            if start_idx < traj_len:
-                data = physics_trajectory[start_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
-                data_list.append(data)
-
             if mid_idx < traj_len and mid_idx != start_idx:
-                data = physics_trajectory[mid_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
+                data = physics_trajectory[mid_idx].get_data(x, y, yaw)
                 data_list.append(data)
 
             if end_idx < traj_len and end_idx != mid_idx and end_idx != start_idx:
-                data = physics_trajectory[end_idx].get_data(x, y, yaw, max_vel_long, min_vel_long, max_acc_long, min_acc_long, max_vel_lat, max_acc_lat)
+                data = physics_trajectory[end_idx].get_data(x, y, yaw)
                 data_list.append(data)
 
         return np.array(data_list)
@@ -867,22 +840,7 @@ class Vehicle:
             time_horizon: 궤적 예측 시간 범위 [s]
             dt: 시간 간격 [s]
         """
-        predicted_polynomial_trajectory = []
         predicted_physics_trajectory = []
-
-        if self.goal_manager.has_goals():
-            # 목표 속도와 횡방향 위치 설정
-            target_velocity = self.state.target_vel_long if self.state.target_vel_long is not None else self.state.vel_long
-            target_d = 0.0 if self.state.frenet_d is not None else self.state.frenet_d
-
-            # 궤적 예측
-            predicted_polynomial_trajectory = TrajectoryPredictor.predict_polynomial_trajectory(
-                state=self.state,
-                target_velocity=target_velocity,
-                target_d=target_d,
-                time_horizon=time_horizon,
-                dt=dt
-            )
 
         predicted_physics_trajectory = TrajectoryPredictor.predict_physics_based_trajectory(
             state=self.state,
@@ -892,7 +850,7 @@ class Vehicle:
             vehicle_config=self.vehicle_config
         )
 
-        self.state.update_trajectory(predicted_polynomial_trajectory, predicted_physics_trajectory)
+        self.state.update_trajectory(predicted_physics_trajectory)
 
     def _draw_predicted_trajectory(self, screen, world_to_screen_func):
         """예측 궤적 시각화
@@ -906,12 +864,9 @@ class Vehicle:
         width = max(1, int(2 * self.visual_config['camera_zoom']))
 
         # 궤적 포인트들을 화면 좌표로 변환
-        polynomial_screen_points = [world_to_screen_func((point.x, point.y)) for point in self.state.polynomial_trajectory]
         physics_screen_points = [world_to_screen_func((point.x, point.y)) for point in self.state.physics_trajectory]
 
         # 라인으로 연결하여 궤적 그리기
-        if len(polynomial_screen_points) > 0:
-            pygame.draw.lines(screen, (0, 255, 255), False, polynomial_screen_points, width)
         if len(physics_screen_points) > 0:
             pygame.draw.lines(screen, (255, 0, 0), False, physics_screen_points, width)
 

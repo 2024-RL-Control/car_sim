@@ -419,7 +419,7 @@ class BasicRLDrivingEnv(gym.Env):
             # 2) extractor 클래스 지정
             "features_extractor_class": CustomFeatureExtractor,
             "features_extractor_kwargs": {
-                "net_arch": [512, 512, 512, 256, 128, 64]
+                "net_arch": [64, 64, 64, 64]
             },
             "share_features_extractor": True,
         }

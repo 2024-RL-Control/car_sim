@@ -9,39 +9,39 @@ simulation:
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment
   boundary:         # [m]
-    x_min: -100
-    x_max: 100
-    y_min: -100
-    y_max: 100
+    x_min: -50
+    x_max: 50
+    y_min: -50
+    y_max: 50
   obstacle:
-    num_static_obstacles: 5
-    num_dynamic_obstacles: 5
+    num_static_obstacles: 1
+    num_dynamic_obstacles: 1
     buffer_distance: 10  # [m]
     boundary:            # [m]
-      x_min: -80
-      x_max: 80
-      y_min: -80
-      y_max: 80
+      x_min: -10
+      x_max: 10
+      y_min: -10
+      y_max: 10
   path_planning:
     max_iterations: 1000          # maximum iterations for path planning
     base_step_size: 0.1           # Base for variable RRT step [m]
     min_step_factor: 1.0          # Min multiplier for base_step_size
-    max_step_factor: 5.0          # Max multiplier for base_step_size
+    max_step_factor: 10.0          # Max multiplier for base_step_size
     goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
     goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
     road_width: 6.0               # Default road width [m]
     min_radius: 8.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
-    default_speed: 30
+    default_speed: 15
     min_speed: 5
-    max_speed: 50
+    max_speed: 30
   rewards:
-    goal_reached_reward: 400.0        # reward for reaching the goal
-    collision_penalty: -200.0          # penalty for collision
-    outside_road_penalty: -200.0       # penalty for going outside the road
-    progress_factor: 0.5              # reward factor for reducing distance to goal
+    goal_reached_reward: 20.0        # reward for reaching the goal
+    collision_penalty: -10.0          # penalty for collision
+    outside_road_penalty: -10.0       # penalty for going outside the road
+    progress_factor: 0.3              # reward factor for reducing distance to goal
     lane_keeping_factor: 0.2          # reward factor for staying in the lane
-    speed_factor: 0.3                 # reward factor for maintaining/reaching target speed
+    speed_factor: 0.5                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
@@ -103,9 +103,9 @@ vehicle:
       sensor_type: "LIDAR"
       relative_pos: [0.0, 0.0]  # 차량 중심 기준 상대 위치 [m]
       relative_angle: 0.0       # 차량 방향 기준 상대 각도 [degrees] - 저장 시 도 단위 사용
-      num_samples: 36          # 샘플(레이) 수
-      angle_start: -180.0       # 시작 각도 [degrees] - 저장 시 도 단위 사용
-      angle_end: 180.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
+      num_samples: 13           # 샘플(레이) 수
+      angle_start: -120.0       # 시작 각도 [degrees] - 저장 시 도 단위 사용
+      angle_end: 120.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       max_range: 50.0           # 최대 감지 거리 [m]
       min_range: 0.1            # 최소 감지 거리 [m]
       scan_history: 0           # 스캔 히스토리 개수

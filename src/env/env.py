@@ -91,7 +91,7 @@ class CarSimulatorEnv(gym.Env):
         )
 
         # 각 차량의 관측 공간, 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
-        obs_dim = 91  # 13(기본상태) + 36(LIDAR) + 42(궤적)
+        obs_dim = 30  # 13(기본상태) + 13(LIDAR) + 4(궤적)
         self.observation_space = spaces.Box(
             low=-1.0,
             high=1.0,
@@ -208,7 +208,7 @@ class CarSimulatorEnv(gym.Env):
         current_time = time.time()
         # dt = current_time - self._last_update_time
         # dt = max(min(dt, 0.1), 1e-2)  # 최소 0.01초, 최대 0.1초
-        dt = 0.05  # 고정된 시간 간격 (10ms)
+        dt = 0.025  # 고정된 시간 간격 (10ms)
 
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()
@@ -402,15 +402,13 @@ class CarSimulatorEnv(gym.Env):
             frenet_d,               # -1 ~ 1
         ], dtype=np.float32)
 
-        # (6, 7), (norm_distance, cos_diff, sin_diff, scale_vel_long, scale_acc_long, scale_vel_lat, scale_acc_lat)
-        trajectory_data = state.get_trajectory_data(self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long, self.max_vel_lat, self.max_acc_lat)
-        # if len(trajectory_data) !=0:
-        #     print(trajectory_data[0][0], trajectory_data[1][0], trajectory_data[2][0])
+        # (2, 2), (cos_diff, sin_diff)
+        trajectory_data = state.get_trajectory_data()
 
-        # (36, ), 0 ~ 1, 정규화된 데이터
+        # (13, ), 0 ~ 1, 정규화된 데이터
         lidar_data = state.get_lidar_data()
 
-        obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (91, )
+        obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (30, )
         return obs
 
     def _calculate_rewards(self, collisions, outside_roads, reached_targets):
