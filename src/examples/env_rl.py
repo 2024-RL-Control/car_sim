@@ -9,7 +9,8 @@ from math import pi
 import numpy as np
 import gymnasium as gym
 from src.env.env import CarSimulatorEnv
-from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CleanCheckpointCallback, CustomLoggingCallback, CustomFeatureExtractor
+from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor
+from ..model.sb3 import CleanCheckpointCallback, CustomLoggingCallback, HyperparameterLoggingCallback, VehiclePerformanceCallback, EvaluationCallback, CustomMonitorCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
@@ -29,6 +30,21 @@ class DummyEnv(gym.Env):
     def step(self, actions):
         multi_actions = np.tile(actions, (self.rl_env.num_vehicles, 1))
         observations, reward, done, truncated, info = self.rl_env.step(multi_actions)
+
+        # Monitor를 위한 info 딕셔너리 수정 - episode 종료 시 올바른 정보 전달
+        if done:
+            # Monitor가 기대하는 형태로 info 구성
+            episode_info = {
+                'r': reward,  # 에피소드 총 보상
+                'l': info.get('episode_length', 1),  # 에피소드 길이 (최소 1)
+                't': info.get('elapsed_time', 0.0)  # 경과 시간
+            }
+            info['episode'] = episode_info
+
+            # 디버깅용 출력 (verbose 모드에서만)
+            if hasattr(self.rl_env, 'episode_count'):
+                print(f"Monitor 기록: Episode {self.rl_env.episode_count}, Reward: {reward:.2f}, Length: {episode_info['l']}")
+
         return observations[0], reward, done, truncated, info
 
 class BasicRLDrivingEnv(gym.Env):
@@ -330,6 +346,8 @@ class BasicRLDrivingEnv(gym.Env):
         info.update({
             'episode_count': self.episode_count,
             'rewards': rewards,  # 개별 차량별 보상
+            'episode_length': self.steps,  # 현재 에피소드 길이
+            'elapsed_time': 0,  # 필요시 실제 시간 계산 가능
         })
 
         return observations, average_reward, done, False, info
@@ -529,8 +547,27 @@ class BasicRLDrivingEnv(gym.Env):
         # 고급 로깅 콜백
         logging_callback = CustomLoggingCallback()
 
-        # 콜백 목록 생성
-        callback = CallbackList([clean_checkpoint_callback, logging_callback])
+        # 하이퍼파라미터 로깅 콜백
+        hparam_callback = HyperparameterLoggingCallback(verbose=1)
+
+        # 차량 성능 추적 콜백
+        vehicle_performance_callback = VehiclePerformanceCallback(log_freq=1000, verbose=1)
+
+        # 실시간 평가 콜백
+        evaluation_callback = EvaluationCallback(eval_freq=10000, n_eval_episodes=3, verbose=1)
+
+        # 커스텀 Monitor 콜백 (monitor.csv 대체)
+        custom_monitor_callback = CustomMonitorCallback(log_dir=log_dir, verbose=0)
+
+        # 통합된 콜백 시스템
+        callback = CallbackList([
+            clean_checkpoint_callback,      # 체크포인트 관리
+            logging_callback,              # 기본 로깅 (GPU, 학습률 등)
+            hparam_callback,               # 하이퍼파라미터 로깅
+            vehicle_performance_callback,   # 차량별 성능 추적
+            evaluation_callback,           # 실시간 모델 평가
+            custom_monitor_callback        # 커스텀 Monitor 기능
+        ])
 
         # learn() 메소드로 학습 시작
         try:

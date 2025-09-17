@@ -8,6 +8,7 @@ import numpy as np
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from stable_baselines3.common.logger import HParam
 
 class CleanCheckpointCallback(CheckpointCallback):
     """
@@ -71,6 +72,235 @@ class CustomLoggingCallback(BaseCallback):
             if torch.cuda.is_available() and mem_allocated > 3.0:  # 3GB 이상 사용 시 메모리 청소
                 torch.cuda.empty_cache()
                 print("\nGPU 메모리 캐시 정리 완료")
+
+        return True
+
+class HyperparameterLoggingCallback(BaseCallback):
+    """
+    하이퍼파라미터와 핵심 메트릭을 TensorBoard HPARAMS 탭에 로깅하는 콜백
+    """
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+
+    def _on_training_start(self) -> None:
+        """학습 시작 시 하이퍼파라미터 로깅"""
+        # 하이퍼파라미터 딕셔너리 구성
+        hparam_dict = {
+            "algorithm": self.model.__class__.__name__,
+            "learning_rate": self.model.learning_rate,
+            "gamma": self.model.gamma,
+        }
+
+        # 알고리즘별 특화 하이퍼파라미터 추가
+        if hasattr(self.model, 'batch_size'):
+            hparam_dict["batch_size"] = self.model.batch_size
+        if hasattr(self.model, 'buffer_size'):
+            hparam_dict["buffer_size"] = self.model.buffer_size
+        if hasattr(self.model, 'tau'):
+            hparam_dict["tau"] = self.model.tau
+        if hasattr(self.model, 'ent_coef'):
+            hparam_dict["ent_coef"] = self.model.ent_coef
+        if hasattr(self.model, 'n_steps'):
+            hparam_dict["n_steps"] = self.model.n_steps
+        if hasattr(self.model, 'n_epochs'):
+            hparam_dict["n_epochs"] = self.model.n_epochs
+        if hasattr(self.model, 'clip_range'):
+            hparam_dict["clip_range"] = self.model.clip_range
+
+        # 환경 특화 하이퍼파라미터 추가 (가능한 경우)
+        if hasattr(self.model, 'rl_env'):
+            rl_env = self.model.rl_env
+            hparam_dict.update({
+                "num_vehicles": rl_env.num_vehicles,
+                "max_episode_steps": rl_env.max_episode_steps,
+                "num_static_obstacles": rl_env.num_static_obstacles,
+                "num_dynamic_obstacles": rl_env.num_dynamic_obstacles,
+            })
+
+        # 메트릭 딕셔너리 (TensorBoard에서 추적할 핵심 지표들)
+        metric_dict = {
+            "train/episode_reward": 0,
+            "train/episode_length": 0,
+            "train/active_vehicles": 0,
+            "resources/gpu_memory_gb": 0,
+            "time/steps_per_second": 0,
+        }
+
+        # 알고리즘별 특화 메트릭 추가
+        if "SAC" in self.model.__class__.__name__:
+            metric_dict.update({
+                "train/actor_loss": 0.0,
+                "train/critic_loss": 0.0,
+                "train/ent_coef": 0.0,
+            })
+        elif "PPO" in self.model.__class__.__name__:
+            metric_dict.update({
+                "train/policy_loss": 0.0,
+                "train/value_loss": 0.0,
+                "train/explained_variance": 0.0,
+            })
+
+        # HPARAMS 로깅
+        self.logger.record(
+            "hparams",
+            HParam(hparam_dict, metric_dict),
+            exclude=("stdout", "log", "json", "csv"),
+        )
+
+        if self.verbose >= 1:
+            print(f"하이퍼파라미터 로깅 완료: {len(hparam_dict)}개 파라미터, {len(metric_dict)}개 메트릭")
+
+    def _on_step(self) -> bool:
+        return True
+
+class VehiclePerformanceCallback(BaseCallback):
+    """
+    개별 차량 성능을 추적하고 로깅하는 콜백
+    """
+    def __init__(self, log_freq: int = 1000, verbose=0):
+        super().__init__(verbose)
+        self.log_freq = log_freq
+        self.vehicle_rewards = {}
+        self.vehicle_steps = {}
+        self.vehicle_collisions = {}
+        self.vehicle_goals_reached = {}
+
+    def _on_step(self) -> bool:
+        # 개별 차량 데이터 수집 (가능한 경우)
+        if hasattr(self.model, 'rl_env') and self.n_calls % self.log_freq == 0:
+            rl_env = self.model.rl_env
+
+            # 현재 에피소드 정보가 있는 경우
+            if hasattr(rl_env, 'episode_count') and hasattr(rl_env, 'num_vehicles'):
+                num_vehicles = rl_env.num_vehicles
+
+                # 활성 차량 수 로깅
+                active_count = sum(rl_env.active_agents) if hasattr(rl_env, 'active_agents') else num_vehicles
+                self.logger.record("vehicles/active_count", active_count)
+                self.logger.record("vehicles/total_count", num_vehicles)
+                self.logger.record("vehicles/active_ratio", active_count / num_vehicles if num_vehicles > 0 else 0)
+
+                # 개별 차량 상태 로깅 (처음 3대만)
+                for i in range(min(3, num_vehicles)):
+                    is_active = rl_env.active_agents[i] if hasattr(rl_env, 'active_agents') else True
+                    self.logger.record(f"vehicles/vehicle_{i}/active", int(is_active))
+
+                if self.verbose >= 1 and self.n_calls % (self.log_freq * 10) == 0:
+                    print(f"차량 성능 추적: {active_count}/{num_vehicles} 차량 활성")
+
+        return True
+
+class CustomMonitorCallback(BaseCallback):
+    """
+    Monitor.csv와 동일한 형태로 에피소드 데이터를 직접 기록하는 콜백
+    """
+    def __init__(self, log_dir: str, verbose=0):
+        super().__init__(verbose)
+        self.log_dir = log_dir
+        self.monitor_file = os.path.join(log_dir, "monitor.csv")
+        self.episode_rewards = []
+        self.episode_lengths = []
+        self.episode_times = []
+        self.start_time = time.time()
+
+        # CSV 헤더 작성
+        os.makedirs(log_dir, exist_ok=True)
+        with open(self.monitor_file, 'w') as f:
+            f.write(f'#{{\"t_start\": {self.start_time}, \"env_id\": \"BasicRLDrivingEnv\"}}\n')
+            f.write('r,l,t\n')
+
+    def _on_step(self) -> bool:
+        # 에피소드 완료 시 데이터 기록
+        if hasattr(self.model, 'rl_env'):
+            rl_env = self.model.rl_env
+
+            # 새 에피소드가 시작되었는지 확인 (에피소드 카운터 변화)
+            if hasattr(rl_env, 'episode_count'):
+                current_episode = rl_env.episode_count
+
+                # 이전 에피소드 데이터가 있다면 기록
+                if hasattr(self, 'prev_episode_count') and current_episode > self.prev_episode_count:
+                    # 이전 에피소드 정보 가져오기
+                    if hasattr(self.model, 'total_reward') and hasattr(self.model, 'episode_steps'):
+                        reward = self.model.total_reward
+                        length = self.model.episode_steps
+                        elapsed_time = time.time() - self.start_time
+
+                        # CSV에 기록
+                        with open(self.monitor_file, 'a') as f:
+                            f.write(f'{reward},{length},{elapsed_time}\n')
+
+                        if self.verbose >= 1:
+                            print(f"Custom Monitor 기록: Episode {self.prev_episode_count}, Reward: {reward:.2f}, Length: {length}")
+
+                self.prev_episode_count = current_episode
+
+        return True
+
+class EvaluationCallback(BaseCallback):
+    """
+    학습 중 주기적으로 모델 성능을 평가하는 콜백
+    """
+    def __init__(self, eval_freq: int = 10000, n_eval_episodes: int = 3, verbose=0):
+        super().__init__(verbose)
+        self.eval_freq = eval_freq
+        self.n_eval_episodes = n_eval_episodes
+        self.best_mean_reward = -np.inf
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.eval_freq == 0 and hasattr(self.model, 'rl_env'):
+            try:
+                rl_env = self.model.rl_env
+
+                # 간단한 평가 수행
+                episode_rewards = []
+                episode_lengths = []
+
+                for episode in range(self.n_eval_episodes):
+                    obs, _ = rl_env.reset()
+                    done = False
+                    episode_reward = 0
+                    episode_length = 0
+
+                    while not done and episode_length < 500:  # 최대 500 스텝
+                        # 모델로 행동 예측 (deterministic)
+                        if hasattr(self.model, 'predict'):
+                            actions = np.zeros((rl_env.num_vehicles, 3))
+                            action, _ = self.model.predict(obs[0], deterministic=True)
+                            actions[0] = action
+                        else:
+                            actions = np.zeros((rl_env.num_vehicles, 3))
+
+                        obs, reward, done, _, _ = rl_env.step(actions)
+                        episode_reward += reward
+                        episode_length += 1
+
+                    episode_rewards.append(episode_reward)
+                    episode_lengths.append(episode_length)
+
+                # 평가 결과 로깅
+                mean_reward = np.mean(episode_rewards)
+                std_reward = np.std(episode_rewards)
+                mean_length = np.mean(episode_lengths)
+
+                self.logger.record("eval/mean_reward", mean_reward)
+                self.logger.record("eval/std_reward", std_reward)
+                self.logger.record("eval/mean_episode_length", mean_length)
+
+                # 최고 성능 추적
+                if mean_reward > self.best_mean_reward:
+                    self.best_mean_reward = mean_reward
+                    self.logger.record("eval/best_mean_reward", self.best_mean_reward)
+
+                    if self.verbose >= 1:
+                        print(f"새로운 최고 평가 성능: {mean_reward:.2f}")
+
+                if self.verbose >= 1:
+                    print(f"평가 완료 - 평균 보상: {mean_reward:.2f} ± {std_reward:.2f}, 평균 길이: {mean_length:.1f}")
+
+            except Exception as e:
+                if self.verbose >= 1:
+                    print(f"평가 실패: {e}")
 
         return True
 
