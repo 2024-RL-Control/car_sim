@@ -13,10 +13,10 @@ simulation:
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment
   boundary:         # [m]
-    x_min: -50
-    x_max: 50
-    y_min: -50
-    y_max: 50
+    x_min: -70
+    x_max: 70
+    y_min: -30
+    y_max: 30
   obstacle:
     num_static_obstacles: 0
     num_dynamic_obstacles: 7
