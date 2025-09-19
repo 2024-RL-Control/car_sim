@@ -534,8 +534,10 @@ class SmartCheckpointManager(BaseCallback):
         current_reward = self.metrics_store.get_recent_mean_reward(10)
 
         if current_reward > self.metrics_store.best_mean_reward:
-            best_path = os.path.join(self.save_path, f"{self.name_prefix}_best.zip")
+            best_path = os.path.join(self.save_path, f"{self.name_prefix}_best")
             self.model.save(best_path)
+            if self.name_prefix == 'sac':
+                self.model.save_replay_buffer(os.path.join(self.save_path, f"{self.name_prefix}_replay_buffer"))
 
             if self.verbose >= 1:
                 print(f"New best model saved: {current_reward:.2f}")
