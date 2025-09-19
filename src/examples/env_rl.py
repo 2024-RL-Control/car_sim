@@ -10,7 +10,7 @@ import numpy as np
 import gymnasium as gym
 from src.env.env import CarSimulatorEnv
 from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor
-from ..model.sb3 import create_training_callbacks, get_callback_summary
+from ..model.sb3 import create_optimized_callbacks, get_callback_summary
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
@@ -533,7 +533,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 모델 출력
         print(model.policy)
 
-        # 콜백 시스템 설정
+        # 최적화된 콜백 시스템 설정
         callback_config = {
             'algorithm': algorithm,
             'num_vehicles': self.num_vehicles,
@@ -544,32 +544,33 @@ class BasicRLDrivingEnv(gym.Env):
             'save_best_model': True,
             'gpu_memory_limit': 5,  # GPU 메모리 제한 (GB)
             'checkpoint_freq': 10000,
-            'vehicle_log_freq': 1000,
-            'performance_log_freq': 1000,
-            'logging_freq': 1000,
+            'unified_log_freq': 1000,  # 통합 로깅 주기
+            'max_episodes_history': 1000,  # 메트릭 히스토리
+            'max_steps_history': 10000,
             'verbose': 1
         }
 
-        # 모듈형 콜백 시스템 생성
-        callbacks = create_training_callbacks(callback_config, log_dir, models_dir)
+        # 최적화된 콜백 시스템 생성
+        callbacks, metrics_store = create_optimized_callbacks(callback_config, log_dir, models_dir)
         callback = CallbackList(callbacks)
 
         # 콜백 요약 정보 출력
         summary = get_callback_summary(callbacks)
         if callback_config['verbose'] >= 1:
-            print(f"\n=== Callback System Summary ===")
+            print(f"\n=== Optimized Callback System ===")
             print(f"Total callbacks: {summary['total_callbacks']}")
-            print(f"Core: {summary['core_callbacks']}, Specialized: {summary['specialized_callbacks']}, Utility: {summary['utility_callbacks']}")
+            print(f"Centralized metrics: {summary['centralized_metrics']}")
             print(f"Types: {', '.join(summary['callback_types'])}")
-            print("==============================\n")
+            print("=================================\n")
 
         # learn() 메소드로 학습 시작
         try:
             # 기본 컨트롤 정보 출력
             self.print_basic_controls()
 
-            # 모델에 환경 정보 설정 (기존 방식 유지)
+            # 모델에 환경 정보 및 메트릭 스토어 설정
             model.set_env_info(self)
+            model.set_metrics_store(metrics_store)
 
             model.learn(
                 total_timesteps=self.max_step,
