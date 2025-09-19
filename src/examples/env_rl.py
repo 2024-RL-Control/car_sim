@@ -10,7 +10,7 @@ import numpy as np
 import gymnasium as gym
 from src.env.env import CarSimulatorEnv
 from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor
-from ..model.sb3 import CleanCheckpointCallback, CustomLoggingCallback, HyperparameterLoggingCallback, VehiclePerformanceCallback, EvaluationCallback, CustomMonitorCallback
+from ..model.sb3 import create_training_callbacks, get_callback_summary
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
 from stable_baselines3.common.buffers import ReplayBuffer
@@ -525,8 +525,7 @@ class BasicRLDrivingEnv(gym.Env):
                 device=self.device,
             )
 
-        # 환경 정보 설정
-        model.set_env_info(self)
+        # 환경 정보는 learn() 내부에서 설정됨
 
         # 로거 설정
         model.set_logger(configure(log_dir, ["stdout", "csv", "tensorboard"]))
@@ -534,45 +533,43 @@ class BasicRLDrivingEnv(gym.Env):
         # 모델 출력
         print(model.policy)
 
-        # 체크포인트 콜백 설정
-        clean_checkpoint_callback = CleanCheckpointCallback(
-            save_freq=10000,  # 10000스텝마다 저장
-            save_path=models_dir,
-            name_prefix=algorithm,
-            save_replay_buffer=False,  # 체크포인트에서는 리플레이 버퍼를 저장하지 않음
-            save_vecnormalize=True,
-            max_checkpoints=10  # 최대 10개의 체크포인트만 유지
-        )
+        # 콜백 시스템 설정
+        callback_config = {
+            'algorithm': algorithm,
+            'num_vehicles': self.num_vehicles,
+            'max_episode_steps': self.max_episode_steps,
+            'num_static_obstacles': self.num_static_obstacles,
+            'num_dynamic_obstacles': self.num_dynamic_obstacles,
+            'max_checkpoints': 10,
+            'save_best_model': True,
+            'gpu_memory_limit': 5,  # GPU 메모리 제한 (GB)
+            'checkpoint_freq': 10000,
+            'vehicle_log_freq': 1000,
+            'performance_log_freq': 1000,
+            'logging_freq': 1000,
+            'verbose': 1
+        }
 
-        # 고급 로깅 콜백
-        logging_callback = CustomLoggingCallback()
+        # 모듈형 콜백 시스템 생성
+        callbacks = create_training_callbacks(callback_config, log_dir, models_dir)
+        callback = CallbackList(callbacks)
 
-        # 하이퍼파라미터 로깅 콜백
-        hparam_callback = HyperparameterLoggingCallback(verbose=1)
-
-        # 차량 성능 추적 콜백
-        vehicle_performance_callback = VehiclePerformanceCallback(log_freq=1000, verbose=1)
-
-        # 실시간 평가 콜백
-        evaluation_callback = EvaluationCallback(eval_freq=10000, n_eval_episodes=3, verbose=1)
-
-        # 커스텀 Monitor 콜백 (monitor.csv 대체)
-        custom_monitor_callback = CustomMonitorCallback(log_dir=log_dir, verbose=0)
-
-        # 통합된 콜백 시스템
-        callback = CallbackList([
-            clean_checkpoint_callback,      # 체크포인트 관리
-            logging_callback,              # 기본 로깅 (GPU, 학습률 등)
-            hparam_callback,               # 하이퍼파라미터 로깅
-            vehicle_performance_callback,   # 차량별 성능 추적
-            evaluation_callback,           # 실시간 모델 평가
-            custom_monitor_callback        # 커스텀 Monitor 기능
-        ])
+        # 콜백 요약 정보 출력
+        summary = get_callback_summary(callbacks)
+        if callback_config['verbose'] >= 1:
+            print(f"\n=== Callback System Summary ===")
+            print(f"Total callbacks: {summary['total_callbacks']}")
+            print(f"Core: {summary['core_callbacks']}, Specialized: {summary['specialized_callbacks']}, Utility: {summary['utility_callbacks']}")
+            print(f"Types: {', '.join(summary['callback_types'])}")
+            print("==============================\n")
 
         # learn() 메소드로 학습 시작
         try:
             # 기본 컨트롤 정보 출력
             self.print_basic_controls()
+
+            # 모델에 환경 정보 설정 (기존 방식 유지)
+            model.set_env_info(self)
 
             model.learn(
                 total_timesteps=self.max_step,

@@ -5,142 +5,289 @@ import torch
 import torch.nn as nn
 import pygame
 import numpy as np
+from typing import Dict, Any, Optional, Union
+from collections import deque
 from stable_baselines3 import SAC, PPO
-from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback, EvalCallback
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.logger import HParam
+from stable_baselines3.common.results_plotter import load_results, ts2xy
 
-class CleanCheckpointCallback(CheckpointCallback):
+
+def create_training_callbacks(config: Dict[str, Any], log_dir: str, models_dir: str) -> list:
     """
-    커스텀 체크포인트 콜백: 지정된 주기로 모델을 저장하고, 오래된 체크포인트를 삭제합니다.
+    설정에 따라 적절한 콜백 조합을 생성하는 팩토리 함수
+
+    Args:
+        config: 환경 및 훈련 설정
+        log_dir: 로그 디렉토리
+        models_dir: 모델 저장 디렉토리
+
+    Returns:
+        콜백 리스트
     """
-    def __init__(self, save_freq, save_path, name_prefix='model', max_checkpoints=5, **kwargs):
-        super().__init__(save_freq=save_freq, save_path=save_path, name_prefix=name_prefix, **kwargs)
-        self.max_checkpoints = max_checkpoints
+    callbacks = []
 
-    def _on_step(self):
-        super_result = super()._on_step()
+    # 핵심 메트릭 콜백
+    if config.get('num_vehicles', 1) > 1:
+        # 다중 차량 환경
+        vehicle_callback = VehicleMetricsCallback(
+            num_vehicles=config['num_vehicles'],
+            log_freq=config.get('vehicle_log_freq', 1000),
+            verbose=config.get('verbose', 0)
+        )
+        callbacks.append(vehicle_callback)
+    else:
+        # 단일 차량 환경
+        training_callback = TrainingMetricsCallback(
+            verbose=config.get('verbose', 0)
+        )
+        callbacks.append(training_callback)
 
-        # 현재 체크포인트 저장 후 초과된 것들 삭제
-        if self.num_timesteps % self.save_freq == 0:
-            files = sorted([f for f in os.listdir(self.save_path)
-                            if f.startswith(self.name_prefix) and f.endswith('.zip')])
-            # 오래된 체크포인트 삭제
-            for old in files[:-self.max_checkpoints]:
-                try: os.remove(os.path.join(self.save_path, old))
-                except: pass
+    # 성능 모니터링
+    performance_callback = PerformanceCallback(
+        log_freq=config.get('performance_log_freq', 1000),
+        gpu_memory_limit=config.get('gpu_memory_limit', 3),
+        verbose=config.get('verbose', 0)
+    )
+    callbacks.append(performance_callback)
 
-        return super_result
+    # 체크포인트 관리
+    checkpoint_callback = EnhancedCheckpointCallback(
+        save_freq=config.get('checkpoint_freq', 10000),
+        save_path=models_dir,
+        name_prefix=config.get('algorithm', 'model'),
+        max_checkpoints=config.get('max_checkpoints', 5),
+        save_best=config.get('save_best_model', True),
+        verbose=config.get('verbose', 0)
+    )
+    callbacks.append(checkpoint_callback)
 
-class CustomLoggingCallback(BaseCallback):
+    # 하이퍼파라미터 로깅
+    hparam_callback = HyperparameterCallback(
+        env_config=config,
+        verbose=config.get('verbose', 0)
+    )
+    callbacks.append(hparam_callback)
+
+    # 통합 로깅
+    logging_callback = ModularLoggingCallback(
+        log_dir=log_dir,
+        save_freq=config.get('logging_freq', 1000),
+        verbose=config.get('verbose', 0)
+    )
+    callbacks.append(logging_callback)
+
+    return callbacks
+
+def get_callback_summary(callbacks: list) -> Dict[str, Any]:
     """
-    커스텀 로깅 콜백: 학습률, GPU 메모리 사용량, 에피소드 보상 등을 기록합니다.
+    콜백 리스트의 요약 정보를 반환
     """
-    def __init__(self, verbose=0):
+    summary = {
+        'total_callbacks': len(callbacks),
+        'callback_types': [type(cb).__name__ for cb in callbacks],
+        'core_callbacks': 0,
+        'specialized_callbacks': 0,
+        'utility_callbacks': 0
+    }
+
+    core_types = {TrainingMetricsCallback, PerformanceCallback, VehicleMetricsCallback}
+    specialized_types = {EnhancedCheckpointCallback, HyperparameterCallback}
+    utility_types = {ModularLoggingCallback}
+
+    for callback in callbacks:
+        cb_type = type(callback)
+        if cb_type in core_types:
+            summary['core_callbacks'] += 1
+        elif cb_type in specialized_types:
+            summary['specialized_callbacks'] += 1
+        elif cb_type in utility_types:
+            summary['utility_callbacks'] += 1
+
+    return summary
+
+class TrainingMetricsCallback(BaseCallback):
+    """
+    핵심 훈련 메트릭을 수집하고 관리하는 기본 콜백
+    - 에피소드 보상, 길이, 성공률 등 기본 메트릭 추적
+    - 다른 콜백들이 사용할 수 있는 공통 데이터 제공
+    """
+    def __init__(self, verbose: int = 0):
         super().__init__(verbose)
-        self.training_start = time.time()
-        self.episode_rewards = []
-        self.episode_lengths = []
-        self.learning_rates = []
-        self.gpu_memory_usage = []
+        self.episode_rewards = deque(maxlen=100)
+        self.episode_lengths = deque(maxlen=100)
+        self.episode_count = 0
+        self.current_episode_reward = 0.0
+        self.current_episode_length = 0
+        self.start_time = time.time()
 
-    def _on_step(self):
-        # GPU 메모리 사용량 추적 (가능한 경우)
+    def _on_training_start(self) -> None:
+        self.start_time = time.time()
+        if self.verbose >= 1:
+            print("Training metrics collection started")
+
+    def _on_step(self) -> bool:
+        # 에피소드 진행 중 메트릭 업데이트는 하위 클래스에서 구현
+        return True
+
+    def get_recent_mean_reward(self, window: int = 100) -> float:
+        """최근 N개 에피소드의 평균 보상 반환"""
+        if len(self.episode_rewards) == 0:
+            return 0.0
+        recent_rewards = list(self.episode_rewards)[-window:]
+        return np.mean(recent_rewards)
+
+    def get_recent_mean_length(self, window: int = 100) -> float:
+        """최근 N개 에피소드의 평균 길이 반환"""
+        if len(self.episode_lengths) == 0:
+            return 0.0
+        recent_lengths = list(self.episode_lengths)[-window:]
+        return np.mean(recent_lengths)
+
+class PerformanceCallback(BaseCallback):
+    """
+    시스템 성능 및 리소스 사용량을 모니터링하는 콜백
+    - GPU/CPU 메모리 사용량, 학습 속도, FPS 등
+    """
+    def __init__(self, log_freq: int = 1000, gpu_memory_limit: int = 3, verbose: int = 0):
+        super().__init__(verbose)
+        self.log_freq = log_freq
+        self.gpu_memory_limit = gpu_memory_limit
+        self.gpu_memory_usage = deque(maxlen=1000)
+        self.training_start_time = None
+        self.step_times = deque(maxlen=100)
+        self.last_step_time = None
+
+    def _on_training_start(self) -> None:
+        self.training_start_time = time.time()
+        self.last_step_time = time.time()
+
+    def _on_step(self) -> bool:
+        current_time = time.time()
+
+        # 스텝 시간 기록
+        if self.last_step_time is not None:
+            step_time = current_time - self.last_step_time
+            self.step_times.append(step_time)
+        self.last_step_time = current_time
+
+        # GPU 메모리 사용량 추적
         if torch.cuda.is_available():
-            mem_allocated = torch.cuda.memory_allocated() / (1024 ** 3)  # GB 단위
-            self.gpu_memory_usage.append(mem_allocated)
+            gpu_memory_gb = torch.cuda.memory_allocated() / (1024 ** 3)
+            self.gpu_memory_usage.append(gpu_memory_gb)
 
-        # 현재 학습률 추적
-        if hasattr(self.model, 'learning_rate'):
-            current_lr = self.model.learning_rate
-            self.learning_rates.append(current_lr)
-
-        # 추가 로그 기록 (1000스텝마다)
-        if self.n_calls % 1000 == 0:
-            elapsed_time = time.time() - self.training_start
-            steps_per_second = self.n_calls / elapsed_time
-            est_remaining_time = (self.locals.get('total_timesteps', 0) - self.n_calls) / steps_per_second if steps_per_second > 0 else 0
-
-            # 학습 진행상황 상세 로깅
-            self.logger.record("time/steps_per_second", steps_per_second)
-            self.logger.record("time/est_remaining_hours", est_remaining_time / 3600)
-
-            if torch.cuda.is_available():
-                self.logger.record("resources/gpu_memory_gb", mem_allocated)
-
-            # 메모리 상태 확인 및 청소 (가능한 경우)
-            if torch.cuda.is_available() and mem_allocated > 3.0:  # 3GB 이상 사용 시 메모리 청소
+            # 메모리 정리 (지정된 GPU 메모리 이상 사용 시)
+            if gpu_memory_gb > self.gpu_memory_limit:
                 torch.cuda.empty_cache()
-                print("\nGPU 메모리 캐시 정리 완료")
+                if self.verbose >= 1:
+                    print(f"GPU memory cleared at {gpu_memory_gb:.2f}GB")
+
+        # 주기적 로깅
+        if self.n_calls % self.log_freq == 0:
+            self._log_performance_metrics()
 
         return True
 
-class HyperparameterLoggingCallback(BaseCallback):
+    def _log_performance_metrics(self):
+        """성능 메트릭을 로거에 기록"""
+        if self.training_start_time:
+            elapsed_time = time.time() - self.training_start_time
+            steps_per_second = self.n_calls / elapsed_time if elapsed_time > 0 else 0
+
+            self.logger.record("performance/steps_per_second", steps_per_second)
+            self.logger.record("performance/elapsed_hours", elapsed_time / 3600)
+
+            if len(self.step_times) > 0:
+                avg_step_time = np.mean(self.step_times)
+                self.logger.record("performance/avg_step_time_ms", avg_step_time * 1000)
+
+            if torch.cuda.is_available() and len(self.gpu_memory_usage) > 0:
+                current_gpu_memory = self.gpu_memory_usage[-1]
+                max_gpu_memory = max(self.gpu_memory_usage)
+                self.logger.record("performance/gpu_memory_current_gb", current_gpu_memory)
+                self.logger.record("performance/gpu_memory_max_gb", max_gpu_memory)
+
+class EnhancedCheckpointCallback(CheckpointCallback):
     """
-    하이퍼파라미터와 핵심 메트릭을 TensorBoard HPARAMS 탭에 로깅하는 콜백
+    향상된 체크포인트 관리 콜백
+    - 자동 정리, 최고 성능 모델 저장, 백업 관리
     """
-    def __init__(self, verbose=0):
+    def __init__(self, save_freq: int, save_path: str, name_prefix: str = 'model',
+                 max_checkpoints: int = 5, save_best: bool = True, verbose: int = 0):
+        super().__init__(save_freq=save_freq, save_path=save_path,
+                        name_prefix=name_prefix, verbose=verbose)
+        self.max_checkpoints = max_checkpoints
+        self.save_best = save_best
+        self.best_mean_reward = -np.inf
+        self.best_model_path = None
+
+    def _on_step(self):
+        result = super()._on_step()
+
+        # 체크포인트 저장 후 정리
+        if self.num_timesteps % self.save_freq == 0:
+            self._cleanup_old_checkpoints()
+
+            if self.save_best:
+                self._save_best_model()
+
+        return result
+
+    def _cleanup_old_checkpoints(self):
+        """오래된 체크포인트 정리"""
+        try:
+            files = sorted([
+                f for f in os.listdir(self.save_path)
+                if f.startswith(self.name_prefix) and f.endswith('.zip')
+                and 'best' not in f  # best 모델은 제외
+            ])
+
+            for old_file in files[:-self.max_checkpoints]:
+                old_path = os.path.join(self.save_path, old_file)
+                os.remove(old_path)
+                if self.verbose >= 1:
+                    print(f"Removed old checkpoint: {old_file}")
+        except Exception as e:
+            if self.verbose >= 1:
+                print(f"Checkpoint cleanup failed: {e}")
+
+    def _save_best_model(self):
+        """최고 성능 모델 저장 (TrainingMetricsCallback이 있는 경우)"""
+        # 다른 콜백에서 메트릭 가져오기 시도
+        try:
+            # CallbackList에서 TrainingMetricsCallback 찾기
+            if hasattr(self.parent, 'callbacks'):
+                for callback in self.parent.callbacks:
+                    if isinstance(callback, TrainingMetricsCallback):
+                        current_reward = callback.get_recent_mean_reward(window=10)
+                        if current_reward > self.best_mean_reward:
+                            self.best_mean_reward = current_reward
+                            self.best_model_path = os.path.join(
+                                self.save_path, f"{self.name_prefix}_best.zip"
+                            )
+                            self.model.save(self.best_model_path)
+                            if self.verbose >= 1:
+                                print(f"New best model saved: {current_reward:.2f}")
+                        break
+        except Exception as e:
+            if self.verbose >= 1:
+                print(f"Best model saving failed: {e}")
+
+class HyperparameterCallback(BaseCallback):
+    """
+    하이퍼파라미터와 모델 설정을 TensorBoard에 로깅하는 콜백
+    - 알고리즘별 하이퍼파라미터 자동 감지 및 로깅
+    - 환경별 설정 정보 포함
+    """
+    def __init__(self, env_config: Optional[Dict[str, Any]] = None, verbose: int = 0):
         super().__init__(verbose)
+        self.env_config = env_config or {}
 
     def _on_training_start(self) -> None:
-        """학습 시작 시 하이퍼파라미터 로깅"""
-        # 하이퍼파라미터 딕셔너리 구성
-        hparam_dict = {
-            "algorithm": self.model.__class__.__name__,
-            "learning_rate": self.model.learning_rate,
-            "gamma": self.model.gamma,
-        }
+        hparam_dict = self._collect_hyperparameters()
+        metric_dict = self._define_metrics()
 
-        # 알고리즘별 특화 하이퍼파라미터 추가
-        if hasattr(self.model, 'batch_size'):
-            hparam_dict["batch_size"] = self.model.batch_size
-        if hasattr(self.model, 'buffer_size'):
-            hparam_dict["buffer_size"] = self.model.buffer_size
-        if hasattr(self.model, 'tau'):
-            hparam_dict["tau"] = self.model.tau
-        if hasattr(self.model, 'ent_coef'):
-            hparam_dict["ent_coef"] = self.model.ent_coef
-        if hasattr(self.model, 'n_steps'):
-            hparam_dict["n_steps"] = self.model.n_steps
-        if hasattr(self.model, 'n_epochs'):
-            hparam_dict["n_epochs"] = self.model.n_epochs
-        if hasattr(self.model, 'clip_range'):
-            hparam_dict["clip_range"] = self.model.clip_range
-
-        # 환경 특화 하이퍼파라미터 추가 (가능한 경우)
-        if hasattr(self.model, 'rl_env'):
-            rl_env = self.model.rl_env
-            hparam_dict.update({
-                "num_vehicles": rl_env.num_vehicles,
-                "max_episode_steps": rl_env.max_episode_steps,
-                "num_static_obstacles": rl_env.num_static_obstacles,
-                "num_dynamic_obstacles": rl_env.num_dynamic_obstacles,
-            })
-
-        # 메트릭 딕셔너리 (TensorBoard에서 추적할 핵심 지표들)
-        metric_dict = {
-            "train/episode_reward": 0,
-            "train/episode_length": 0,
-            "train/active_vehicles": 0,
-            "resources/gpu_memory_gb": 0,
-            "time/steps_per_second": 0,
-        }
-
-        # 알고리즘별 특화 메트릭 추가
-        if "SAC" in self.model.__class__.__name__:
-            metric_dict.update({
-                "train/actor_loss": 0.0,
-                "train/critic_loss": 0.0,
-                "train/ent_coef": 0.0,
-            })
-        elif "PPO" in self.model.__class__.__name__:
-            metric_dict.update({
-                "train/policy_loss": 0.0,
-                "train/value_loss": 0.0,
-                "train/explained_variance": 0.0,
-            })
-
-        # HPARAMS 로깅
         self.logger.record(
             "hparams",
             HParam(hparam_dict, metric_dict),
@@ -148,161 +295,243 @@ class HyperparameterLoggingCallback(BaseCallback):
         )
 
         if self.verbose >= 1:
-            print(f"하이퍼파라미터 로깅 완료: {len(hparam_dict)}개 파라미터, {len(metric_dict)}개 메트릭")
+            print(f"Logged {len(hparam_dict)} hyperparameters and {len(metric_dict)} metrics")
+
+    def _collect_hyperparameters(self) -> Dict[str, Any]:
+        """모델과 환경의 하이퍼파라미터 수집"""
+        hparams = {
+            "algorithm": self.model.__class__.__name__,
+            "learning_rate": float(self.model.learning_rate),
+            "gamma": float(self.model.gamma),
+        }
+
+        # 알고리즘별 특화 파라미터
+        algo_specific = {
+            'batch_size': getattr(self.model, 'batch_size', None),
+            'buffer_size': getattr(self.model, 'buffer_size', None),
+            'tau': getattr(self.model, 'tau', None),
+            'ent_coef': getattr(self.model, 'ent_coef', None),
+            'n_steps': getattr(self.model, 'n_steps', None),
+            'n_epochs': getattr(self.model, 'n_epochs', None),
+            'clip_range': getattr(self.model, 'clip_range', None),
+        }
+
+        # None이 아닌 값만 추가
+        for key, value in algo_specific.items():
+            if value is not None:
+                hparams[key] = float(value) if isinstance(value, (int, float)) else value
+
+        # 환경 설정 추가
+        if self.env_config:
+            env_params = {
+                "num_vehicles": self.env_config.get('num_vehicles', 1),
+                "max_episode_steps": self.env_config.get('max_episode_steps', 1000),
+                "num_static_obstacles": self.env_config.get('num_static_obstacles', 0),
+                "num_dynamic_obstacles": self.env_config.get('num_dynamic_obstacles', 0),
+            }
+            hparams.update(env_params)
+
+        return hparams
+
+    def _define_metrics(self) -> Dict[str, float]:
+        """추적할 메트릭 정의"""
+        base_metrics = {
+            "rollout/ep_rew_mean": 0.0,
+            "rollout/ep_len_mean": 0.0,
+            "performance/steps_per_second": 0.0,
+            "performance/gpu_memory_current_gb": 0.0,
+        }
+
+        # 알고리즘별 메트릭
+        if "SAC" in self.model.__class__.__name__:
+            base_metrics.update({
+                "train/actor_loss": 0.0,
+                "train/critic_loss": 0.0,
+                "train/ent_coef": 0.0,
+            })
+        elif "PPO" in self.model.__class__.__name__:
+            base_metrics.update({
+                "train/policy_loss": 0.0,
+                "train/value_loss": 0.0,
+                "train/explained_variance": 0.0,
+            })
+
+        return base_metrics
 
     def _on_step(self) -> bool:
         return True
 
-class VehiclePerformanceCallback(BaseCallback):
+class VehicleMetricsCallback(TrainingMetricsCallback):
     """
-    개별 차량 성능을 추적하고 로깅하는 콜백
+    차량 시뮬레이션 환경 전용 메트릭 콜백
+    - 차량별 성능, 충돌률, 목표 도달률 등 추적
+    - 멀티 에이전트 환경 지원
     """
-    def __init__(self, log_freq: int = 1000, verbose=0):
+    def __init__(self, num_vehicles: int = 1, log_freq: int = 1000, verbose: int = 0):
         super().__init__(verbose)
+        self.num_vehicles = num_vehicles
         self.log_freq = log_freq
-        self.vehicle_rewards = {}
-        self.vehicle_steps = {}
-        self.vehicle_collisions = {}
-        self.vehicle_goals_reached = {}
+
+        # 차량별 메트릭
+        self.vehicle_rewards = {i: deque(maxlen=100) for i in range(num_vehicles)}
+        self.collision_count = 0
+        self.goal_reached_count = 0
+        self.outside_road_count = 0
+        self.active_vehicles_history = deque(maxlen=100)
 
     def _on_step(self) -> bool:
-        # 개별 차량 데이터 수집 (가능한 경우)
-        if hasattr(self.model, 'rl_env') and self.n_calls % self.log_freq == 0:
-            rl_env = self.model.rl_env
+        super()._on_step()
 
-            # 현재 에피소드 정보가 있는 경우
-            if hasattr(rl_env, 'episode_count') and hasattr(rl_env, 'num_vehicles'):
-                num_vehicles = rl_env.num_vehicles
+        # 차량 시뮬레이션 특화 메트릭 수집
+        self._collect_vehicle_metrics()
 
-                # 활성 차량 수 로깅
-                active_count = sum(rl_env.active_agents) if hasattr(rl_env, 'active_agents') else num_vehicles
-                self.logger.record("vehicles/active_count", active_count)
-                self.logger.record("vehicles/total_count", num_vehicles)
-                self.logger.record("vehicles/active_ratio", active_count / num_vehicles if num_vehicles > 0 else 0)
-
-                # 개별 차량 상태 로깅 (처음 3대만)
-                for i in range(min(3, num_vehicles)):
-                    is_active = rl_env.active_agents[i] if hasattr(rl_env, 'active_agents') else True
-                    self.logger.record(f"vehicles/vehicle_{i}/active", int(is_active))
-
-                if self.verbose >= 1 and self.n_calls % (self.log_freq * 10) == 0:
-                    print(f"차량 성능 추적: {active_count}/{num_vehicles} 차량 활성")
+        # 주기적 로깅
+        if self.n_calls % self.log_freq == 0:
+            self._log_vehicle_metrics()
 
         return True
 
-class CustomMonitorCallback(BaseCallback):
+    def _collect_vehicle_metrics(self):
+        """차량 관련 메트릭 수집"""
+        # 로컬 변수에서 정보 추출 시도
+        info = self.locals.get('info', {})
+
+        if isinstance(info, dict):
+            # 충돌, 목표 도달, 도로 이탈 카운트
+            collisions = info.get('collisions', {})
+            reached_targets = info.get('reached_targets', {})
+            outside_roads = info.get('outside_roads', {})
+
+            if collisions:
+                self.collision_count += sum(collisions.values())
+            if reached_targets:
+                self.goal_reached_count += sum(reached_targets.values())
+            if outside_roads:
+                self.outside_road_count += sum(outside_roads.values())
+
+            # 개별 차량 보상 기록
+            rewards = info.get('rewards', [])
+            if isinstance(rewards, (list, np.ndarray)) and len(rewards) >= self.num_vehicles:
+                for i in range(min(self.num_vehicles, len(rewards))):
+                    self.vehicle_rewards[i].append(float(rewards[i]))
+
+    def _log_vehicle_metrics(self):
+        """차량 관련 메트릭을 로거에 기록"""
+        # 전체 통계
+        total_episodes = max(1, self.episode_count)
+
+        self.logger.record("vehicles/collision_rate", self.collision_count / total_episodes)
+        self.logger.record("vehicles/goal_reached_rate", self.goal_reached_count / total_episodes)
+        self.logger.record("vehicles/outside_road_rate", self.outside_road_count / total_episodes)
+
+        # 차량별 평균 보상 (처음 3대만)
+        for i in range(min(3, self.num_vehicles)):
+            if len(self.vehicle_rewards[i]) > 0:
+                avg_reward = np.mean(self.vehicle_rewards[i])
+                self.logger.record(f"vehicles/vehicle_{i}_avg_reward", avg_reward)
+
+        # 활성 차량 수 (가능한 경우)
+        try:
+            # 모델에서 활성 에이전트 정보 가져오기
+            if hasattr(self.model, 'rl_env') and hasattr(self.model.rl_env, 'active_agents'):
+                active_count = sum(self.model.rl_env.active_agents)
+                self.logger.record("vehicles/active_count", active_count)
+                self.logger.record("vehicles/active_ratio", active_count / self.num_vehicles)
+        except Exception:
+            pass
+
+    def update_episode_end(self, episode_reward: float, episode_length: int,
+                          episode_info: Dict[str, Any]):
+        """에피소드 종료 시 메트릭 업데이트"""
+        self.episode_rewards.append(episode_reward)
+        self.episode_lengths.append(episode_length)
+        self.episode_count += 1
+        self.current_episode_reward = 0.0
+        self.current_episode_length = 0
+
+class ModularLoggingCallback(BaseCallback):
     """
-    Monitor.csv와 동일한 형태로 에피소드 데이터를 직접 기록하는 콜백
+    모듈형 로깅 콜백 - 다른 콜백들의 데이터를 수집하여 통합 로깅
     """
-    def __init__(self, log_dir: str, verbose=0):
+    def __init__(self, log_dir: str, save_freq: int = 1000, verbose: int = 0):
         super().__init__(verbose)
         self.log_dir = log_dir
+        self.save_freq = save_freq
         self.monitor_file = os.path.join(log_dir, "monitor.csv")
-        self.episode_rewards = []
-        self.episode_lengths = []
-        self.episode_times = []
         self.start_time = time.time()
+        self.last_episode_count = 0
 
-        # CSV 헤더 작성
+        # CSV 파일 초기화
         os.makedirs(log_dir, exist_ok=True)
-        with open(self.monitor_file, 'w') as f:
-            f.write(f'#{{\"t_start\": {self.start_time}, \"env_id\": \"BasicRLDrivingEnv\"}}\n')
-            f.write('r,l,t\n')
+        self._init_csv_file()
+
+    def _init_csv_file(self):
+        """CSV 파일 헤더 초기화"""
+        try:
+            with open(self.monitor_file, 'w') as f:
+                f.write(f'# Training monitor started at {time.strftime("%Y-%m-%d %H:%M:%S")}\n')
+                f.write('episode,timesteps,reward,length,elapsed_time,active_vehicles,collision_rate\n')
+        except Exception as e:
+            if self.verbose >= 1:
+                print(f"Failed to initialize CSV file: {e}")
 
     def _on_step(self) -> bool:
-        # 에피소드 완료 시 데이터 기록
-        if hasattr(self.model, 'rl_env'):
-            rl_env = self.model.rl_env
-
-            # 새 에피소드가 시작되었는지 확인 (에피소드 카운터 변화)
-            if hasattr(rl_env, 'episode_count'):
-                current_episode = rl_env.episode_count
-
-                # 이전 에피소드 데이터가 있다면 기록
-                if hasattr(self, 'prev_episode_count') and current_episode > self.prev_episode_count:
-                    # 이전 에피소드 정보 가져오기
-                    if hasattr(self.model, 'total_reward') and hasattr(self.model, 'episode_steps'):
-                        reward = self.model.total_reward
-                        length = self.model.episode_steps
-                        elapsed_time = time.time() - self.start_time
-
-                        # CSV에 기록
-                        with open(self.monitor_file, 'a') as f:
-                            f.write(f'{reward},{length},{elapsed_time}\n')
-
-                        if self.verbose >= 1:
-                            print(f"Custom Monitor 기록: Episode {self.prev_episode_count}, Reward: {reward:.2f}, Length: {length}")
-
-                self.prev_episode_count = current_episode
-
+        if self.n_calls % self.save_freq == 0:
+            self._collect_and_log_data()
         return True
 
-class EvaluationCallback(BaseCallback):
-    """
-    학습 중 주기적으로 모델 성능을 평가하는 콜백
-    """
-    def __init__(self, eval_freq: int = 10000, n_eval_episodes: int = 3, verbose=0):
-        super().__init__(verbose)
-        self.eval_freq = eval_freq
-        self.n_eval_episodes = n_eval_episodes
-        self.best_mean_reward = -np.inf
+    def _collect_and_log_data(self):
+        """다른 콜백들로부터 데이터를 수집하여 기록"""
+        try:
+            # CallbackList에서 다른 콜백들 찾기
+            training_callback = None
+            vehicle_callback = None
 
-    def _on_step(self) -> bool:
-        if self.n_calls % self.eval_freq == 0 and hasattr(self.model, 'rl_env'):
-            try:
-                rl_env = self.model.rl_env
+            if hasattr(self.parent, 'callbacks'):
+                for callback in self.parent.callbacks:
+                    if isinstance(callback, TrainingMetricsCallback):
+                        training_callback = callback
+                    elif isinstance(callback, VehicleMetricsCallback):
+                        vehicle_callback = callback
 
-                # 간단한 평가 수행
-                episode_rewards = []
-                episode_lengths = []
+            # 데이터 수집 및 기록
+            if training_callback and training_callback.episode_count > self.last_episode_count:
+                self._log_episode_data(training_callback, vehicle_callback)
+                self.last_episode_count = training_callback.episode_count
 
-                for episode in range(self.n_eval_episodes):
-                    obs, _ = rl_env.reset()
-                    done = False
-                    episode_reward = 0
-                    episode_length = 0
+        except Exception as e:
+            if self.verbose >= 1:
+                print(f"Data collection failed: {e}")
 
-                    while not done and episode_length < 500:  # 최대 500 스텝
-                        # 모델로 행동 예측 (deterministic)
-                        if hasattr(self.model, 'predict'):
-                            actions = np.zeros((rl_env.num_vehicles, 3))
-                            action, _ = self.model.predict(obs[0], deterministic=True)
-                            actions[0] = action
-                        else:
-                            actions = np.zeros((rl_env.num_vehicles, 3))
+    def _log_episode_data(self, training_callback, vehicle_callback):
+        """에피소드 데이터를 CSV에 기록"""
+        try:
+            elapsed_time = time.time() - self.start_time
+            episode = training_callback.episode_count
+            timesteps = self.num_timesteps
 
-                        obs, reward, done, _, _ = rl_env.step(actions)
-                        episode_reward += reward
-                        episode_length += 1
+            # 기본 메트릭
+            reward = training_callback.get_recent_mean_reward(window=1)
+            length = training_callback.get_recent_mean_length(window=1)
 
-                    episode_rewards.append(episode_reward)
-                    episode_lengths.append(episode_length)
+            # 차량 메트릭 (있는 경우)
+            active_vehicles = "N/A"
+            collision_rate = "N/A"
+            if vehicle_callback:
+                try:
+                    if hasattr(self.model, 'rl_env') and hasattr(self.model.rl_env, 'active_agents'):
+                        active_vehicles = sum(self.model.rl_env.active_agents)
+                    collision_rate = vehicle_callback.collision_count / max(1, episode)
+                except Exception:
+                    pass
 
-                # 평가 결과 로깅
-                mean_reward = np.mean(episode_rewards)
-                std_reward = np.std(episode_rewards)
-                mean_length = np.mean(episode_lengths)
+            # CSV에 기록
+            with open(self.monitor_file, 'a') as f:
+                f.write(f'{episode},{timesteps},{reward:.4f},{length:.1f},{elapsed_time:.2f},{active_vehicles},{collision_rate}\n')
 
-                self.logger.record("eval/mean_reward", mean_reward)
-                self.logger.record("eval/std_reward", std_reward)
-                self.logger.record("eval/mean_episode_length", mean_length)
-
-                # 최고 성능 추적
-                if mean_reward > self.best_mean_reward:
-                    self.best_mean_reward = mean_reward
-                    self.logger.record("eval/best_mean_reward", self.best_mean_reward)
-
-                    if self.verbose >= 1:
-                        print(f"새로운 최고 평가 성능: {mean_reward:.2f}")
-
-                if self.verbose >= 1:
-                    print(f"평가 완료 - 평균 보상: {mean_reward:.2f} ± {std_reward:.2f}, 평균 길이: {mean_length:.1f}")
-
-            except Exception as e:
-                if self.verbose >= 1:
-                    print(f"평가 실패: {e}")
-
-        return True
+        except Exception as e:
+            if self.verbose >= 1:
+                print(f"CSV logging failed: {e}")
 
 class SACVehicleAlgorithm(SAC):
     """
