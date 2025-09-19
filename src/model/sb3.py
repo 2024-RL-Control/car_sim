@@ -499,6 +499,7 @@ class SmartCheckpointManager(BaseCallback):
             'mean_reward': self.metrics_store.get_recent_mean_reward(10),
             'best_reward': self.metrics_store.best_mean_reward,
             'collision_rate': self.metrics_store.get_collision_rate(50),
+            'goal_success_rate': self.metrics_store.get_goal_success_rate(50),
             'timestamp': time.time()
         }
 
