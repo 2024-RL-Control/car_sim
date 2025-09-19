@@ -586,10 +586,22 @@ class BasicRLDrivingEnv(gym.Env):
 
             # 학습 완료 후 추가 로그 저장
             print("\n===== 학습 완료 =====")
-            print(f"총 학습 시간: {(time.time() - logging_callback.training_start)/3600:.2f} 시간")
+
+            # 성능 콜백에서 학습 시간 정보 가져오기
+            performance_callback = None
+            for cb in callbacks:
+                if hasattr(cb, 'training_start_time'):
+                    performance_callback = cb
+                    break
+
+            if performance_callback and performance_callback.training_start_time:
+                total_time = (time.time() - performance_callback.training_start_time) / 3600
+                print(f"총 학습 시간: {total_time:.2f} 시간")
 
             if torch.cuda.is_available():
-                print(f"최대 GPU 메모리 사용량: {max(logging_callback.gpu_memory_usage):.2f} GB")
+                if performance_callback and len(performance_callback.gpu_memory_usage) > 0:
+                    max_gpu_memory = max(performance_callback.gpu_memory_usage)
+                    print(f"최대 GPU 메모리 사용량: {max_gpu_memory:.2f} GB")
                 # 메모리 정리
                 torch.cuda.empty_cache()
 
