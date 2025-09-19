@@ -540,13 +540,13 @@ class BasicRLDrivingEnv(gym.Env):
             'max_episode_steps': self.max_episode_steps,
             'num_static_obstacles': self.num_static_obstacles,
             'num_dynamic_obstacles': self.num_dynamic_obstacles,
+            'max_episodes_history': 1000,  # 메트릭 히스토리
+            'max_steps_history': 10000,
             'max_checkpoints': 10,
             'save_best_model': True,
             'gpu_memory_limit': 5,  # GPU 메모리 제한 (GB)
             'checkpoint_freq': 10000,
-            'unified_log_freq': 1000,  # 통합 로깅 주기
-            'max_episodes_history': 1000,  # 메트릭 히스토리
-            'max_steps_history': 10000,
+            'monitoring_freq': 1000,  # 메모리 및 성능 모니터링 빈도
             'verbose': 1
         }
 

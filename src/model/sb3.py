@@ -158,11 +158,12 @@ class MetricsCollectorCallback(BaseCallback):
     모든 다른 콜백들이 의존하는 기본 데이터를 수집
     """
 
-    def __init__(self, metrics_store: MetricsStore, verbose: int = 0):
+    def __init__(self, metrics_store: MetricsStore, monitor_freq: int = 1000, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_store = metrics_store
         self.current_episode_reward = 0.0
         self.current_episode_length = 0
+        self.monitor_freq = monitor_freq
 
     def _on_training_start(self) -> None:
         self.metrics_store.start_training()
@@ -172,8 +173,9 @@ class MetricsCollectorCallback(BaseCallback):
     def _on_step(self) -> bool:
         # GPU 메모리 추적
         gpu_memory = None
-        if torch.cuda.is_available():
-            gpu_memory = torch.cuda.memory_allocated() / (1024 ** 3)
+        if self.n_calls % self.monitor_freq == 0:
+            if torch.cuda.is_available():
+                gpu_memory = torch.cuda.memory_allocated() / (1024 ** 3)
 
         self.metrics_store.record_step(self.num_timesteps, gpu_memory)
         return True
@@ -247,19 +249,21 @@ class SystemPerformanceCallback(BaseCallback):
     GPU/CPU 사용량, 메모리 관리
     """
 
-    def __init__(self, metrics_store: MetricsStore, gpu_memory_limit: int = 5, verbose: int = 0):
+    def __init__(self, metrics_store: MetricsStore, gpu_memory_limit: int = 5, monitor_freq: int = 1000, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_store = metrics_store
         self.gpu_memory_limit = gpu_memory_limit
+        self.monitor_freq = monitor_freq
 
     def _on_step(self) -> bool:
         # GPU 메모리 정리
-        if torch.cuda.is_available():
-            gpu_memory_gb = torch.cuda.memory_allocated() / (1024 ** 3)
-            if gpu_memory_gb > self.gpu_memory_limit:
-                torch.cuda.empty_cache()
-                if self.verbose >= 1:
-                    print(f"GPU memory cleared at {gpu_memory_gb:.2f}GB")
+        if self.n_calls % self.monitor_freq == 0:
+            if torch.cuda.is_available():
+                gpu_memory_gb = torch.cuda.memory_allocated() / (1024 ** 3)
+                if gpu_memory_gb > self.gpu_memory_limit:
+                    torch.cuda.empty_cache()
+                    if self.verbose >= 1:
+                        print(f"GPU memory cleared at {gpu_memory_gb:.2f}GB")
         return True
 
 
@@ -551,13 +555,18 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
 
     # 1. 메트릭 수집기 (가장 먼저)
     metrics_collector = MetricsCollectorCallback(
-        metrics_store, config.get('verbose', 0)
+        metrics_store,
+        config.get('monitoring_freq', 1000),
+        config.get('verbose', 0)
     )
     callbacks.append(metrics_collector)
 
     # 2. 시스템 성능 모니터링
     system_perf = SystemPerformanceCallback(
-        metrics_store, config.get('gpu_memory_limit', 5), config.get('verbose', 0)
+        metrics_store,
+        config.get('gpu_memory_limit', 5),
+        config.get('monitoring_freq', 1000),
+        config.get('verbose', 0)
     )
     callbacks.append(system_perf)
 
