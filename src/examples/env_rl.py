@@ -554,6 +554,10 @@ class BasicRLDrivingEnv(gym.Env):
         callbacks, metrics_store = create_optimized_callbacks(callback_config, log_dir, models_dir)
         callback = CallbackList(callbacks)
 
+        # CSV 로거 생성 (알고리즘에서 직접 사용)
+        from ..model.sb3 import CSVLogger
+        csv_logger = CSVLogger(log_dir, callback_config['verbose'])
+
         # 콜백 요약 정보 출력
         summary = get_callback_summary(callbacks)
         if callback_config['verbose'] >= 1:
@@ -570,7 +574,7 @@ class BasicRLDrivingEnv(gym.Env):
 
             # 모델에 환경 정보 및 메트릭 스토어 설정
             model.set_env_info(self)
-            model.set_metrics_store(metrics_store)
+            model.set_metrics_store(metrics_store, csv_logger)
 
             model.learn(
                 total_timesteps=self.max_step,
