@@ -35,7 +35,6 @@ class EpisodeData:
     collisions: Dict[int, bool]
     goals_reached: Dict[int, bool]
     outside_roads: Dict[int, bool]
-    active_vehicles: int
     elapsed_time: float
     individual_rewards: List[float]
 
@@ -153,10 +152,6 @@ class MetricsStore:
         return metrics
 
 
-# =============================================================================
-# 최적화된 콜백 시스템
-# =============================================================================
-
 class MetricsCollectorCallback(BaseCallback):
     """
     중앙 메트릭 수집기
@@ -181,20 +176,6 @@ class MetricsCollectorCallback(BaseCallback):
             gpu_memory = torch.cuda.memory_allocated() / (1024 ** 3)
 
         self.metrics_store.record_step(self.num_timesteps, gpu_memory)
-        return True
-
-
-class CoreRLMetricsCallback(BaseCallback):
-    """
-    핵심 RL 메트릭 수집
-    에피소드 보상, 길이 등 기본 RL 메트릭
-    """
-
-    def __init__(self, metrics_store: MetricsStore, verbose: int = 0):
-        super().__init__(verbose)
-        self.metrics_store = metrics_store
-
-    def _on_step(self) -> bool:
         return True
 
 
@@ -431,7 +412,7 @@ class CSVLogger:
         """CSV 파일 초기화"""
         headers = [
             "episode", "timesteps", "reward", "length", "collision_rate",
-            "goal_success_rate", "active_vehicles", "elapsed_time", "best_reward"
+            "goal_success_rate", "elapsed_time", "best_reward"
         ]
 
         with open(self.csv_file, 'w', encoding='utf-8') as f:
@@ -450,7 +431,6 @@ class CSVLogger:
                 episode_data.length,
                 f"{collision_rate:.4f}",
                 f"{goal_rate:.4f}",
-                episode_data.active_vehicles,
                 f"{episode_data.elapsed_time:.2f}",
                 f"{best_reward:.4f}"
             ]
@@ -573,11 +553,11 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
     )
     callbacks.append(metrics_collector)
 
-    # 2. 핵심 RL 메트릭
-    core_metrics = CoreRLMetricsCallback(
-        metrics_store, config.get('verbose', 0)
+    # 2. 시스템 성능 모니터링
+    system_perf = SystemPerformanceCallback(
+        metrics_store, config.get('gpu_memory_limit', 5), config.get('verbose', 0)
     )
-    callbacks.append(core_metrics)
+    callbacks.append(system_perf)
 
     # 3. 차량별 메트릭
     if config.get('num_vehicles', 1) >= 1:
@@ -589,13 +569,7 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         )
         callbacks.append(vehicle_metrics)
 
-    # 4. 시스템 성능 모니터링
-    system_perf = SystemPerformanceCallback(
-        metrics_store, config.get('gpu_memory_limit', 5), config.get('verbose', 0)
-    )
-    callbacks.append(system_perf)
-
-    # 5. TensorBoard 로거 (직접 추가)
+    # 4. TensorBoard 로거
     tensorboard_logger = TensorBoardLogger(
         metrics_store,
         config.get('logging_freq', 1000),
@@ -604,7 +578,7 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
     )
     callbacks.append(tensorboard_logger)
 
-    # 6. 체크포인트 매니저 (직접 추가)
+    # 5. 체크포인트 매니저
     checkpoint_manager = SmartCheckpointManager(
         metrics_store,
         config.get('checkpoint_freq', 10000),
@@ -782,7 +756,6 @@ class SACVehicleAlgorithm(SAC):
                 collisions=info.get('collisions', {}),
                 goals_reached=info.get('reached_targets', {}),
                 outside_roads=info.get('outside_roads', {}),
-                active_vehicles=sum(self.rl_env.active_agents),
                 elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
                 individual_rewards=info.get('rewards', [])
             )
@@ -1002,7 +975,6 @@ class PPOVehicleAlgorithm(PPO):
                 collisions=info.get('collisions', {}),
                 goals_reached=info.get('reached_targets', {}),
                 outside_roads=info.get('outside_roads', {}),
-                active_vehicles=sum(self.rl_env.active_agents),
                 elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
                 individual_rewards=info.get('rewards', [])
             )
