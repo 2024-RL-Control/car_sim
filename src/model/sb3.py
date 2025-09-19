@@ -453,19 +453,17 @@ class CSVLogger:
 class SmartCheckpointManager(BaseCallback):
     """
     스마트 체크포인트 관리
-    성능 기반 + 시간 기반 저장 정책
+    시간 기반 저장 정책
     """
 
     def __init__(self, metrics_store: MetricsStore, save_freq: int, save_path: str,
-                 name_prefix: str = 'model', max_checkpoints: int = 5,
-                 save_best: bool = True, verbose: int = 0):
+                 name_prefix: str = 'model', max_checkpoints: int = 5, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_store = metrics_store
         self.save_freq = save_freq
         self.save_path = save_path
         self.name_prefix = name_prefix
         self.max_checkpoints = max_checkpoints
-        self.save_best = save_best
         self.checkpoint_metadata = []
 
         # 저장 디렉토리 생성
@@ -477,9 +475,6 @@ class SmartCheckpointManager(BaseCallback):
             self._save_checkpoint()
             self._save_checkpoint_metadata()
             self._cleanup_old_checkpoints()
-
-            if self.save_best:
-                self._save_best_model()
 
         return True
 
@@ -528,19 +523,6 @@ class SmartCheckpointManager(BaseCallback):
         except Exception as e:
             if self.verbose >= 1:
                 print(f"Checkpoint cleanup failed: {e}")
-
-    def _save_best_model(self):
-        """베스트 모델 저장"""
-        current_reward = self.metrics_store.get_recent_mean_reward(10)
-
-        if current_reward > self.metrics_store.best_mean_reward:
-            best_path = os.path.join(self.save_path, f"{self.name_prefix}_best")
-            self.model.save(best_path)
-            if self.name_prefix == 'sac':
-                self.model.save_replay_buffer(os.path.join(self.save_path, f"{self.name_prefix}_replay_buffer"))
-
-            if self.verbose >= 1:
-                print(f"New best model saved: {current_reward:.2f}")
 
 
 # 콜백 팩토리 함수
@@ -598,7 +580,6 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         models_dir,
         config.get('algorithm', 'model'),
         config.get('max_checkpoints', 5),
-        config.get('save_best_model', True),
         config.get('verbose', 0)
     )
     callbacks.append(checkpoint_manager)
@@ -639,10 +620,12 @@ class SACVehicleAlgorithm(SAC):
         self.rl_env = rl_env
         self.num_vehicles = rl_env.num_vehicles
 
-    def set_metrics_store(self, metrics_store: MetricsStore, csv_logger: Optional[CSVLogger] = None):
+    def set_metrics_store(self, metrics_store: MetricsStore, csv_logger: Optional[CSVLogger] = None, models_dir: Optional[str] = None, log_dir: Optional[str] = None):
         """메트릭 스토어 및 CSV 로거 설정"""
         self.metrics_store = metrics_store
         self.csv_logger = csv_logger
+        self.models_dir = models_dir
+        self.log_dir = log_dir
         self._last_losses = {}  # 알고리즘 로스 추적용
 
     def _excluded_save_params(self) -> list[str]:
@@ -760,6 +743,10 @@ class SACVehicleAlgorithm(SAC):
 
             self.metrics_store.record_episode(episode_data)
 
+            # 베스트 모델 저장
+            if self.total_reward == self.metrics_store.best_mean_reward:
+                self._save_best_model()
+
             # CSV 로거에 즉시 기록 (직접 접근)
             if hasattr(self, 'csv_logger') and self.csv_logger:
                 self.csv_logger.log_episode(episode_data, self.metrics_store.best_mean_reward)
@@ -770,6 +757,11 @@ class SACVehicleAlgorithm(SAC):
 
         # 로거 덤프
         self.logger.dump(self.num_timesteps)
+
+    def _save_best_model(self):
+        """베스트 모델 저장"""
+        self.save(os.path.join(self.models_dir, "sac_best"))
+        self.save_replay_buffer(os.path.join(self.models_dir, "sac_best_replay_buffer"))
 
     def learn(
         self,
@@ -829,10 +821,12 @@ class PPOVehicleAlgorithm(PPO):
         self.rl_env = rl_env
         self.num_vehicles = rl_env.num_vehicles
 
-    def set_metrics_store(self, metrics_store: MetricsStore, csv_logger: Optional[CSVLogger] = None):
+    def set_metrics_store(self, metrics_store: MetricsStore, csv_logger: Optional[CSVLogger] = None, models_dir: Optional[str] = None, log_dir: Optional[str] = None):
         """메트릭 스토어 및 CSV 로거 설정"""
         self.metrics_store = metrics_store
         self.csv_logger = csv_logger
+        self.models_dir = models_dir
+        self.log_dir = log_dir
         self._last_losses = {}  # 알고리즘 로스 추적용
 
     def _excluded_save_params(self) -> list[str]:
@@ -960,6 +954,10 @@ class PPOVehicleAlgorithm(PPO):
 
             self.metrics_store.record_episode(episode_data)
 
+            # 베스트 모델 저장
+            if self.total_reward == self.metrics_store.best_mean_reward:
+                self._save_best_model()
+
             # CSV 로거에 즉시 기록 (직접 접근)
             if hasattr(self, 'csv_logger') and self.csv_logger:
                 self.csv_logger.log_episode(episode_data, self.metrics_store.best_mean_reward)
@@ -970,6 +968,10 @@ class PPOVehicleAlgorithm(PPO):
 
         # 로거 덤프
         self.logger.dump(self.num_timesteps)
+
+    def _save_best_model(self):
+        """베스트 모델 저장"""
+        self.save(os.path.join(self.models_dir, "ppo_best"))
 
     def learn(
             self,

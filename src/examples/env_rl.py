@@ -543,10 +543,9 @@ class BasicRLDrivingEnv(gym.Env):
             'max_episodes_history': 1000,  # 메트릭 히스토리
             'max_steps_history': 10000,
             'max_checkpoints': 10,
-            'save_best_model': True,
             'gpu_memory_limit': 5,  # GPU 메모리 제한 (GB)
             'checkpoint_freq': 10000,
-            'monitoring_freq': 1000,  # 메모리 및 성능 모니터링 빈도
+            'monitoring_freq': 1000,  # 메모리 등 하드웨어 모니터링 빈도
             'verbose': 1
         }
 
@@ -574,7 +573,7 @@ class BasicRLDrivingEnv(gym.Env):
 
             # 모델에 환경 정보 및 메트릭 스토어 설정
             model.set_env_info(self)
-            model.set_metrics_store(metrics_store, csv_logger)
+            model.set_metrics_store(metrics_store, csv_logger, models_dir, log_dir)
 
             model.learn(
                 total_timesteps=self.max_step,
@@ -599,25 +598,35 @@ class BasicRLDrivingEnv(gym.Env):
                     performance_callback = cb
                     break
 
-            if performance_callback and performance_callback.training_start_time:
-                total_time = (time.time() - performance_callback.training_start_time) / 3600
+            if metrics_store:
+                total_time = abs((metrics_store.training_start_time - metrics_store.last_step_time) / 3600)
                 print(f"총 학습 시간: {total_time:.2f} 시간")
 
-            if torch.cuda.is_available():
-                if performance_callback and len(performance_callback.gpu_memory_usage) > 0:
-                    max_gpu_memory = max(performance_callback.gpu_memory_usage)
+            if torch.cuda.is_available() and metrics_store:
+                if len(metrics_store.gpu_memory_usage) > 0:
+                    max_gpu_memory = max(metrics_store.gpu_memory_usage)
                     print(f"최대 GPU 메모리 사용량: {max_gpu_memory:.2f} GB")
                 # 메모리 정리
                 torch.cuda.empty_cache()
 
         except Exception as e:
+            import traceback
             exc_type, exc_obj, exc_tb = sys.exc_info()
             fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-            print(f"\n\n학습 중단됨: {e}")
-            print(f'file name: {str(fname)}')
-            print(f'error type: {str(exc_type)}')
-            print(f'error msg: {str(e)}')
-            print(f'line number: {str(exc_tb.tb_lineno)}')
+
+            error_msg = str(e) if str(e).strip() else repr(e)
+            if not error_msg.strip():
+                error_msg = f"{exc_type.__name__}: No error message available"
+
+            print(f"\n\n학습 중단됨: {error_msg}")
+            print(f'file name: {fname}')
+            print(f'error type: {exc_type.__name__}')
+            print(f'error msg: {error_msg}')
+            print(f'line number: {exc_tb.tb_lineno}')
+            print(f'Full traceback:')
+            traceback.print_exc()
+            print("")
+
             # 오류 발생시에도 현재까지 학습된 모델 저장 시도
             try:
                 if algorithm == 'sac':
