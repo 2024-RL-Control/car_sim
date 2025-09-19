@@ -185,16 +185,18 @@ class VehicleSpecificCallback(BaseCallback):
     다중 차량 환경의 충돌, 목표 달성 등
     """
 
-    def __init__(self, metrics_store: MetricsStore, num_vehicles: int = 1, log_freq: int = 1000, verbose: int = 0):
+    def __init__(self, metrics_store: MetricsStore, num_vehicles: int = 1, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_store = metrics_store
         self.num_vehicles = num_vehicles
-        self.log_freq = log_freq
+        self.last_episode_count = 0  # 마지막 로깅한 에피소드 수
 
     def _on_step(self) -> bool:
-        # 차량별 메트릭을 TensorBoard에 로깅
-        if self.n_calls % self.log_freq == 0:
+        # 에피소드 종료 시 즉시 로깅
+        if self.metrics_store.episode_count > self.last_episode_count:
             self._log_vehicle_metrics()
+            self.last_episode_count = self.metrics_store.episode_count
+
         return True
 
     def _log_vehicle_metrics(self):
@@ -564,7 +566,6 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         vehicle_metrics = VehicleSpecificCallback(
             metrics_store,
             config['num_vehicles'],
-            config.get('logging_freq', 1000),
             config.get('verbose', 0)
         )
         callbacks.append(vehicle_metrics)
@@ -769,8 +770,6 @@ class SACVehicleAlgorithm(SAC):
         # TensorBoard 로깅
         self.logger.record("rollout/ep_rew_mean", self.total_reward)
         self.logger.record("rollout/ep_len_mean", self.episode_steps)
-        if hasattr(self.rl_env, 'active_agents'):
-            self.logger.record("vehicles/active_count", sum(self.rl_env.active_agents))
 
         # 로거 덤프
         self.logger.dump(self.num_timesteps)
