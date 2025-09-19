@@ -35,8 +35,8 @@ class EpisodeData:
     collisions: Dict[int, bool]
     goals_reached: Dict[int, bool]
     outside_roads: Dict[int, bool]
-    elapsed_time: float
     individual_rewards: List[float]
+    elapsed_time: float
 
 
 class MetricsStore:
@@ -201,13 +201,13 @@ class VehicleSpecificCallback(BaseCallback):
 
         return True
 
-    def _log_vehicle_metrics(self):
+    def _log_vehicle_metrics(self, window: int = 50):
         """차량별 상세 메트릭 로깅"""
         if not self.metrics_store.episodes:
             return
 
         # 최근 에피소드들에서 차량별 데이터 분석
-        recent_episodes = list(self.metrics_store.episodes)[-min(50, len(self.metrics_store.episodes)):]
+        recent_episodes = list(self.metrics_store.episodes)[-min(window, len(self.metrics_store.episodes)):]
 
         # 차량별 보상 통계
         for vehicle_id in range(self.num_vehicles):
@@ -723,33 +723,19 @@ class SACVehicleAlgorithm(SAC):
         self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
         self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
 
-        # 7) 콜백 업데이트
-        callback_locals = {
-            'actions': actions,
-            'next_observations': next_observations,
-            'reward': reward,
-            'done': done,
-            'info': info,
-            'episode_steps': self.episode_steps,
-            'total_reward': self.total_reward,
-            'active_mask': active_mask
-        }
-
-        # 마지막 스텝 정보 저장
-        self._last_step_info = info
-
-        callback.update_locals(callback_locals)
+        # 7) 콜백 호출
+        callback.update_locals(locals())
         if not callback.on_step():
             return False
 
         # 8) 에피소드 종료 시 처리
         if done:
-            self._handle_episode_end(callback)
+            self._handle_episode_end(info)
             self._reset()
 
         return True
 
-    def _handle_episode_end(self, callback):
+    def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
         print(f"Episode {self.rl_env.episode_count}, "
@@ -757,8 +743,7 @@ class SACVehicleAlgorithm(SAC):
               f"Total Reward: {self.total_reward:.2f}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
-        if self.metrics_store and hasattr(self, '_last_step_info'):
-            info = self._last_step_info
+        if self.metrics_store:
             episode_data = EpisodeData(
                 episode_id=self.rl_env.episode_count,
                 timesteps=self.num_timesteps,
@@ -767,8 +752,8 @@ class SACVehicleAlgorithm(SAC):
                 collisions=info.get('collisions', {}),
                 goals_reached=info.get('reached_targets', {}),
                 outside_roads=info.get('outside_roads', {}),
-                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
-                individual_rewards=info.get('rewards', [])
+                individual_rewards=info.get('rewards', []),
+                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
             )
 
             self.metrics_store.record_episode(episode_data)
@@ -935,38 +920,22 @@ class PPOVehicleAlgorithm(PPO):
             # 6) 내부 상태 갱신
             if self._is_new_episode:
                 self._is_new_episode = False
-            self.prev_observations = next_observations
+            self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
             self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
 
-            # 7) 콜백 업데이트
-            callback_locals = {
-                'actions': actions,
-                'next_observations': next_observations,
-                'reward': reward,
-                'done': done,
-                'info': info,
-                'episode_steps': self.episode_steps,
-                'total_reward': self.total_reward,
-                'active_mask': active_mask,
-                'values': values,
-                'log_probs': log_probs
-            }
-
-            # 마지막 스텝 정보 저장
-            self._last_step_info = info
-
-            callback.update_locals(callback_locals)
+            # 7) 콜백 호출
+            callback.update_locals(locals())
             if not callback.on_step():
                 return False
 
-            # 8) 에피소드 종료시점 처리
+            # 8) 에피소드 종료 시 처리
             if done:
-                self._handle_episode_end(callback)
+                self._handle_episode_end(info)
                 self._reset()
 
-        return True
+            return True
 
-    def _handle_episode_end(self, callback):
+    def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
         print(f"Episode {self.rl_env.episode_count}, "
@@ -974,8 +943,7 @@ class PPOVehicleAlgorithm(PPO):
               f"Total Reward: {self.total_reward:.2f}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
-        if self.metrics_store and hasattr(self, '_last_step_info'):
-            info = self._last_step_info
+        if self.metrics_store:
             episode_data = EpisodeData(
                 episode_id=self.rl_env.episode_count,
                 timesteps=self.num_timesteps,
@@ -984,8 +952,8 @@ class PPOVehicleAlgorithm(PPO):
                 collisions=info.get('collisions', {}),
                 goals_reached=info.get('reached_targets', {}),
                 outside_roads=info.get('outside_roads', {}),
-                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
-                individual_rewards=info.get('rewards', [])
+                individual_rewards=info.get('rewards', []),
+                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
             )
 
             self.metrics_store.record_episode(episode_data)
