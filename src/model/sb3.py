@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional, Union, List
 from collections import deque
 from dataclasses import dataclass, asdict
 from pathlib import Path
-
+import re
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.callbacks import (
     CheckpointCallback, BaseCallback, EvalCallback
@@ -537,11 +537,8 @@ class SmartCheckpointManager(BaseCallback):
     def _cleanup_old_checkpoints(self):
         """오래된 체크포인트 정리"""
         try:
-            files = sorted([
-                f for f in os.listdir(self.save_path)
-                if f.startswith(self.name_prefix) and f.endswith('.zip')
-                and 'best' not in f
-            ])
+            files = [f for f in os.listdir(self.save_path)if f.startswith(self.name_prefix) and f.endswith('.zip') and 'best' not in f and 'replay_buffer' not in f and 'final' not in f and 'interrupted' not in f]
+            files = sorted(files, key=lambda f: int(re.search(r'_(\d+)_steps', f).group(1)))
 
             for old_file in files[:-self.max_checkpoints]:
                 old_path = os.path.join(self.save_path, old_file)

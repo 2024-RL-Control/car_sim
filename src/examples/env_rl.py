@@ -454,7 +454,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [128, 128, 128, 64, 32],
+            "net_arch": [128, 128, 128, 64, 64, 32],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
@@ -462,7 +462,7 @@ class BasicRLDrivingEnv(gym.Env):
             "features_extractor_class": CustomFeatureExtractor,
             # 추출기 아키텍처
             "features_extractor_kwargs": {
-                "net_arch": [64, 64, 128, 128, 256, 256, 128]
+                "net_arch": [64, 64, 128, 128, 128, 256, 256]
             },
             "share_features_extractor": True,
         }
@@ -472,7 +472,7 @@ class BasicRLDrivingEnv(gym.Env):
             buffer_size = self.max_step // 2  # 더 큰 버퍼
             learning_rate = 1e-3  # 더 높은 학습률
             batch_size = 256
-            learning_starts = 10000  # 더 빠른 학습 시작
+            learning_starts = 20000  # 더 빠른 학습 시작
             n_envs = 1
 
             # 공유 리플레이 버퍼 생성
@@ -515,7 +515,7 @@ class BasicRLDrivingEnv(gym.Env):
             gamma         = 0.995 # 더 긴 시간 지평선
             gae_lambda    = 0.95
             clip_range    = 0.2
-            learning_rate = 5e-4  # 더 높은 학습률
+            learning_rate = 3e-4  # 더 높은 학습률
 
             # 커스텀 PPO 모델 생성
             model = PPOVehicleAlgorithm(

@@ -8,7 +8,7 @@ simulation:
     vehicle_state_dim: 8
     lidar_dim: 13
     trajectory_dim: 0
-  train_max_steps: 1000000
+  train_max_steps: 2000000
   train_max_episode_steps: 5000    # maximum steps per episode (더 짧은 에피소드)
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment
@@ -19,8 +19,8 @@ simulation:
     y_max: 30
   obstacle:
     num_static_obstacles: 0
-    num_dynamic_obstacles: 7
-    buffer_distance: 20  # [m]
+    num_dynamic_obstacles: 5
+    buffer_distance: 40  # [m]
     boundary:            # [m]
       x_min: -10
       x_max: 10
@@ -40,12 +40,12 @@ simulation:
     min_speed: 5
     max_speed: 30
   rewards:
-    goal_reached_reward: 400.0        # reward for reaching the goal
-    collision_penalty: -200.0          # penalty for collision
-    outside_road_penalty: -200.0       # penalty for going outside the road
-    progress_factor: 1.0              # reward factor for reducing distance to goal
-    lane_keeping_factor: 0.5          # reward factor for staying in the lane
-    speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
+    goal_reached_reward: 500.0        # reward for reaching the goal
+    collision_penalty: -100.0          # penalty for collision
+    outside_road_penalty: -100.0       # penalty for going outside the road
+    progress_factor: 0.5              # reward factor for reducing distance to goal
+    lane_keeping_factor: 0.2          # reward factor for staying in the lane
+    speed_factor: 0.3                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
