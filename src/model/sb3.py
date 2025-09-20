@@ -655,6 +655,7 @@ class SACVehicleAlgorithm(SAC):
         self.prev_observations = None
         self.prev_active_mask = None
         self.total_reward = 0
+        self.individual_rewards = None
         self.metrics_store = None  # 메트릭 스토어 참조
 
     def set_env_info(self, rl_env):
@@ -679,6 +680,7 @@ class SACVehicleAlgorithm(SAC):
         self.prev_observations = prev_observations
         self.prev_active_mask = np.array(active_agents)
         self.total_reward = 0.0
+        self.individual_rewards = np.zeros(self.num_vehicles)
 
     def _custom_rollout_step(self, callback) -> bool:
         """
@@ -718,6 +720,9 @@ class SACVehicleAlgorithm(SAC):
         next_observations, reward, done, _, info = self.rl_env.step(actions)
         self.num_timesteps += 1
         self.total_reward += reward
+        for vehicle_id in range(self.num_vehicles):
+            if vehicle_id < len(info['rewards']):
+                self.individual_rewards[vehicle_id] += info['rewards'][vehicle_id]
 
         # 4) 렌더링
         self.rl_env.render()
@@ -762,10 +767,10 @@ class SACVehicleAlgorithm(SAC):
                 timesteps=self.num_timesteps,
                 reward=self.total_reward,
                 length=info['episode_length'],
-                collisions=info.get('collisions', {}),
-                goals_reached=info.get('reached_targets', {}),
-                outside_roads=info.get('outside_roads', {}),
-                individual_rewards=info.get('rewards', []),
+                collisions=info['collisions'].copy(),
+                goals_reached=info['reached_targets'].copy(),
+                outside_roads=info['outside_roads'].copy(),
+                individual_rewards=self.individual_rewards.tolist(),
                 elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
             )
 
@@ -818,6 +823,7 @@ class PPOVehicleAlgorithm(PPO):
         self.prev_observations = None
         self.prev_active_mask = None
         self.total_reward = 0
+        self.individual_rewards = None
         self._is_new_episode = True
         self.metrics_store = None
 
@@ -843,6 +849,7 @@ class PPOVehicleAlgorithm(PPO):
         self.prev_observations = prev_observations
         self.prev_active_mask = np.array(active_agents)
         self.total_reward = 0.0
+        self.individual_rewards = np.zeros(self.num_vehicles)
         self._is_new_episode = True
 
     def _custom_rollout_step(self, callback: BaseCallback, n_steps: int) -> bool:
@@ -886,6 +893,9 @@ class PPOVehicleAlgorithm(PPO):
             next_observations, reward, done, _, info = self.rl_env.step(actions)
             self.num_timesteps += 1
             self.total_reward += reward
+            for vehicle_id in range(self.num_vehicles):
+                if vehicle_id < len(info['rewards']):
+                    self.individual_rewards[vehicle_id] += info['rewards'][vehicle_id]
 
             # 4) 렌더링
             self.rl_env.render()
@@ -936,10 +946,10 @@ class PPOVehicleAlgorithm(PPO):
                 timesteps=self.num_timesteps,
                 reward=self.total_reward,
                 length=info['episode_length'],
-                collisions=info.get('collisions', {}),
-                goals_reached=info.get('reached_targets', {}),
-                outside_roads=info.get('outside_roads', {}),
-                individual_rewards=info.get('rewards', []),
+                collisions=info['collisions'].copy(),
+                goals_reached=info['reached_targets'].copy(),
+                outside_roads=info['outside_roads'].copy(),
+                individual_rewards=self.individual_rewards.tolist(),
                 elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
             )
 
