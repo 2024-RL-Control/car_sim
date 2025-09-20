@@ -537,7 +537,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 환경 정보는 learn() 내부에서 설정됨
 
         # 로거 설정
-        model.set_logger(configure(log_dir, ["stdout", "csv", "tensorboard"]))
+        model.set_logger(configure(log_dir, ["stdout", "tensorboard"]))
 
         # 모델 출력
         print(model.policy)
@@ -554,6 +554,7 @@ class BasicRLDrivingEnv(gym.Env):
             'max_checkpoints': 10,
             'gpu_memory_limit': 5,  # GPU 메모리 제한 (GB)
             'checkpoint_freq': 10000,
+            'save_best_model': True,
             'monitoring_freq': 1000,  # 메모리 등 하드웨어 모니터링 빈도
             'verbose': 1
         }

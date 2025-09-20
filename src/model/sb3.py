@@ -418,7 +418,7 @@ class CustomCSVLogger(BaseCallback):
         super().__init__(verbose)
         self.metrics_store = metrics_store
         self.log_dir = Path(log_dir)
-        self.csv_file = self.log_dir / "training_log.csv"
+        self.csv_file = self.log_dir / "monitor.csv"
         self.verbose = verbose
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._init_csv()
@@ -427,8 +427,8 @@ class CustomCSVLogger(BaseCallback):
     def _init_csv(self):
         """CSV 파일 초기화"""
         headers = [
-            "episode", "timesteps", "reward", "length", "collision_rate",
-            "goal_success_rate", "elapsed_time", "best_reward"
+            "elapsed_time", "episode", "timesteps", "reward", "length", "collision_rate",
+            "success_rate", "best_reward"
         ]
 
         with open(self.csv_file, 'w', encoding='utf-8') as f:
@@ -450,13 +450,13 @@ class CustomCSVLogger(BaseCallback):
             goal_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
 
             row = [
+                f"{episode.elapsed_time:.2f}",
                 episode.episode_id,
                 episode.timesteps,
                 f"{episode.reward:.4f}",
                 episode.length,
                 f"{collision_rate:.4f}",
                 f"{goal_rate:.4f}",
-                f"{episode.elapsed_time:.2f}",
                 f"{self.metrics_store.best_reward:.4f}"
             ]
 
@@ -476,7 +476,7 @@ class SmartCheckpointManager(BaseCallback):
     """
 
     def __init__(self, metrics_store: MetricsStore, save_freq: int, save_path: str,
-                 name_prefix: str = 'model', max_checkpoints: int = 5, save_best: bool = True, verbose: int = 0):
+                 name_prefix: str = 'model', max_checkpoints: int = 5, save_best_model: bool = True, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_store = metrics_store
         self.save_freq = save_freq
@@ -484,7 +484,7 @@ class SmartCheckpointManager(BaseCallback):
         self.name_prefix = name_prefix
         self.max_checkpoints = max_checkpoints
         self.checkpoint_metadata = []
-        self.save_best = save_best
+        self.save_best_model = save_best_model
         self.last_episode_count = 0  # 마지막 로깅한 에피소드 수
 
         # 저장 디렉토리 생성
@@ -498,7 +498,7 @@ class SmartCheckpointManager(BaseCallback):
             self._cleanup_old_checkpoints()
 
         # 에피소드 종료 시 최고 성능 모델 저장
-        if self.save_best:
+        if self.save_best_model:
             if self.metrics_store.episode_count > self.last_episode_count:
                 episode = self.metrics_store.episodes[-1]
                 if episode.reward >= self.metrics_store.best_reward:
@@ -624,6 +624,7 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         models_dir,
         config.get('algorithm', 'model'),
         config.get('max_checkpoints', 5),
+        config.get('save_best_model', True),
         config.get('verbose', 0)
     )
     callbacks.append(checkpoint_manager)
