@@ -344,11 +344,11 @@ class TensorBoardLogger(BaseCallback):
 
         # 메트릭 정의
         metric_dict = {
-            # "rollout/episode_reward": 0.0,
-            # "rollout/episode_length": 0.0,
-            # "vehicles/collision_rate": 0.0,
-            # "vehicles/goal_success_rate": 0.0,
-            # "performance/steps_per_second": 0.0,
+            "rollout/episode_reward_mean_10": 0.0,
+            "rollout/episode_length_mean_10": 0.0,
+            "vehicles/collision_rate": 0.0,
+            "vehicles/goal_success_rate": 0.0,
+            "performance/steps_per_second": 0.0,
         }
 
         self.logger.record(
