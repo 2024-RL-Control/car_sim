@@ -67,7 +67,7 @@ class MetricsStore:
         self.last_step_time = None
 
         # 베스트 성능 추적
-        self.best_mean_reward = -np.inf
+        self.best_reward = -np.inf
         self.best_episode_id = -1
 
     def start_training(self):
@@ -95,8 +95,8 @@ class MetricsStore:
         self.episode_count += 1
 
         # 베스트 성능 업데이트
-        if episode_data.reward > self.best_mean_reward:
-            self.best_mean_reward = episode_data.reward
+        if episode_data.reward > self.best_reward:
+            self.best_reward = episode_data.reward
             self.best_episode_id = episode_data.episode_id
 
     def get_recent_mean_reward(self, window: int = 100) -> float:
@@ -281,7 +281,7 @@ class TensorBoardLogger(BaseCallback):
         self.log_freq = log_freq
         self.env_config = env_config or {}
         self.tb_formatter = None
-        self.last_logged_timestep = 0
+        self.last_episode_count = 0  # 마지막 로깅한 에피소드 수
 
     def _on_training_start(self) -> None:
         # TensorBoard 포매터 찾기
@@ -298,6 +298,16 @@ class TensorBoardLogger(BaseCallback):
     def _on_step(self) -> bool:
         if self.n_calls % self.log_freq == 0:
             self._log_metrics()
+
+        if self.metrics_store.episode_count > self.last_episode_count:
+            episode = self.metrics_store.episodes[-1]
+
+            self.logger.record("rollout/episode_reward", episode.reward)
+            self.logger.record("rollout/episode_length", episode.length)
+            self.logger.dump(episode.timesteps)
+
+            self.last_episode_count = self.metrics_store.episode_count
+
         return True
 
     def _log_hyperparameters(self):
@@ -334,8 +344,8 @@ class TensorBoardLogger(BaseCallback):
 
         # 메트릭 정의
         metric_dict = {
-            "rollout/ep_rew_mean": 0.0,
-            "rollout/ep_len_mean": 0.0,
+            "rollout/episode_reward": 0.0,
+            "rollout/episode_length": 0.0,
             "vehicles/collision_rate": 0.0,
             "vehicles/goal_success_rate": 0.0,
             "performance/steps_per_second": 0.0,
@@ -353,9 +363,9 @@ class TensorBoardLogger(BaseCallback):
         mean_reward = self.metrics_store.get_recent_mean_reward(window=10)
         mean_length = self.metrics_store.get_recent_mean_length(window=10)
 
-        self.logger.record("rollout/ep_rew_mean_10", mean_reward)
-        self.logger.record("rollout/ep_len_mean_10", mean_length)
-        self.logger.record("rollout/best_mean_reward", self.metrics_store.best_mean_reward)
+        self.logger.record("rollout/episode_reward_mean_10", mean_reward)
+        self.logger.record("rollout/episode_length_mean_10", mean_length)
+        self.logger.record("rollout/best_reward", self.metrics_store.best_reward)
 
         # 차량 메트릭
         collision_rate = self.metrics_store.get_collision_rate(window=50)
@@ -400,19 +410,19 @@ class TensorBoardLogger(BaseCallback):
                     self.logger.record("train/clip_fraction", losses['clip_fraction'])
 
 
-class CSVLogger:
+class CustomCSVLogger(BaseCallback):
     """
-    실시간 CSV 로깅
-    에피소드 즉시 기록으로 데이터 손실 방지
-    BaseCallback에서 분리되어 직접 사용 가능
+    커스텀 CSV 로깅, 에피소드 종료시 기록으로 데이터 손실 방지
     """
-
-    def __init__(self, log_dir: str, verbose: int = 0):
+    def __init__(self, metrics_store: MetricsStore, log_dir: str, verbose: int = 0):
+        super().__init__(verbose)
+        self.metrics_store = metrics_store
         self.log_dir = Path(log_dir)
         self.csv_file = self.log_dir / "training_log.csv"
         self.verbose = verbose
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self._init_csv()
+        self.last_episode_count = 0  # 마지막 로깅한 에피소드 수
 
     def _init_csv(self):
         """CSV 파일 초기화"""
@@ -424,21 +434,30 @@ class CSVLogger:
         with open(self.csv_file, 'w', encoding='utf-8') as f:
             f.write(','.join(headers) + '\n')
 
-    def log_episode(self, episode_data: EpisodeData, best_reward: float):
+    def _on_step(self) -> bool:
+        if self.metrics_store.episode_count > self.last_episode_count:
+            self._log_episode()
+            self.last_episode_count = self.metrics_store.episode_count
+
+        return True
+
+    def _log_episode(self):
         """에피소드 데이터 즉시 기록"""
         try:
-            collision_rate = sum(episode_data.collisions.values()) / max(1, len(episode_data.collisions))
-            goal_rate = sum(episode_data.goals_reached.values()) / max(1, len(episode_data.goals_reached))
+            episode = self.metrics_store.episodes[-1]
+
+            collision_rate = sum(episode.collisions.values()) / max(1, len(episode.collisions))
+            goal_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
 
             row = [
-                episode_data.episode_id,
-                episode_data.timesteps,
-                f"{episode_data.reward:.4f}",
-                episode_data.length,
+                episode.episode_id,
+                episode.timesteps,
+                f"{episode.reward:.4f}",
+                episode.length,
                 f"{collision_rate:.4f}",
                 f"{goal_rate:.4f}",
-                f"{episode_data.elapsed_time:.2f}",
-                f"{best_reward:.4f}"
+                f"{episode.elapsed_time:.2f}",
+                f"{self.metrics_store.best_reward:.4f}"
             ]
 
             with open(self.csv_file, 'a', encoding='utf-8') as f:
@@ -457,7 +476,7 @@ class SmartCheckpointManager(BaseCallback):
     """
 
     def __init__(self, metrics_store: MetricsStore, save_freq: int, save_path: str,
-                 name_prefix: str = 'model', max_checkpoints: int = 5, verbose: int = 0):
+                 name_prefix: str = 'model', max_checkpoints: int = 5, save_best: bool = True, verbose: int = 0):
         super().__init__(verbose)
         self.metrics_store = metrics_store
         self.save_freq = save_freq
@@ -465,6 +484,8 @@ class SmartCheckpointManager(BaseCallback):
         self.name_prefix = name_prefix
         self.max_checkpoints = max_checkpoints
         self.checkpoint_metadata = []
+        self.save_best = save_best
+        self.last_episode_count = 0  # 마지막 로깅한 에피소드 수
 
         # 저장 디렉토리 생성
         os.makedirs(save_path, exist_ok=True)
@@ -475,6 +496,14 @@ class SmartCheckpointManager(BaseCallback):
             self._save_checkpoint()
             self._save_checkpoint_metadata()
             self._cleanup_old_checkpoints()
+
+        # 에피소드 종료 시 최고 성능 모델 저장
+        if self.save_best:
+            if self.metrics_store.episode_count > self.last_episode_count:
+                episode = self.metrics_store.episodes[-1]
+                if episode.reward >= self.metrics_store.best_reward:
+                    self._save_best_model()
+                self.last_episode_count = self.metrics_store.episode_count
 
         return True
 
@@ -492,7 +521,7 @@ class SmartCheckpointManager(BaseCallback):
             'timestep': self.num_timesteps,
             'episode': self.metrics_store.episode_count,
             'mean_reward': self.metrics_store.get_recent_mean_reward(10),
-            'best_reward': self.metrics_store.best_mean_reward,
+            'best_reward': self.metrics_store.best_reward,
             'collision_rate': self.metrics_store.get_collision_rate(50),
             'goal_success_rate': self.metrics_store.get_goal_success_rate(50),
             'timestamp': time.time()
@@ -523,6 +552,13 @@ class SmartCheckpointManager(BaseCallback):
         except Exception as e:
             if self.verbose >= 1:
                 print(f"Checkpoint cleanup failed: {e}")
+
+    def _save_best_model(self):
+        """베스트 모델 저장"""
+        checkpoint_path = os.path.join(self.save_path, f"{self.name_prefix}_best.zip")
+        self.model.save(checkpoint_path)
+        if self.name_prefix == 'sac':
+            self.model.save_replay_buffer(os.path.join(self.save_path, f"{self.name_prefix}_best_replay_buffer"))
 
 
 # 콜백 팩토리 함수
@@ -564,7 +600,15 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         )
         callbacks.append(vehicle_metrics)
 
-    # 4. TensorBoard 로거
+    # 4. 커스텀 CSV 로거
+    csv_logger = CustomCSVLogger(
+        metrics_store,
+        log_dir,
+        config.get('verbose', 0)
+    )
+    callbacks.append(csv_logger)
+
+    # 5. TensorBoard 로거
     tensorboard_logger = TensorBoardLogger(
         metrics_store,
         config.get('logging_freq', 1000),
@@ -573,7 +617,7 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
     )
     callbacks.append(tensorboard_logger)
 
-    # 5. 체크포인트 매니저
+    # 6. 체크포인트 매니저
     checkpoint_manager = SmartCheckpointManager(
         metrics_store,
         config.get('checkpoint_freq', 10000),
@@ -609,7 +653,6 @@ class SACVehicleAlgorithm(SAC):
         self.num_vehicles = None
         self.prev_observations = None
         self.prev_active_mask = None
-        self.episode_steps = 0
         self.total_reward = 0
         self.metrics_store = None  # 메트릭 스토어 참조
 
@@ -620,33 +663,20 @@ class SACVehicleAlgorithm(SAC):
         self.rl_env = rl_env
         self.num_vehicles = rl_env.num_vehicles
 
-    def set_metrics_store(self, metrics_store: MetricsStore, csv_logger: Optional[CSVLogger] = None, models_dir: Optional[str] = None, log_dir: Optional[str] = None):
-        """메트릭 스토어 및 CSV 로거 설정"""
+    def set_metrics_store(self, metrics_store: MetricsStore):
+        """메트릭 스토어 설정"""
         self.metrics_store = metrics_store
-        self.csv_logger = csv_logger
-        self.models_dir = models_dir
-        self.log_dir = log_dir
         self._last_losses = {}  # 알고리즘 로스 추적용
 
     def _excluded_save_params(self) -> list[str]:
         # 제외된 저장 파라미터 목록
-        return super()._excluded_save_params() + ["rl_env", "metrics_store", "csv_logger"]
+        return super()._excluded_save_params() + ["rl_env", "metrics_store"]
 
     def _reset(self):
-        # 환경 리셋 (성공할 때까지 무한 시도)
-        success = False
-
-        while not success:
-            try:
-                prev_observations, _ = self.rl_env.reset()
-                success = True
-            except Exception as e:
-                print(f"Reset failed: {e}")
-                continue
-
+        # 환경 리셋
+        prev_observations, active_agents = self.rl_env.reset()
         self.prev_observations = prev_observations
-        self.prev_active_mask = np.array(self.rl_env.active_agents)
-        self.episode_steps = 0
+        self.prev_active_mask = np.array(active_agents)
         self.total_reward = 0.0
 
     def _custom_rollout_step(self, callback) -> bool:
@@ -685,7 +715,6 @@ class SACVehicleAlgorithm(SAC):
 
         # 3) 환경 스텝 & 보상 누적
         next_observations, reward, done, _, info = self.rl_env.step(actions)
-        self.episode_steps += 1
         self.num_timesteps += 1
         self.total_reward += reward
 
@@ -723,17 +752,15 @@ class SACVehicleAlgorithm(SAC):
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
-        print(f"Episode {self.rl_env.episode_count}, "
-              f"Steps: {self.episode_steps}, "
-              f"Total Reward: {self.total_reward:.2f}")
+        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
         if self.metrics_store:
             episode_data = EpisodeData(
-                episode_id=self.rl_env.episode_count,
+                episode_id=info['episode_count'],
                 timesteps=self.num_timesteps,
                 reward=self.total_reward,
-                length=self.episode_steps,
+                length=info['episode_length'],
                 collisions=info.get('collisions', {}),
                 goals_reached=info.get('reached_targets', {}),
                 outside_roads=info.get('outside_roads', {}),
@@ -742,26 +769,6 @@ class SACVehicleAlgorithm(SAC):
             )
 
             self.metrics_store.record_episode(episode_data)
-
-            # 베스트 모델 저장
-            if self.total_reward == self.metrics_store.best_mean_reward:
-                self._save_best_model()
-
-            # CSV 로거에 즉시 기록 (직접 접근)
-            if hasattr(self, 'csv_logger') and self.csv_logger:
-                self.csv_logger.log_episode(episode_data, self.metrics_store.best_mean_reward)
-
-        # TensorBoard 로깅
-        self.logger.record("rollout/ep_rew_mean", self.total_reward)
-        self.logger.record("rollout/ep_len_mean", self.episode_steps)
-
-        # 로거 덤프
-        self.logger.dump(self.num_timesteps)
-
-    def _save_best_model(self):
-        """베스트 모델 저장"""
-        self.save(os.path.join(self.models_dir, "sac_best"))
-        self.save_replay_buffer(os.path.join(self.models_dir, "sac_best_replay_buffer"))
 
     def learn(
         self,
@@ -809,7 +816,6 @@ class PPOVehicleAlgorithm(PPO):
         self.num_vehicles = None
         self.prev_observations = None
         self.prev_active_mask = None
-        self.episode_steps = 0
         self.total_reward = 0
         self._is_new_episode = True
         self.metrics_store = None
@@ -821,33 +827,20 @@ class PPOVehicleAlgorithm(PPO):
         self.rl_env = rl_env
         self.num_vehicles = rl_env.num_vehicles
 
-    def set_metrics_store(self, metrics_store: MetricsStore, csv_logger: Optional[CSVLogger] = None, models_dir: Optional[str] = None, log_dir: Optional[str] = None):
-        """메트릭 스토어 및 CSV 로거 설정"""
+    def set_metrics_store(self, metrics_store: MetricsStore):
+        """메트릭 스토어 설정"""
         self.metrics_store = metrics_store
-        self.csv_logger = csv_logger
-        self.models_dir = models_dir
-        self.log_dir = log_dir
         self._last_losses = {}  # 알고리즘 로스 추적용
 
     def _excluded_save_params(self) -> list[str]:
         # 제외된 저장 파라미터 목록
-        return super()._excluded_save_params() + ["rl_env", "metrics_store", "csv_logger"]
+        return super()._excluded_save_params() + ["rl_env", "metrics_store"]
 
     def _reset(self):
-        # 환경 리셋 (성공할 때까지 무한 시도)
-        success = False
-
-        while not success:
-            try:
-                prev_observations, _ = self.rl_env.reset()
-                success = True
-            except Exception as e:
-                print(f"Reset failed: {e}")
-                continue
-
+        # 환경 리셋
+        prev_observations, active_agents = self.rl_env.reset()
         self.prev_observations = prev_observations
-        self.prev_active_mask = np.array(self.rl_env.active_agents)
-        self.episode_steps = 0
+        self.prev_active_mask = np.array(active_agents)
         self.total_reward = 0.0
         self._is_new_episode = True
 
@@ -891,7 +884,6 @@ class PPOVehicleAlgorithm(PPO):
             # 3) 환경 스텝
             next_observations, reward, done, _, info = self.rl_env.step(actions)
             self.num_timesteps += 1
-            self.episode_steps += 1
             self.total_reward += reward
 
             # 4) 렌더링
@@ -934,17 +926,15 @@ class PPOVehicleAlgorithm(PPO):
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
-        print(f"Episode {self.rl_env.episode_count}, "
-              f"Steps: {self.episode_steps}, "
-              f"Total Reward: {self.total_reward:.2f}")
+        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
         if self.metrics_store:
             episode_data = EpisodeData(
-                episode_id=self.rl_env.episode_count,
+                episode_id=info['episode_count'],
                 timesteps=self.num_timesteps,
                 reward=self.total_reward,
-                length=self.episode_steps,
+                length=info['episode_length'],
                 collisions=info.get('collisions', {}),
                 goals_reached=info.get('reached_targets', {}),
                 outside_roads=info.get('outside_roads', {}),
@@ -953,25 +943,6 @@ class PPOVehicleAlgorithm(PPO):
             )
 
             self.metrics_store.record_episode(episode_data)
-
-            # 베스트 모델 저장
-            if self.total_reward == self.metrics_store.best_mean_reward:
-                self._save_best_model()
-
-            # CSV 로거에 즉시 기록 (직접 접근)
-            if hasattr(self, 'csv_logger') and self.csv_logger:
-                self.csv_logger.log_episode(episode_data, self.metrics_store.best_mean_reward)
-
-        # TensorBoard 로깅
-        self.logger.record("rollout/ep_rew_mean", self.total_reward)
-        self.logger.record("rollout/ep_len_mean", self.episode_steps)
-
-        # 로거 덤프
-        self.logger.dump(self.num_timesteps)
-
-    def _save_best_model(self):
-        """베스트 모델 저장"""
-        self.save(os.path.join(self.models_dir, "ppo_best"))
 
     def learn(
             self,

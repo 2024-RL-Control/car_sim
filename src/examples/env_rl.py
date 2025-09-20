@@ -289,14 +289,27 @@ class BasicRLDrivingEnv(gym.Env):
         Returns:
             observations: 차량별 초기 관측 값 (num_vehicles, obs_dim) [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
         """
-        # 환경 초기화
-        _ = self.env.reset(seed=seed, options=options)
+        success = False
 
-        # 장애물, 차량, 목적지 다시 설정
-        self.setup_environment()
+        while not success:
+            try:
+                # 환경 초기화
+                _ = self.env.reset(seed=seed, options=options)
 
-        # 에이전트 활성화 상태 초기화
-        self.active_agents = [True] * self.num_vehicles
+                # 장애물, 차량, 목적지 다시 설정
+                self.setup_environment()
+
+                # 에이전트 활성화 상태 초기화
+                self.active_agents = [True] * self.num_vehicles
+
+                # 초기 행동으로 0을 사용하여 첫 번째 스텝 실행 (LIDAR, 궤적 데이터 초기화 필요)
+                actions = np.zeros((self.num_vehicles, 3))
+                observations, _, _, _, _ = self.step(actions)
+
+                success = True
+            except Exception as e:
+                print(f"Reset failed: {e}")
+                continue
 
         # 스텝 카운터 초기화
         self.steps = 0
@@ -304,12 +317,8 @@ class BasicRLDrivingEnv(gym.Env):
         # 에피소드 카운터 증가
         self.episode_count += 1
 
-        # 초기 행동으로 0을 사용하여 첫 번째 스텝 실행 (LIDAR, 궤적 데이터 초기화 필요)
-        actions = np.zeros((self.num_vehicles, 3))
-        observations, _, _, _, _ = self.step(actions)
-
         # 초기 관측값 반환
-        return observations, {}
+        return observations, self.active_agents
 
     def step(self, actions):
         """
@@ -445,7 +454,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [128, 64, 32, 32, 16],
+            "net_arch": [128, 128, 128, 64, 32],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
@@ -453,7 +462,7 @@ class BasicRLDrivingEnv(gym.Env):
             "features_extractor_class": CustomFeatureExtractor,
             # 추출기 아키텍처
             "features_extractor_kwargs": {
-                "net_arch": [64, 128, 128, 128]
+                "net_arch": [64, 64, 128, 128, 256, 256, 128]
             },
             "share_features_extractor": True,
         }
@@ -553,10 +562,6 @@ class BasicRLDrivingEnv(gym.Env):
         callbacks, metrics_store = create_optimized_callbacks(callback_config, log_dir, models_dir)
         callback = CallbackList(callbacks)
 
-        # CSV 로거 생성 (알고리즘에서 직접 사용)
-        from ..model.sb3 import CSVLogger
-        csv_logger = CSVLogger(log_dir, callback_config['verbose'])
-
         # 콜백 요약 정보 출력
         summary = get_callback_summary(callbacks)
         if callback_config['verbose'] >= 1:
@@ -573,7 +578,7 @@ class BasicRLDrivingEnv(gym.Env):
 
             # 모델에 환경 정보 및 메트릭 스토어 설정
             model.set_env_info(self)
-            model.set_metrics_store(metrics_store, csv_logger, models_dir, log_dir)
+            model.set_metrics_store(metrics_store)
 
             model.learn(
                 total_timesteps=self.max_step,
