@@ -929,7 +929,7 @@ class PPOVehicleAlgorithm(PPO):
                 self._handle_episode_end(info)
                 self._reset()
 
-            return True
+        return True
 
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
