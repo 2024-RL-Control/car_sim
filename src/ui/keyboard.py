@@ -103,17 +103,17 @@ class KeyboardHandler:
             if self._keys_pressed['up']:
                 action[0] = 1.0  # 가속
             if self._keys_pressed['down']:
-                action[1] = 0.7  # 제동
+                action[0] = -0.7  # 제동
 
             # 브레이크 키가 눌려있으면 최대 제동
             if self._keys_pressed['brake']:
-                action[1] = 1.0
+                action[0] = -1.0
 
             # 조향 입력
             if self._keys_pressed['left']:
-                action[2] = -1.0  # 좌회전
+                action[1] = -1.0  # 좌회전
             if self._keys_pressed['right']:
-                action[2] = 1.0  # 우회전
+                action[1] = 1.0  # 우회전
 
         active_idx = env.vehicle_manager.get_active_vehicle_index()
         actions[active_idx] = action

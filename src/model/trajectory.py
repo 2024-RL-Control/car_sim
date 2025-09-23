@@ -204,7 +204,7 @@ class TrajectoryPredictor:
         # 상태 이력이 없으면 빈 패턴 반환
         if len(state_history) < 2:
             num_steps = int(time_horizon / dt)
-            return [[0.0, 0.0, 0.0]] * num_steps
+            return [[0.0, 0.0]] * num_steps
 
         num_steps = int(time_horizon / dt)
         if num_steps == 0:
@@ -269,7 +269,13 @@ class TrajectoryPredictor:
             temp_engines  # 그렇지 않으면 현재 엔진 값 유지
         )
 
-        # 결과 조합: num_steps x 3 배열을 만들고 리스트로 변환
-        control_patterns = np.stack((throttle_engines_out, throttle_brakes_out, steers_out), axis=-1).tolist()
+        acceleration_out = np.where(
+            throttle_brakes_out > throttle_engines_out,
+            -throttle_brakes_out,
+            throttle_engines_out
+        )
+
+        # 결과 조합: num_steps x 2 배열을 만들고 리스트로 변환
+        control_patterns = np.stack((acceleration_out, steers_out), axis=-1).tolist()
 
         return control_patterns
