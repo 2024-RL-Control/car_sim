@@ -694,12 +694,12 @@ class SACVehicleAlgorithm(SAC):
 
         # 2) 행동 결정
         active_mask = self.prev_active_mask
-        actions = np.zeros((self.num_vehicles, 3))
+        actions = np.zeros((self.num_vehicles, self.action_space.shape[-1]), dtype=np.float32)
         if self._n_updates < self.learning_starts:
             # 랜덤 행동 (벡터화)
             if active_mask.any():
                 random_actions = np.stack([self.rl_env.env.action_space.sample() for _ in range(active_mask.sum())])
-                random_actions[:, 1] = random_actions[:, 1] / 5
+                # random_actions[:, 1] = random_actions[:, 1] / 5
                 actions[active_mask] = random_actions
         else:
             # 활성화된 에이전트만 행동 예측 (벡터화)
