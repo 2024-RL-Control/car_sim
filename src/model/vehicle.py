@@ -153,14 +153,11 @@ class VehicleState:
         """목표 도달 진행률 변화량 계산"""
         return self.prev_distance_to_target - self.curr_distance_to_target
 
-    def scale_frenet_d(self, d):
-        """frenet_d 값의 연속적 스케일링 (tanh 사용)"""
-        # if d is None:
-        #     return 0.0
-        # return np.tanh(d/10)
+    def scale_frenet_d(self, d, road_width=6.0):
+        """frenet_d 값의 스케일링 (도로 폭에 따라 -1.0 ~ 1.0 범위로)"""
         if d is None:
             return 0.0
-        return d / 3.0     # 도로 폭이 6m인 경우 -1.0 ~ 1.0 범위
+        return d / (road_width / 2.0)  # 도로 폭에 따라 -1.0 ~ 1.0 범위로 스케일링
 
     def scale_long(self, vel_long, acc_long, max_vel, min_vel, max_acc, min_acc):
         """종방향 속도 정규화"""

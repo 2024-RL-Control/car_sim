@@ -33,8 +33,8 @@ simulation:
     max_step_factor: 10.0          # Max multiplier for base_step_size
     goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
     goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
-    road_width: 6.0               # Default road width [m]
-    min_radius: 6.0               # minimum turning radius for path planning [m]
+    road_width: 8.0               # Default road width [m]
+    min_radius: 5.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 15
     min_speed: 5
@@ -43,9 +43,9 @@ simulation:
     goal_reached_reward: 500.0        # reward for reaching the goal
     collision_penalty: -100.0          # penalty for collision
     outside_road_penalty: -100.0       # penalty for going outside the road
-    progress_factor: 0.5              # reward factor for reducing distance to goal
+    progress_factor: 0.6              # reward factor for reducing distance to goal
     lane_keeping_factor: 0.2          # reward factor for staying in the lane
-    speed_factor: 0.3                 # reward factor for maintaining/reaching target speed
+    speed_factor: 0.2                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
@@ -134,9 +134,9 @@ physics:
     snow: 0.3       # 눈
     ice: 0.1        # 얼음
   min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
-  min_turning_radius: 6.0       # meters, minimum turning radius for vehicle dynamics
-  throttle_response_rate: 4.0   # 1/s
-  steering_response_rate: 7.0   # 1/s
+  min_turning_radius: 4.0       # meters, minimum turning radius for vehicle dynamics
+  throttle_response_rate: 15.0   # 1/s
+  steering_response_rate: 10.0   # 1/s
   min_steer_speed_factor: 0.8   # minimum steering speed factor
   max_steer_speed_factor: 0.2   # maximum steering speed factor
   steer_speed_threshold: 15.0   # m/s, threshold for steering speed factor
