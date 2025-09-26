@@ -50,6 +50,11 @@ class VehicleState:
     frenet_point: tuple = None
     target_vel_long: float = None
 
+    # Frenet 업데이트 빈도 조절을 위한 변수들
+    _last_frenet_update_time: float = field(default=0.0)
+    _frenet_update_interval: float = field(default=0.1)  # 100ms (10Hz)
+    _last_frenet_position: tuple = field(default=None)
+
     # 라이다 센서 데이터, 거리 배열
     lidar_data: List = field(default_factory=list)
 
@@ -95,6 +100,10 @@ class VehicleState:
         self.frenet_d = None
         self.frenet_point = None
         self.target_vel_long = None
+
+        # Frenet 업데이트 빈도 조절 변수 초기화
+        self._last_frenet_update_time = 0.0
+        self._last_frenet_position = None
 
         self.lidar_data.clear()
 
@@ -204,16 +213,54 @@ class VehicleState:
         self.rear_axle_x = self.x - self.half_wheelbase * cos(self.yaw)
         self.rear_axle_y = self.y - self.half_wheelbase * sin(self.yaw)
 
+    def should_update_frenet(self, current_time: float) -> bool:
+        """Frenet 좌표 업데이트 여부 판단"""
+        # 시간 간격 확인
+        time_elapsed = current_time - self._last_frenet_update_time
+        if time_elapsed < self._frenet_update_interval:
+            return False
+
+        # 위치 변화 확인 (너무 작은 변화면 업데이트 생략)
+        if self._last_frenet_position is not None:
+            current_pos = (self.x, self.y)
+            dx = current_pos[0] - self._last_frenet_position[0]
+            dy = current_pos[1] - self._last_frenet_position[1]
+            distance_moved = (dx*dx + dy*dy)**0.5
+
+            # 이동 거리가 0.1m 미만이면 업데이트 생략
+            if distance_moved < 0.1:
+                return False
+
+        return True
+
     def update_position_from_rear_axle(self, cos_yaw, sin_yaw):
         """뒷바퀴 축 위치에서 heading 방향으로 이동, 차량 중심점 위치 업데이트"""
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
         self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
 
-    def update_road_data(self, road_manager):
+    def update_road_data(self, road_manager, current_time: float = None):
         """
-        도로 데이터 기반 차량 상태 업데이트
+        도로 데이터 기반 차량 상태 업데이트 - 빈도 조절 적용
         """
+        if current_time is None:
+            current_time = time.time()
+
+        # Frenet 좌표 업데이트 여부 확인
+        if not self.should_update_frenet(current_time):
+            # 기존 데이터 사용, outside_road만 간단히 체크
+            if self.frenet_d is not None:
+                road_width = 6.0  # 기본 도로 폭 (설정으로부터 가져올 수도 있음)
+                outside_road = abs(self.frenet_d) > (road_width / 2)
+                return outside_road
+            # Frenet 데이터가 없으면 정상적으로 계산
+
+        # Frenet 좌표 업데이트
         self.frenet_point, self.frenet_d, self.target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.x, self.y, self.yaw))
+
+        # 업데이트 시간과 위치 기록
+        self._last_frenet_update_time = current_time
+        self._last_frenet_position = (self.x, self.y)
+
         return outside_road
 
     def update_state_history(self):
@@ -430,8 +477,8 @@ class Vehicle:
         # 센서 정보 업데이트
         self._update_lidar_data()
 
-        # 도로 정보 업데이트
-        outside_road = self._update_road_data(road_manager)
+        # 도로 정보 업데이트 (시간 정보 전달)
+        outside_road = self._update_road_data(road_manager, time_elapsed)
 
         # 충돌 검사
         collision = self._check_collision(objects)
@@ -448,8 +495,8 @@ class Vehicle:
 
         return self.state, collision, outside_road, reached
 
-    def _update_road_data(self, road_manager):
-        return self.state.update_road_data(road_manager)
+    def _update_road_data(self, road_manager, current_time: float = None):
+        return self.state.update_road_data(road_manager, current_time)
 
     def _update_state_history(self):
         self.state.update_state_history()

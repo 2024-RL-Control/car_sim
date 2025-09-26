@@ -10,7 +10,7 @@ import os
 from collections import deque
 from ..model.vehicle import VehicleManager
 from ..model.object import ObstacleManager
-from ..model.road import RoadNetworkManager
+from ..model.road import RoadSystemAPI
 from ..utils.config_utils import load_config
 from ..ui.camera import Camera
 from ..ui.keyboard import KeyboardHandler
@@ -52,7 +52,7 @@ class CarSimulatorEnv(gym.Env):
         self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
 
         # 도로 시스템 초기화
-        self.road_manager = RoadNetworkManager(self.config['simulation']['path_planning'])
+        self.road_manager = RoadSystemAPI(self.config['simulation']['path_planning'])
 
         # 차량 관리자 초기화
         self.vehicle_manager = VehicleManager(
@@ -300,7 +300,7 @@ class CarSimulatorEnv(gym.Env):
         self.obstacle_manager.clear_obstacles()
 
         # 도로 시스템 초기화
-        self.road_manager.reset()
+        self.road_manager.clear_network()
 
         return self._get_obs()
 
@@ -331,8 +331,8 @@ class CarSimulatorEnv(gym.Env):
         goal_id = self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
         if goal_id is not None:
             vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
-            road = self.add_road(vehicle, x, y, yaw, mode=mode)
-            return road
+            bool = self.add_road(vehicle, x, y, yaw, mode=mode)
+            return goal_id
         else:
             return goal_id
 
@@ -364,7 +364,7 @@ class CarSimulatorEnv(gym.Env):
                 raise ValueError("위치가 다른 차량과 충돌합니다")
             objects.extend(body)
 
-        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects, mode=mode)
+        return self.road_manager.add_point_to_point_road(vehicle.get_position(), (x, y, yaw), obstacles=objects)
 
     def _get_obs(self):
         """
