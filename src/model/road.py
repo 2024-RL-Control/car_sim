@@ -339,7 +339,7 @@ class BSplineCurve:
 
         points = []
         for i in range(num_points):
-            t = i / (num_points - 1)
+            t = i / num_points  # 0부터 (num_points-1)/num_points까지
             points.append(self.evaluate(t))
 
         return points
