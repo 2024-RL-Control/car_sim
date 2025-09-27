@@ -29,7 +29,7 @@ simulation:
     trajectory_dim: 0
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   reinforcement_learning:
-    action_selection_hz: 20     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_selection_hz: 10     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
   train_max_steps: 2000000
@@ -159,8 +159,8 @@ physics:
     ice: 0.1        # 얼음
   min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
   min_turning_radius: 4.0       # meters, minimum turning radius for vehicle dynamics
-  throttle_response_rate: 15.0   # 1/s
-  steering_response_rate: 10.0   # 1/s
+  throttle_response_rate: 20.0   # 1/s
+  steering_response_rate: 15.0   # 1/s
   min_steer_speed_factor: 0.8   # minimum steering speed factor
   max_steer_speed_factor: 0.2   # maximum steering speed factor
   steer_speed_threshold: 15.0   # m/s, threshold for steering speed factor
