@@ -27,6 +27,11 @@ simulation:
     vehicle_state_dim: 8
     lidar_dim: 13
     trajectory_dim: 0
+  # 강화학습 관련 설정 (시뮬레이션 시간 기준)
+  reinforcement_learning:
+    action_selection_hz: 20     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
+    debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
   train_max_steps: 2000000
   train_max_episode_steps: 5000    # maximum steps per episode (더 짧은 에피소드)
   eval_episode: 10  # number of episodes for evaluation

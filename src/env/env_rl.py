@@ -17,6 +17,130 @@ from stable_baselines3.common.buffers import ReplayBuffer
 from stable_baselines3.common.callbacks import CallbackList
 from stable_baselines3.common.vec_env import DummyVecEnv
 
+class ActionController:
+    """
+    강화학습 환경에서 행동 선택 빈도를 제어하는 클래스
+    시뮬레이션 시간 기준으로 지정된 Hz에 맞춰 새로운 행동을 선택하고,
+    그 사이에는 이전 행동을 유지합니다.
+    """
+
+    def __init__(self, action_hz: float, num_vehicles: int, action_dim: int, debug: bool = False):
+        """
+        ActionController 초기화
+
+        Args:
+            action_hz: 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+            num_vehicles: 차량 수
+            action_dim: 각 차량의 행동 차원
+            debug: 디버그 출력 여부
+        """
+        self.action_hz = action_hz
+        self.action_interval = 1.0 / action_hz if action_hz > 0 else 0.0
+        self.num_vehicles = num_vehicles
+        self.action_dim = action_dim
+        self.debug = debug
+
+        # 이전 행동 저장
+        self.last_actions = np.zeros((num_vehicles, action_dim), dtype=np.float64)
+
+        # 타이밍 관리
+        self.last_action_selection_time = 0.0
+        self.action_selection_count = 0
+        self.step_count = 0
+
+        if self.debug:
+            print(f"ActionController 초기화: {action_hz}Hz, 간격: {self.action_interval:.4f}초")
+
+    def should_select_new_action(self, current_simulation_time: float) -> bool:
+        """
+        새로운 행동을 선택해야 하는지 판단
+
+        Args:
+            current_simulation_time: 현재 시뮬레이션 시간 [초]
+
+        Returns:
+            새로운 행동 선택이 필요한지 여부
+        """
+        if self.action_interval <= 0:
+            return True  # Hz가 0이면 매번 새로운 행동 선택
+
+        time_since_last_selection = current_simulation_time - self.last_action_selection_time
+
+        # 첫 번째 호출이거나 충분한 시간이 경과했으면 새로운 행동 선택
+        should_select = (self.action_selection_count == 0) or (time_since_last_selection >= self.action_interval)
+
+        if self.debug and should_select:
+            actual_hz = 1.0 / time_since_last_selection if time_since_last_selection > 0 else float('inf')
+            print(f"새로운 행동 선택: 시간 {current_simulation_time:.4f}초, "
+                  f"간격 {time_since_last_selection:.4f}초, 실제 Hz: {actual_hz:.2f}")
+
+        return should_select
+
+    def update_action(self, new_actions: np.ndarray, current_simulation_time: float):
+        """
+        새로운 행동으로 업데이트
+
+        Args:
+            new_actions: 새로운 행동 배열 (num_vehicles, action_dim)
+            current_simulation_time: 현재 시뮬레이션 시간 [초]
+        """
+        self.last_actions = new_actions.copy()
+        self.last_action_selection_time = current_simulation_time
+        self.action_selection_count += 1
+
+        if self.debug:
+            print(f"행동 업데이트: {self.action_selection_count}번째, "
+                  f"행동값: {new_actions[0] if len(new_actions) > 0 else 'None'}")
+
+    def get_current_action(self, current_simulation_time: float, new_actions: np.ndarray = None) -> np.ndarray:
+        """
+        현재 사용할 행동 반환 (새로운 행동 또는 이전 행동 유지)
+
+        Args:
+            current_simulation_time: 현재 시뮬레이션 시간 [초]
+            new_actions: 새로운 행동 후보 (필요시에만 사용)
+
+        Returns:
+            사용할 행동 배열 (num_vehicles, action_dim)
+        """
+        self.step_count += 1
+
+        if self.should_select_new_action(current_simulation_time):
+            if new_actions is not None:
+                self.update_action(new_actions, current_simulation_time)
+                return self.last_actions.copy()
+            else:
+                # new_actions가 제공되지 않았지만 새로운 행동이 필요한 경우
+                # 이전 행동을 그대로 사용
+                if self.debug:
+                    print("새로운 행동이 필요하지만 제공되지 않음. 이전 행동 유지.")
+                return self.last_actions.copy()
+        else:
+            # 이전 행동 유지
+            if self.debug and self.step_count % 100 == 0:  # 너무 자주 출력하지 않도록
+                print(f"이전 행동 유지 (스텝 {self.step_count})")
+            return self.last_actions.copy()
+
+    def reset(self):
+        """ActionController 상태 초기화"""
+        self.last_actions.fill(0.0)
+        self.last_action_selection_time = 0.0
+        self.action_selection_count = 0
+        self.step_count = 0
+
+        if self.debug:
+            print("ActionController 리셋")
+
+    def get_statistics(self) -> dict:
+        """통계 정보 반환"""
+        return {
+            'action_hz': self.action_hz,
+            'action_interval': self.action_interval,
+            'action_selection_count': self.action_selection_count,
+            'step_count': self.step_count,
+            'actual_selection_rate': self.action_selection_count / max(self.step_count, 1)
+        }
+
 class DummyEnv(gym.Env):
     def __init__(self, rl_env):
         self.rl_env = rl_env
@@ -43,7 +167,16 @@ class DummyEnv(gym.Env):
 
             # 디버깅용 출력 (verbose 모드에서만)
             if hasattr(self.rl_env, 'episode_count'):
-                print(f"Monitor 기록: Episode {self.rl_env.episode_count}, Reward: {reward:.2f}, Length: {episode_info['l']}")
+                episode_msg = f"Monitor 기록: Episode {self.rl_env.episode_count}, Reward: {reward:.2f}, Length: {episode_info['l']}"
+
+                # ActionController 통계 추가
+                if hasattr(self.rl_env, 'action_controller') and self.rl_env.action_controller is not None:
+                    action_stats = info.get('action_controller_stats', {})
+                    selection_rate = action_stats.get('actual_selection_rate', 0)
+                    selection_count = action_stats.get('action_selection_count', 0)
+                    episode_msg += f", 행동선택: {selection_count}회 ({selection_rate:.2%})"
+
+                print(episode_msg)
 
         return observations[0], reward, done, truncated, info
 
@@ -119,6 +252,24 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 에피소드 정보 저장용
         self.episode_count = 0
+
+        # ActionController 초기화
+        rl_config = self.env.config['simulation'].get('reinforcement_learning', {})
+        self.action_hz = rl_config.get('action_selection_hz', 15)
+        self.action_hold_behavior = rl_config.get('action_hold_behavior', True)
+        self.debug_action_timing = rl_config.get('debug_action_timing', False)
+
+        if self.action_hold_behavior:
+            self.action_controller = ActionController(
+                action_hz=self.action_hz,
+                num_vehicles=self.num_vehicles,
+                action_dim=self.env.action_space.shape[0],
+                debug=self.debug_action_timing
+            )
+            print(f"ActionController 활성화: {self.action_hz}Hz로 행동 선택")
+        else:
+            self.action_controller = None
+            print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
 
     def _calculate_vehicle_areas(self):
         """차량 배치 가능 영역 계산"""
@@ -310,6 +461,10 @@ class BasicRLDrivingEnv(gym.Env):
         # 스텝 카운터 초기화
         self.steps = 0
 
+        # ActionController 리셋
+        if self.action_controller is not None:
+            self.action_controller.reset()
+
         # 에피소드 카운터 증가
         self.episode_count += 1
 
@@ -321,7 +476,7 @@ class BasicRLDrivingEnv(gym.Env):
         환경에서 한 스텝 진행
 
         Args:
-            actions: 모든 차량의 행동 (num_vehicles, 3)
+            actions: 모든 차량의 행동 (num_vehicles, action_dim)
 
         Returns:
             observations: 모든 차량의 관측값 (num_vehicles, obs_dim)
@@ -329,8 +484,21 @@ class BasicRLDrivingEnv(gym.Env):
             done: 종료 여부 bool
             info: 추가 정보
         """
-        # 환경에서 스텝 진행
-        observations, rewards, done, _, info = self.env.step(actions)
+        # ActionController를 사용하여 행동 제어
+        if self.action_controller is not None:
+            # 현재 시뮬레이션 시간 가져오기
+            current_simulation_time = self.env._time_elapsed
+
+            # ActionController를 통해 실제 사용할 행동 결정
+            actual_actions = self.action_controller.get_current_action(
+                current_simulation_time, actions
+            )
+        else:
+            # ActionController가 비활성화된 경우 원래 행동 그대로 사용
+            actual_actions = actions
+
+        # 환경에서 스텝 진행 (실제 사용할 행동으로)
+        observations, rewards, done, _, info = self.env.step(actual_actions)
         average_reward = np.mean(rewards)
 
         # 스텝 카운터 증가
@@ -348,12 +516,24 @@ class BasicRLDrivingEnv(gym.Env):
         if self.steps >= self.max_episode_steps:
             done = True
 
-        info.update({
-            'episode_count': self.episode_count,
-            'rewards': rewards,  # 개별 차량별 보상
-            'episode_length': self.steps,  # 현재 에피소드 길이
-            'elapsed_time': 0,  # 필요시 실제 시간 계산 가능
-        })
+        # ActionController 통계 정보 추가
+        if self.action_controller is not None:
+            action_stats = self.action_controller.get_statistics()
+            info.update({
+                'episode_count': self.episode_count,
+                'rewards': rewards,  # 개별 차량별 보상
+                'episode_length': self.steps,  # 현재 에피소드 길이
+                'elapsed_time': 0,  # 필요시 실제 시간 계산 가능
+                'action_controller_stats': action_stats,  # ActionController 통계
+                'action_selection_rate': action_stats['actual_selection_rate']  # 실제 행동 선택 비율
+            })
+        else:
+            info.update({
+                'episode_count': self.episode_count,
+                'rewards': rewards,  # 개별 차량별 보상
+                'episode_length': self.steps,  # 현재 에피소드 길이
+                'elapsed_time': 0,  # 필요시 실제 시간 계산 가능
+            })
 
         return observations, average_reward, done, False, info
 
