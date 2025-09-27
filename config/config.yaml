@@ -5,8 +5,24 @@ simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
   hz:
-    frenet_update: 10  # Frenet 좌표 업데이트 주파수 [Hz]
-    lidar_update: 20   # 라이다 스캔 주파수 [Hz]
+    frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz]
+    lidar_update: 20       # 라이다 스캔 주파수 [Hz]
+    trajectory_update: 20  # 궤적 예측 업데이트 주파수 [Hz]
+    collision_check: 30    # 충돌 검사 주파수 [Hz] - 고속에서 빠르게 검사
+    goal_check: 5          # 목적지 도달 확인 주파수 [Hz] - 비교적 낮은 빈도
+    state_history: 2       # 상태 이력 저장 주파수 [Hz] - 메모리 효율성
+  memory_management:
+    # SubsystemManager 캐시 설정
+    subsystem_cache:
+      max_cache_size: 1000        # 최대 캐시 항목 수
+      cleanup_interval: 60.0      # 캐시 정리 주기 [seconds]
+      memory_threshold_mb: 100    # 메모리 임계값 [MB]
+      max_cache_age: 3600.0       # 최대 캐시 보존 시간 [seconds]
+    # Road 시스템 캐시 설정
+    road_cache:
+      max_cache_size: 1000        # 투영 캐시 최대 크기
+      cleanup_interval: 300.0     # 캐시 정리 주기 [seconds]
+      max_cache_age: 1800.0       # 최대 캐시 보존 시간 [seconds]
   observation:
     vehicle_state_dim: 8
     lidar_dim: 13
@@ -35,7 +51,7 @@ simulation:
     min_step_factor: 1.0          # Min multiplier for base_step_size
     max_step_factor: 10.0          # Max multiplier for base_step_size
     goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
-    goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
+    goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
     road_width: 8.0               # Default road width [m]
     min_radius: 5.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]

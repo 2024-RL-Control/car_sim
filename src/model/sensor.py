@@ -249,15 +249,28 @@ class LidarSensor(BaseSensor):
         Returns:
             측정이 수행되었는지 여부 (Boolean)
         """
-        # 스캔 수행
-        self.current_data = self._perform_scan(time_elapsed, objects)
+        try:
+            # 스캔 수행
+            self.current_data = self._perform_scan(time_elapsed, objects or [])
 
-        # 스캔 결과 히스토리 저장
-        if self.scan_history is not None:
-            self.scan_history.append(self.current_data)
+            # 스캔 결과 히스토리 저장
+            if self.scan_history is not None:
+                self.scan_history.append(self.current_data)
 
-        self.last_scan_time = time_elapsed
-        return True
+            self.last_scan_time = time_elapsed
+            return True
+
+        except Exception as e:
+            print(f"Warning: Error in LiDAR sensor update: {e}")
+            # 오류 발생 시 빈 스캔 데이터 생성
+            if self.current_data is None:
+                sensor_pose = self.get_pose()
+                self.current_data = LidarData(
+                    timestamp=time_elapsed,
+                    sensor_pose=sensor_pose,
+                    ranges=[]
+                )
+            return False
 
     def _perform_scan(self, timestamp, objects):
         """
@@ -699,8 +712,17 @@ class SensorManager:
             time_elapsed: 시뮬레이션 누적 시간 [s]
             objects: 객체 외접원 리스트
         """
-        for sensor in self.sensors.values():
-            sensor.update(dt, time_elapsed, objects)
+        failed_sensors = []
+        for sensor_id, sensor in self.sensors.items():
+            try:
+                sensor.update(dt, time_elapsed, objects)
+            except Exception as e:
+                print(f"Warning: Sensor {sensor_id} update failed: {e}")
+                failed_sensors.append(sensor_id)
+
+        # 실패한 센서들을 로그에 기록 (필요시 제거 가능)
+        if failed_sensors:
+            print(f"Failed sensors in this update: {failed_sensors}")
 
     def draw(self, screen, world_to_screen_func, debug=False):
         """

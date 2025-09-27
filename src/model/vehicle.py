@@ -1,15 +1,668 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
-from typing import List, Dict
-from collections import deque
+from typing import List, Dict, Optional, Any, Callable
+from collections import deque, OrderedDict
 from math import degrees, pi, cos, sin, log, e, exp, sqrt
 import pygame
 import numpy as np
 import time
+import weakref
+import threading
 from .physics import PhysicsEngine
 from .trajectory import TrajectoryPredictor, TrajectoryData
 from .object import RectangleObstacle, GoalManager
 from .sensor import SensorManager
+
+# ======================
+# Subsystem Management System
+# ======================
+class SubsystemManager:
+    """차량 서브시스템의 업데이트 빈도를 통합 관리하는 클래스"""
+
+    def __init__(self, vehicle_instance=None, simulation_config=None):
+        """서브 시스템 관리자 초기화
+
+        Args:
+            vehicle_instance: Vehicle 인스턴스 참조 (콜백에서 사용)
+            simulation_config: 시뮬레이션 설정 (주파수 등)
+        """
+        # 순환 참조 방지를 위한 약한 참조 사용
+        self._vehicle_ref = weakref.ref(vehicle_instance) if vehicle_instance else None
+
+        self._update_intervals = {}  # {subsystem_name: interval}
+        self._last_update_times = {}  # {subsystem_name: last_time}
+        self._adaptive_configs = {}  # {subsystem_name: adaptive_config}
+
+        # 콜백 및 캐시 관리
+        self._update_callbacks = {}  # {subsystem_name: callback_function}
+        self._initialization_callbacks = {}  # {subsystem_name: init_callback}
+
+        # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
+        self._cache_config = {
+            'max_cache_size': 1000,
+            'cleanup_interval': 60.0,  # seconds
+            'memory_threshold_mb': 100,
+            'max_cache_age': 3600.0
+        }
+
+        # 설정 파일에서 메모리 관리 설정 로드
+        if simulation_config and 'memory_management' in simulation_config:
+            memory_config = simulation_config['memory_management'].get('subsystem_cache', {})
+            self._cache_config.update(memory_config)
+
+        # LRU 캐시 사용 (OrderedDict 기반)
+        self._cached_data = OrderedDict()  # {subsystem_name: cached_result}
+        self._interpolation_data = OrderedDict()  # {subsystem_name: interpolation_info}
+
+        # 캐시 액세스 시간 추적
+        self._cache_access_times = {}  # {subsystem_name: last_access_time}
+        self._last_cleanup_time = time.time()
+
+        # Thread safety를 위한 락
+        self._cache_lock = threading.RLock()
+
+        # 적응적 업데이트를 위한 추가 정보
+        self._last_positions = {}  # {subsystem_name: (x, y)}
+        self._context_data = {}  # {subsystem_name: context_specific_data}
+
+        # 성능 모니터링
+        self._update_counts = {}  # {subsystem_name: count}
+        self._skip_counts = {}  # {subsystem_name: skip_count}
+
+        # 설정이 제공되면 서브시스템 설정 및 콜백 등록 (지연 초기화)
+        self._simulation_config = simulation_config
+        self._callbacks_registered = False
+
+    def _get_vehicle(self):
+        """약한 참조로부터 vehicle 인스턴스를 안전하게 가져오기
+
+        Returns:
+            Vehicle 인스턴스 또는 None (참조가 만료된 경우)
+        """
+        if self._vehicle_ref is None:
+            return None
+        return self._vehicle_ref()
+
+    def _ensure_callbacks_registered(self):
+        """콜백이 등록되지 않았다면 지연 등록 수행"""
+        vehicle = self._get_vehicle()
+        if not self._callbacks_registered and vehicle and self._simulation_config:
+            self._setup_subsystem_manager(self._simulation_config)
+            self._callbacks_registered = True
+
+    def _manage_cache_memory(self):
+        """캐시 메모리 관리 - LRU 정책 및 크기 제한 적용"""
+        with self._cache_lock:
+            current_time = time.time()
+
+            # 주기적 정리 체크
+            if current_time - self._last_cleanup_time > self._cache_config['cleanup_interval']:
+                self._cleanup_old_cache_entries(current_time)
+                self._last_cleanup_time = current_time
+
+            # 캐시 크기 제한 적용
+            max_size = self._cache_config['max_cache_size']
+
+            # cached_data 크기 제한
+            while len(self._cached_data) > max_size:
+                # 가장 오래된 항목 제거 (LRU)
+                oldest_key = next(iter(self._cached_data))
+                del self._cached_data[oldest_key]
+                if oldest_key in self._cache_access_times:
+                    del self._cache_access_times[oldest_key]
+
+            # interpolation_data 크기 제한
+            while len(self._interpolation_data) > max_size:
+                oldest_key = next(iter(self._interpolation_data))
+                del self._interpolation_data[oldest_key]
+
+    def _cleanup_old_cache_entries(self, current_time: float):
+        """오래된 캐시 항목 정리"""
+        max_age = self._cache_config.get('max_cache_age', 3600.0)
+
+        expired_keys = []
+        for key, last_access in self._cache_access_times.items():
+            if current_time - last_access > max_age:
+                expired_keys.append(key)
+
+        for key in expired_keys:
+            if key in self._cached_data:
+                del self._cached_data[key]
+            if key in self._interpolation_data:
+                del self._interpolation_data[key]
+            if key in self._cache_access_times:
+                del self._cache_access_times[key]
+
+    def _access_cache(self, subsystem_name: str, cache_dict: OrderedDict):
+        """캐시 액세스 시 LRU 업데이트"""
+        if subsystem_name in cache_dict:
+            # LRU 업데이트 - 항목을 맨 뒤로 이동
+            value = cache_dict.pop(subsystem_name)
+            cache_dict[subsystem_name] = value
+            self._cache_access_times[subsystem_name] = time.time()
+            return value
+        return None
+
+    def _setup_subsystem_manager(self, simulation_config):
+        """서브 시스템 관리자 설정 및 콜백 등록"""
+        vehicle = self._get_vehicle()
+        if not vehicle or not simulation_config or 'hz' not in simulation_config:
+            return
+
+        hz_config = simulation_config['hz']
+        adaptive_config = {
+            'velocity_thresholds': [2.0, 10.0],
+            'interval_factors': [2.0, 0.5],
+            'min_distance': 0.05
+        }
+
+        try:
+            # Frenet 업데이트 설정 (적응적 업데이트)
+            if 'frenet_update' in hz_config:
+                frenet_hz = hz_config['frenet_update']
+                self.configure_subsystem('frenet', frenet_hz, adaptive_config)
+                # 안전한 콜백 등록 (weakref 사용)
+                self._register_safe_callback('frenet', '_update_frenet_callback', '_initialize_frenet_callback')
+
+            # 라이다 센서 업데이트 설정 (적응적 업데이트)
+            if 'lidar_update' in hz_config:
+                lidar_hz = hz_config['lidar_update']
+                self.configure_subsystem('sensor', lidar_hz, adaptive_config)
+                # 안전한 콜백 등록
+                self._register_safe_callback('sensor', '_update_sensor_callback', '_initialize_sensor_callback')
+
+            # 궤적 예측 업데이트 설정 (적응적 업데이트)
+            if 'trajectory_update' in hz_config:
+                trajectory_hz = hz_config['trajectory_update']
+                self.configure_subsystem('trajectory', trajectory_hz, adaptive_config)
+                # 안전한 콜백 등록
+                self._register_safe_callback('trajectory', '_update_trajectory_callback', '_initialize_trajectory_callback')
+
+            # 충돌 검사 서브시스템 설정
+            if 'collision_check' in hz_config:
+                collision_hz = hz_config['collision_check']
+                collision_adaptive_config = {
+                    'velocity_thresholds': [5.0, 15.0],
+                    'interval_factors': [3.0, 0.5],  # 저속에서 간격 늘리기, 고속에서 빠르게
+                    'min_distance': 0.1,
+                    'priority_mode': 'velocity'
+                }
+                self.configure_subsystem('collision_check', collision_hz, collision_adaptive_config)
+                self._register_safe_callback('collision_check', '_update_collision_check_callback', '_initialize_collision_check_callback')
+
+            # 목적지 도달 확인 서브시스템 설정
+            if 'goal_check' in hz_config:
+                goal_hz = hz_config['goal_check']
+                goal_adaptive_config = {
+                    'velocity_thresholds': [2.0, 8.0],
+                    'interval_factors': [2.0, 1.0],
+                    'min_distance': 0.05,
+                    'distance_thresholds': [3.0, 15.0],  # 목적지 기반 적응적 업데이트
+                    'priority_mode': 'hybrid'
+                }
+                self.configure_subsystem('goal_check', goal_hz, goal_adaptive_config)
+                self._register_safe_callback('goal_check', '_update_goal_check_callback', '_initialize_goal_check_callback')
+
+            # 상태 이력 서브시스템 설정
+            if 'state_history' in hz_config:
+                history_hz = hz_config['state_history']
+                history_adaptive_config = {
+                    'velocity_thresholds': [1.0, 10.0],
+                    'interval_factors': [5.0, 0.8],  # 정지 시 이력 간격 늘리기
+                    'min_distance': 0.2,
+                    'priority_mode': 'velocity'
+                }
+                self.configure_subsystem('state_history', history_hz, history_adaptive_config)
+                self._register_safe_callback('state_history', '_update_state_history_callback', '_initialize_state_history_callback')
+
+        except Exception as e:
+            print(f"Warning: Failed to setup subsystem manager: {e}")
+
+    def _register_safe_callback(self, subsystem_name: str, update_method_name: str, init_method_name: str):
+        """안전한 콜백 등록 - weakref를 사용하여 순환 참조 방지"""
+        def safe_update_callback(*args, **kwargs):
+            vehicle = self._get_vehicle()
+            if vehicle and hasattr(vehicle, update_method_name):
+                try:
+                    method = getattr(vehicle, update_method_name)
+                    return method(*args, **kwargs)
+                except Exception as e:
+                    print(f"Warning: Error in {subsystem_name} update callback: {e}")
+                    return None
+            return None
+
+        def safe_init_callback(*args, **kwargs):
+            vehicle = self._get_vehicle()
+            if vehicle and hasattr(vehicle, init_method_name):
+                try:
+                    method = getattr(vehicle, init_method_name)
+                    return method(*args, **kwargs)
+                except Exception as e:
+                    print(f"Warning: Error in {subsystem_name} init callback: {e}")
+                    return None
+            return None
+
+        self.register_update_callback(subsystem_name, safe_update_callback)
+        self.register_initialization_callback(subsystem_name, safe_init_callback)
+
+    def configure_subsystem(self, subsystem_name: str, hz: float, adaptive_config=None):
+        """서브시스템의 업데이트 빈도 설정
+
+        Args:
+            subsystem_name: 서브시스템 이름
+            hz: 업데이트 주파수 [Hz]
+            adaptive_config: 적응적 업데이트 설정
+                - velocity_thresholds: [low_vel, high_vel] 속도 임계값
+                - interval_factors: [low_factor, high_factor] 간격 조정 인수
+                - min_distance: 최소 거리 변화 임계값
+                - distance_thresholds: [close_dist, far_dist] 거리 임계값 (목적지용)
+                - priority_mode: 'velocity', 'distance', 'hybrid' 중 선택
+        """
+        interval = 1.0 / hz if hz > 0 else float('inf')
+        self._update_intervals[subsystem_name] = interval
+        self._last_update_times[subsystem_name] = 0.0
+        self._update_counts[subsystem_name] = 0
+        self._skip_counts[subsystem_name] = 0
+
+        if adaptive_config:
+            self._adaptive_configs[subsystem_name] = adaptive_config
+
+        # 초기 위치 설정
+        self._last_positions[subsystem_name] = None
+        self._context_data[subsystem_name] = {}
+
+    def register_update_callback(self, subsystem_name: str, callback_function):
+        """서브시스템의 업데이트 콜백 함수 등록"""
+        self._update_callbacks[subsystem_name] = callback_function
+
+    def register_initialization_callback(self, subsystem_name: str, init_callback):
+        """서브시스템의 초기화 콜백 함수 등록"""
+        self._initialization_callbacks[subsystem_name] = init_callback
+
+    def initialize_subsystem(self, subsystem_name: str, *args, **kwargs):
+        """서브시스템 초기화 실행"""
+        # 콜백이 등록되지 않았다면 지연 등록 시도
+        self._ensure_callbacks_registered()
+
+        if subsystem_name in self._initialization_callbacks:
+            try:
+                result = self._initialization_callbacks[subsystem_name](*args, **kwargs)
+                with self._cache_lock:
+                    self._cached_data[subsystem_name] = result
+                    self._cache_access_times[subsystem_name] = time.time()
+                return result
+            except Exception as e:
+                print(f"Warning: Error initializing {subsystem_name}: {e}")
+                return None
+        return None
+
+    def initialize_all_subsystems(self, *args, **kwargs):
+        """모든 등록된 서브시스템 초기화"""
+        self._ensure_callbacks_registered()
+        for subsystem_name in self._initialization_callbacks:
+            self.initialize_subsystem(subsystem_name, *args, **kwargs)
+
+    def should_update(self, subsystem_name: str, current_time: float,
+                     velocity: float = 0.0, position: tuple = None,
+                     context: dict = None) -> bool:
+        """향상된 서브시스템 업데이트 여부 판단
+
+        Args:
+            subsystem_name: 서브시스템 이름
+            current_time: 현재 시간
+            velocity: 현재 속도
+            position: 현재 위치 (x, y)
+            context: 추가 컨텍스트 정보 (목적지 거리, 장애물 거리 등)
+        """
+        # 설정되지 않은 서브시스템은 항상 업데이트
+        if subsystem_name not in self._update_intervals:
+            return True
+
+        last_update_time = self._last_update_times[subsystem_name]
+        base_interval = self._update_intervals[subsystem_name]
+
+        # 무한 간격(비활성화)인 경우 업데이트 안함
+        if base_interval == float('inf'):
+            return False
+
+        # 적응적 업데이트 설정 적용
+        if subsystem_name in self._adaptive_configs:
+            adaptive_config = self._adaptive_configs[subsystem_name]
+            interval = self._calculate_adaptive_interval(
+                base_interval, velocity, adaptive_config, context
+            )
+
+            # 시간 간격 확인
+            time_elapsed = current_time - last_update_time
+            if time_elapsed < interval:
+                self._skip_counts[subsystem_name] += 1
+                return False
+
+            # 위치/거리 기반 확인
+            if not self._check_positional_update_criteria(
+                subsystem_name, position, adaptive_config, context
+            ):
+                self._skip_counts[subsystem_name] += 1
+                return False
+        else:
+            # 단순 시간 기반 업데이트
+            time_elapsed = current_time - last_update_time
+            if time_elapsed < base_interval:
+                self._skip_counts[subsystem_name] += 1
+                return False
+
+        # 업데이트 승인
+        self._last_update_times[subsystem_name] = current_time
+        if position:
+            self._last_positions[subsystem_name] = position
+        if context:
+            self._context_data[subsystem_name].update(context)
+        self._update_counts[subsystem_name] += 1
+
+        return True
+
+    def _check_positional_update_criteria(self, subsystem_name: str, position: tuple,
+                                        adaptive_config: dict, context: dict = None) -> bool:
+        """위치/거리 기반 업데이트 기준 확인"""
+        if position is None:
+            return True
+
+        last_position = self._last_positions.get(subsystem_name)
+        if last_position is None:
+            return True
+
+        # 이동 거리 계산
+        dx = position[0] - last_position[0]
+        dy = position[1] - last_position[1]
+        distance_moved = (dx*dx + dy*dy)**0.5
+
+        min_distance = adaptive_config.get('min_distance', 0.05)
+        if distance_moved < min_distance:
+            return False
+
+        # 컨텍스트 기반 추가 검사
+        if context and 'goal_distance' in context:
+            goal_distance = context['goal_distance']
+            distance_thresholds = adaptive_config.get('distance_thresholds', [5.0, 20.0])
+
+            # 목적지에 가까울수록 더 자주 업데이트
+            if goal_distance < distance_thresholds[0]:  # 매우 가까움
+                return distance_moved > min_distance * 0.5
+            elif goal_distance > distance_thresholds[1]:  # 매우 멀음
+                return distance_moved > min_distance * 2.0
+
+        return True
+
+    def execute_update(self, subsystem_name: str, current_time: float,
+                      velocity: float = 0.0, position: tuple = None,
+                      context: dict = None, *args, **kwargs):
+        """향상된 서브시스템 업데이트 실행"""
+        # 콜백이 등록되지 않았다면 지연 등록 시도
+        self._ensure_callbacks_registered()
+
+        # 메모리 관리 수행
+        self._manage_cache_memory()
+
+        should_update = self.should_update(subsystem_name, current_time, velocity, position, context)
+
+        if should_update and subsystem_name in self._update_callbacks:
+            try:
+                # 새로운 업데이트 실행
+                result = self._update_callbacks[subsystem_name](*args, **kwargs)
+
+                # 캐시에 안전하게 저장
+                with self._cache_lock:
+                    self._cached_data[subsystem_name] = result
+                    self._cache_access_times[subsystem_name] = current_time
+
+                return result
+            except Exception as e:
+                print(f"Warning: Error executing update for {subsystem_name}: {e}")
+                # 오류 발생 시 캐시된 데이터 반환 시도
+                return self.get_cached_data(subsystem_name)
+        else:
+            # 캐시된 데이터 반환 (보간 가능)
+            return self._get_cached_or_interpolated_data(
+                subsystem_name, current_time, position, context
+            )
+
+    def get_cached_data(self, subsystem_name: str):
+        """캐시된 데이터 반환"""
+        with self._cache_lock:
+            return self._access_cache(subsystem_name, self._cached_data)
+
+    def _get_cached_or_interpolated_data(self, subsystem_name: str, current_time: float,
+                                       position: tuple = None, context: dict = None):
+        """캐시된 데이터 또는 보간된 데이터 반환"""
+        with self._cache_lock:
+            cached_data = self._access_cache(subsystem_name, self._cached_data)
+
+        if cached_data is None:
+            return None
+
+        try:
+            # 서브시스템별 특별한 보간 처리
+            if subsystem_name == 'frenet' and position:
+                return self._interpolate_frenet_data(cached_data, position)
+            elif subsystem_name == 'collision_check':
+                return self._interpolate_collision_data(cached_data, position, context)
+            elif subsystem_name == 'goal_check':
+                return self._interpolate_goal_data(cached_data, position, context)
+        except Exception as e:
+            print(f"Warning: Error interpolating data for {subsystem_name}: {e}")
+
+        return cached_data
+
+    def _interpolate_frenet_data(self, cached_data, position: tuple):
+        """Frenet 데이터 보간"""
+        vehicle = self._get_vehicle()
+        if not vehicle:
+            return cached_data
+
+        try:
+            # 보간을 사용한 부드러운 전환
+            state = vehicle.state
+            if (state.frenet_d is not None and state.frenet_point is not None and
+                'frenet' in self._last_positions and
+                self._last_positions['frenet'] is not None):
+
+                # 이전 위치에서 현재 위치로의 변화량 계산
+                last_pos = self._last_positions['frenet']
+                dx = position[0] - last_pos[0]
+                dy = position[1] - last_pos[1]
+
+                # 도로 방향으로의 투영 (간단한 보간)
+                if state.frenet_point and len(state.frenet_point) >= 3:
+                    road_yaw = state.frenet_point[2]
+
+                    # 도로 방향과 수직 방향의 단위 벡터
+                    perp_dir_x = -sin(road_yaw)
+                    perp_dir_y = cos(road_yaw)
+
+                    # 현재 위치에서의 d 값 보간 계산
+                    ref_x, ref_y = state.frenet_point[0], state.frenet_point[1]
+                    to_vehicle_x = position[0] - ref_x
+                    to_vehicle_y = position[1] - ref_y
+
+                    # 수직 거리 계산 (좌측이 양수)
+                    interpolated_d = to_vehicle_x * perp_dir_x + to_vehicle_y * perp_dir_y
+
+                    # 보간된 값으로 업데이트
+                    state.frenet_d = interpolated_d
+
+                road_width = 8.0  # 기본 도로 폭
+                outside_road = abs(state.frenet_d) > (road_width / 2)
+                return outside_road
+
+        except Exception as e:
+            print(f"Warning: Error in frenet data interpolation: {e}")
+
+        return cached_data if cached_data is not None else False
+
+    def _interpolate_collision_data(self, cached_data, position: tuple, context: dict):
+        """충돌 데이터 보간 - 빠른 움직임 시 더 보수적으로"""
+        if context and 'velocity' in context:
+            velocity = context['velocity']
+            # 고속일 때는 충돌 위험을 더 보수적으로 평가
+            if velocity > 10.0 and cached_data:  # 충돌이 감지된 상태에서 고속
+                return True  # 더 보수적으로 충돌 상태 유지
+        return cached_data
+
+    def _interpolate_goal_data(self, cached_data, position: tuple, context: dict):
+        """목적지 도달 데이터 보간"""
+        # 목적지 거리가 빠르게 변하는 경우 캐시 무효화
+        if context and 'goal_distance' in context:
+            goal_distance = context['goal_distance']
+            last_context = self._context_data.get('goal_check', {})
+
+            if 'last_goal_distance' in last_context:
+                distance_change = abs(goal_distance - last_context['last_goal_distance'])
+                if distance_change > 2.0:  # 2m 이상 변화시 재평가 필요
+                    return None  # 캐시 무효화
+
+        return cached_data
+
+    def execute_all_updates(self, current_time: float, current_velocity: float = 0.0,
+                           current_position: tuple = None, context: dict = None,
+                           **subsystem_args):
+        """모든 등록된 서브시스템을 한번에 업데이트"""
+        results = {}
+        base_context = context or {}
+
+        for subsystem_name in self._update_intervals.keys():
+            # 각 서브시스템별 인수 가져오기
+            args_key = f"{subsystem_name}_args"
+            args = subsystem_args.get(args_key, ())
+
+            # 서브시스템별 컨텍스트 정보 추가
+            subsystem_context = base_context.copy()
+            subsystem_context['velocity'] = current_velocity
+
+            if not isinstance(args, tuple):
+                args = (args,) if args is not None else ()
+
+            result = self.execute_update(
+                subsystem_name,
+                current_time,
+                current_velocity,
+                current_position,
+                subsystem_context,
+                *args
+            )
+
+            results[subsystem_name] = result
+
+        return results
+
+    def _calculate_adaptive_interval(self, base_interval: float, velocity: float,
+                                   config: dict, context: dict = None) -> float:
+        """향상된 적응적 업데이트 간격 계산"""
+        priority_mode = config.get('priority_mode', 'velocity')
+
+        if priority_mode == 'velocity':
+            return self._calculate_velocity_based_interval(base_interval, velocity, config)
+        elif priority_mode == 'distance' and context and 'goal_distance' in context:
+            return self._calculate_distance_based_interval(base_interval, context['goal_distance'], config)
+        elif priority_mode == 'hybrid':
+            velocity_interval = self._calculate_velocity_based_interval(base_interval, velocity, config)
+            if context and 'goal_distance' in context:
+                distance_interval = self._calculate_distance_based_interval(base_interval, context['goal_distance'], config)
+                return min(velocity_interval, distance_interval)  # 더 짧은 간격 선택
+            return velocity_interval
+        else:
+            return base_interval
+
+    def _calculate_velocity_based_interval(self, base_interval: float, velocity: float, config: dict) -> float:
+        """속도 기반 간격 계산"""
+        velocity_thresholds = config.get('velocity_thresholds', [2.0, 10.0])
+        interval_factors = config.get('interval_factors', [2.0, 0.5])
+
+        low_vel, high_vel = velocity_thresholds
+        low_factor, high_factor = interval_factors
+
+        if velocity < low_vel:
+            return base_interval * low_factor
+        elif velocity > high_vel:
+            return base_interval * high_factor
+        else:
+            # 선형 보간
+            t = (velocity - low_vel) / (high_vel - low_vel)
+            factor = low_factor + t * (high_factor - low_factor)
+            return base_interval * factor
+
+    def _calculate_distance_based_interval(self, base_interval: float, distance: float, config: dict) -> float:
+        """거리 기반 간격 계산"""
+        distance_thresholds = config.get('distance_thresholds', [5.0, 20.0])
+        interval_factors = config.get('interval_factors', [0.5, 2.0])  # 가까울수록 자주
+
+        close_dist, far_dist = distance_thresholds
+        close_factor, far_factor = interval_factors
+
+        if distance < close_dist:
+            return base_interval * close_factor
+        elif distance > far_dist:
+            return base_interval * far_factor
+        else:
+            # 선형 보간
+            t = (distance - close_dist) / (far_dist - close_dist)
+            factor = close_factor + t * (far_factor - close_factor)
+            return base_interval * factor
+
+    def get_performance_stats(self) -> dict:
+        """성능 통계 반환"""
+        stats = {}
+        for subsystem_name in self._update_intervals.keys():
+            total_attempts = self._update_counts[subsystem_name] + self._skip_counts[subsystem_name]
+            if total_attempts > 0:
+                update_rate = self._update_counts[subsystem_name] / total_attempts
+            else:
+                update_rate = 0.0
+
+            stats[subsystem_name] = {
+                'updates': self._update_counts[subsystem_name],
+                'skips': self._skip_counts[subsystem_name],
+                'update_rate': update_rate,
+                'configured_hz': 1.0 / self._update_intervals[subsystem_name] if self._update_intervals[subsystem_name] > 0 else 0
+            }
+        return stats
+
+    def reset(self):
+        """모든 서브시스템의 상태 초기화"""
+        with self._cache_lock:
+            for subsystem_name in self._last_update_times:
+                self._last_update_times[subsystem_name] = 0.0
+                self._last_positions[subsystem_name] = None
+                self._context_data[subsystem_name] = {}
+                self._update_counts[subsystem_name] = 0
+                self._skip_counts[subsystem_name] = 0
+
+            # 캐시 완전 초기화
+            self._cached_data.clear()
+            self._interpolation_data.clear()
+            self._cache_access_times.clear()
+            self._last_cleanup_time = time.time()
+
+    def reset_and_reinitialize(self, *args, **kwargs):
+        """모든 서브시스템 초기화 후 재초기화 실행"""
+        self.reset()
+        self.initialize_all_subsystems(*args, **kwargs)
+
+    def set_cache_config(self, config: Dict[str, Any]):
+        """캐시 설정 업데이트"""
+        with self._cache_lock:
+            self._cache_config.update(config)
+
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """캐시 사용 통계 반환"""
+        with self._cache_lock:
+            return {
+                'cached_data_size': len(self._cached_data),
+                'interpolation_data_size': len(self._interpolation_data),
+                'access_times_size': len(self._cache_access_times),
+                'max_cache_size': self._cache_config['max_cache_size'],
+                'cleanup_interval': self._cache_config['cleanup_interval'],
+                'last_cleanup_time': self._last_cleanup_time
+            }
 
 # ======================
 # State Management
@@ -46,18 +699,9 @@ class VehicleState:
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
 
     # frenet 좌표
-    frenet_d: float = None
+    frenet_d: float = 0.0
     frenet_point: tuple = None
-    target_vel_long: float = None
-
-    # Frenet 업데이트 빈도 조절을 위한 변수들
-    _last_frenet_update_time: float = field(default=0.0)
-    _frenet_update_interval: float = field(default=0.1)  # config에서 설정 가능
-    _last_frenet_position: tuple = field(default=None)
-
-    # 센서 업데이트 빈도 조절을 위한 변수들
-    _last_sensor_update_times: Dict[str, float] = field(default_factory=dict)
-    _sensor_update_intervals: Dict[str, float] = field(default_factory=dict)
+    target_vel_long: float = 0.0
 
     # 라이다 센서 데이터, 거리 배열
     lidar_data: List = field(default_factory=list)
@@ -73,14 +717,6 @@ class VehicleState:
 
     # 환경 속성
     terrain_type: str = "asphalt"  # 현재 지형 유형
-
-    def set_frenet_update_interval(self, interval: float):
-        """Frenet 업데이트 간격 설정"""
-        self._frenet_update_interval = interval
-
-    def set_sensor_update_interval(self, sensor_type: str, interval: float):
-        """센서 업데이트 간격 설정"""
-        self._sensor_update_intervals[sensor_type] = interval
 
     def reset(self):
         """차량 상태 초기화"""
@@ -109,16 +745,9 @@ class VehicleState:
         self.curr_distance_to_target = 0.0
         self.yaw_diff_to_target = 0.0
 
-        self.frenet_d = None
+        self.frenet_d = 0.0
         self.frenet_point = None
-        self.target_vel_long = None
-
-        # Frenet 업데이트 빈도 조절 변수 초기화
-        self._last_frenet_update_time = 0.0
-        self._last_frenet_position = None
-
-        # 센서 업데이트 빈도 조절 변수 초기화
-        self._last_sensor_update_times.clear()
+        self.target_vel_long = 0.0
 
         self.lidar_data.clear()
 
@@ -228,115 +857,10 @@ class VehicleState:
         self.rear_axle_x = self.x - self.half_wheelbase * cos(self.yaw)
         self.rear_axle_y = self.y - self.half_wheelbase * sin(self.yaw)
 
-    def should_update_frenet(self, current_time: float, velocity: float = 0.0) -> bool:
-        """Frenet 좌표 업데이트 여부 판단 - 적응적 업데이트 빈도"""
-        # 속도에 따른 적응적 업데이트 간격 조정
-        base_interval = self._frenet_update_interval
-        if velocity > 10.0:  # 고속 주행 시 더 자주 업데이트
-            adaptive_interval = base_interval * 0.5
-        elif velocity < 2.0:  # 저속 주행 시 덜 자주 업데이트
-            adaptive_interval = base_interval * 2.0
-        else:
-            adaptive_interval = base_interval
-
-        # 시간 간격 확인
-        time_elapsed = current_time - self._last_frenet_update_time
-        if time_elapsed < adaptive_interval:
-            return False
-
-        # 위치 변화 확인 (속도에 따른 적응적 기준)
-        if self._last_frenet_position is not None:
-            current_pos = (self.x, self.y)
-            dx = current_pos[0] - self._last_frenet_position[0]
-            dy = current_pos[1] - self._last_frenet_position[1]
-            distance_moved = (dx*dx + dy*dy)**0.5
-
-            # 속도에 따른 적응적 거리 기준
-            min_distance = max(0.05, min(0.3, velocity * 0.02))  # 0.05m ~ 0.3m
-            if distance_moved < min_distance:
-                return False
-
-        return True
-
-    def should_update_sensor(self, sensor_type: str, current_time: float) -> bool:
-        """센서 업데이트 여부 판단"""
-        # 센서 타입에 대한 업데이트 간격이 설정되지 않은 경우 항상 업데이트
-        if sensor_type not in self._sensor_update_intervals:
-            return True
-
-        # 마지막 업데이트 시간 가져오기 (처음인 경우 0.0)
-        last_update_time = self._last_sensor_update_times.get(sensor_type, 0.0)
-
-        # 설정된 업데이트 간격
-        update_interval = self._sensor_update_intervals[sensor_type]
-
-        # 시간 간격 확인
-        time_elapsed = current_time - last_update_time
-        if time_elapsed >= update_interval:
-            # 업데이트 시간 기록
-            self._last_sensor_update_times[sensor_type] = current_time
-            return True
-
-        return False
-
     def update_position_from_rear_axle(self, cos_yaw, sin_yaw):
         """뒷바퀴 축 위치에서 heading 방향으로 이동, 차량 중심점 위치 업데이트"""
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
         self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
-
-    def update_road_data(self, road_manager, current_time: float = None):
-        """
-        도로 데이터 기반 차량 상태 업데이트 - 적응적 빈도 및 보간 적용
-        """
-        if current_time is None:
-            current_time = time.time()
-
-        # 현재 속도 계산 (적응적 업데이트용)
-        current_velocity = sqrt(self.vel_long**2 + self.vel_lat**2)
-
-        # Frenet 좌표 업데이트 여부 확인
-        if not self.should_update_frenet(current_time, current_velocity):
-            # 보간을 사용한 부드러운 전환
-            if (self.frenet_d is not None and self.frenet_point is not None and
-                self._last_frenet_position is not None):
-
-                # 이전 위치에서 현재 위치로의 변화량 계산
-                dx = self.x - self._last_frenet_position[0]
-                dy = self.y - self._last_frenet_position[1]
-
-                # 도로 방향으로의 투영 (간단한 보간)
-                if self.frenet_point and len(self.frenet_point) >= 3:
-                    road_yaw = self.frenet_point[2]
-
-                    # 도로 방향과 수직 방향의 단위 벡터
-                    road_dir_x = cos(road_yaw)
-                    road_dir_y = sin(road_yaw)
-                    perp_dir_x = -sin(road_yaw)
-                    perp_dir_y = cos(road_yaw)
-
-                    # 현재 위치에서의 d 값 보간 계산
-                    ref_x, ref_y = self.frenet_point[0], self.frenet_point[1]
-                    to_vehicle_x = self.x - ref_x
-                    to_vehicle_y = self.y - ref_y
-
-                    # 수직 거리 계산 (좌측이 양수)
-                    interpolated_d = to_vehicle_x * perp_dir_x + to_vehicle_y * perp_dir_y
-
-                    # 보간된 값으로 업데이트
-                    self.frenet_d = interpolated_d
-
-                road_width = 8.0  # 기본 도로 폭
-                outside_road = abs(self.frenet_d) > (road_width / 2)
-                return outside_road
-
-        # 완전한 Frenet 좌표 업데이트
-        self.frenet_point, self.frenet_d, self.target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.x, self.y, self.yaw))
-
-        # 업데이트 시간과 위치 기록
-        self._last_frenet_update_time = current_time
-        self._last_frenet_position = (self.x, self.y)
-
-        return outside_road
 
     def update_state_history(self):
         """현재 상태 복사본을 이력에 추가"""
@@ -420,19 +944,8 @@ class Vehicle:
         self.state = VehicleState()
         self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
 
-        # Frenet 업데이트 간격 설정 (config에서 Hz 값을 읽어서 interval로 변환)
-        if simulation_config and 'hz' in simulation_config and 'frenet_update' in simulation_config['hz']:
-            frenet_hz = simulation_config['hz']['frenet_update']
-            frenet_interval = 1.0 / frenet_hz
-            self.state.set_frenet_update_interval(frenet_interval)
-
-        # 센서 업데이트 간격 설정 (config에서 Hz 값을 읽어서 interval로 변환)
-        if simulation_config and 'hz' in simulation_config:
-            hz_config = simulation_config['hz']
-            if 'lidar_update' in hz_config:
-                lidar_hz = hz_config['lidar_update']
-                lidar_interval = 1.0 / lidar_hz
-                self.state.set_sensor_update_interval("lidar", lidar_interval)
+        # Subsystem 관리자 초기화
+        self.subsystem_manager = SubsystemManager(vehicle_instance=self, simulation_config=self.simulation_config)
 
         self.collision_body = RectangleObstacle(
             x=self.state.x, y=self.state.y,
@@ -446,11 +959,64 @@ class Vehicle:
         self.goal_manager = GoalManager(bounding_circle_colors=self.visual_config['bounding_circle_color'])
         self.sensor_manager = SensorManager(self, self.vehicle_config['sensors'], self.visual_config)
 
-        # 초기 센서 값 설정
-        self._update_sensor_data()
+        # 서브 시스템 관리자를 통한 초기화
+        self._initialize_all_subsystems()
 
         # 그래픽 리소스 초기화
         self._load_graphics()
+
+    def reset(self):
+        """차량 상태 초기화"""
+        self.state.reset()
+        self.goal_manager.clear_goals()
+        self.sensor_manager.reset()
+        self._load_graphics()
+        self._update_collision_body()
+        # 서브 시스템 관리자를 통한 재초기화
+        self.subsystem_manager.reset_and_reinitialize()
+
+    def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
+        """차량 상태 업데이트"""
+
+        # 물리 모델 적용
+        PhysicsEngine.update(self.state, action, dt, self.physics_config, self.vehicle_config)
+
+        # 충돌 바디 위치 및 방향 업데이트
+        self._update_collision_body()
+
+        # 객체 목록 생성
+        objects = []
+        if obstacles:
+            objects.extend(obstacles)
+        if vehicles:
+            for vehicle in vehicles:
+                if vehicle.id != self.id:  # 자기 자신이 아닌 차량만 추가
+                    objects.extend(vehicle.get_outer_circles_world())
+
+        # 서브 시스템 관리자를 통한 통합 업데이트
+        current_velocity = sqrt(self.state.vel_long**2 + self.state.vel_lat**2)
+        current_position = (self.state.x, self.state.y)
+
+        # 모든 서브시스템을 한번에 업데이트
+        update_results = self.subsystem_manager.execute_all_updates(
+            current_time=time_elapsed,
+            current_velocity=current_velocity,
+            current_position=current_position,
+            context={},
+            sensor_args=(dt, time_elapsed, objects),
+            frenet_args=(road_manager, time_elapsed),
+            trajectory_args=(),
+            collision_check_args=(objects,),
+            goal_check_args=(),
+            state_history_args=()
+        )
+
+        # 서브시스템 결과 추출
+        outside_road = update_results.get('frenet', False)
+        collision = update_results.get('collision_check', False)
+        reached = update_results.get('goal_check', False)
+
+        return self.state, collision, outside_road, reached
 
     def get_state(self):
         """차량 상태 반환"""
@@ -538,62 +1104,110 @@ class Vehicle:
                 self.update_target(goal.x, goal.y, goal.yaw)
         return result
 
-    def reset(self):
-        """차량 상태 초기화"""
-        self.state.reset()
-        self.goal_manager.clear_goals()
-        self.sensor_manager.reset()
-        self._load_graphics()
-        self._update_collision_body()
+    def _initialize_all_subsystems(self):
+        """서브 시스템 관리자를 통한 모든 서브시스템 초기화"""
+        self.subsystem_manager.initialize_all_subsystems()
+
+    def _initialize_frenet_callback(self):
+        """Frenet 초기화 콜백"""
+        return False
+
+    def _initialize_sensor_callback(self):
+        """센서 초기화 콜백"""
         self._update_sensor_data()
+        return self.state.get_lidar_data()
 
-    def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
-        """차량 상태 업데이트"""
+    def _initialize_trajectory_callback(self):
+        """궤적 초기화 콜백"""
+        self._predict_trajectory(self.physics_config['trajectory']['time_horizon'],
+                               self.physics_config['trajectory']['dt'])
+        return self.state.physics_trajectory
 
-        # 물리 모델 적용
-        PhysicsEngine.update(self.state, action, dt, self.physics_config, self.vehicle_config)
+    def _update_frenet_callback(self, road_manager, time_elapsed):
+        """Frenet 업데이트 콜백 - road_manager를 통해 계산 및 보간 처리"""
+        # 기본 frenet 업데이트
+        outside_road = self._update_road_data_internal(road_manager, time_elapsed)
 
-        # 충돌 바디 위치 및 방향 업데이트
-        self._update_collision_body()
+        return outside_road
 
-        # 객체 목록 생성
-        objects = []
-        if obstacles:
-            objects.extend(obstacles)
-        if vehicles:
-            for vehicle in vehicles:
-                if vehicle.id != self.id:  # 자기 자신이 아닌 차량만 추가
-                    objects.extend(vehicle.get_outer_circles_world())
+    def _update_road_data_internal(self, road_manager, current_time: float = None):
+        """내부용 road data 업데이트 - 서브 시스템 관리자에서 호출"""
+        if current_time is None:
+            current_time = time.time()
 
-        # 차량 센서 업데이트 (조건부)
-        if self.state.should_update_sensor("lidar", time_elapsed):
-            self.sensor_manager.update(dt, time_elapsed, objects)
-            # 센서 정보 업데이트
-            self._update_sensor_data()
+        # road_manager를 통해 Frenet 좌표 계산
+        frenet_point, frenet_d, target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
 
-        # 도로 정보 업데이트 (시간 정보 전달)
-        outside_road = self._update_road_data(road_manager, time_elapsed)
+        # 상태 업데이트
+        self.state.frenet_point = frenet_point
+        self.state.frenet_d = frenet_d
+        self.state.target_vel_long = target_vel_long
 
-        # 충돌 검사
-        collision = self._check_collision(objects)
+        return outside_road
 
-        # 목표 도달 여부 확인
-        reached = False
-        if self.goal_manager.has_goals():
-            reached = self._check_target_reached()
+    def _update_sensor_callback(self, dt, time_elapsed, objects):
+        """센서 업데이트 콜백"""
+        self.sensor_manager.update(dt, time_elapsed, objects)
+        self._update_sensor_data()
+        return self.state.get_lidar_data()
 
-        # 상태 이력 업데이트
-        self._update_state_history()
-        # 차량 궤적 업데이트
-        self._predict_trajectory(self.physics_config['trajectory']['time_horizon'], self.physics_config['trajectory']['dt'])
+    def _update_trajectory_callback(self):
+        """궤적 업데이트 콜백"""
+        self._predict_trajectory(self.physics_config['trajectory']['time_horizon'],
+                               self.physics_config['trajectory']['dt'])
+        return self.state.physics_trajectory
 
-        return self.state, collision, outside_road, reached
+    def _initialize_collision_check_callback(self):
+        """충돌 검사 초기화 콜백"""
+        return False
 
-    def _update_road_data(self, road_manager, current_time: float = None):
-        return self.state.update_road_data(road_manager, current_time)
+    def _update_collision_check_callback(self, objects):
+        """충돌 검사 업데이트 콜백
 
-    def _update_state_history(self):
+        Args:
+            objects: 충돌 검사할 객체들
+
+        Returns:
+            충돌 여부 (Boolean)
+        """
+        if len(objects) == 0:
+            return False
+
+        # 다른 객체들과의 외접원 수준의 충돌 검사
+        return self._check_collision(objects)
+
+    def _initialize_goal_check_callback(self):
+        """목적지 도달 확인 초기화 콜백"""
+        return False
+
+    def _update_goal_check_callback(self, position_tolerance=None, yaw_tolerance=None):
+        """목적지 도달 확인 업데이트 콜백
+
+        Args:
+            position_tolerance: 위치 도달 판정 거리 [m]
+            yaw_tolerance: 방향 도달 판정 각도 [rad]
+
+        Returns:
+            목적지 도달 여부 (Boolean)
+        """
+        if not self.goal_manager.has_goals():
+            return False
+
+        return self._check_target_reached(position_tolerance, yaw_tolerance)
+
+    def _initialize_state_history_callback(self):
+        """상태 이력 초기화 콜백"""
+        self.state.state_history.clear()
+        return None
+
+    def _update_state_history_callback(self):
+        """상태 이력 업데이트 콜백
+
+        Returns:
+            업데이트된 상태 이력 크기
+        """
         self.state.update_state_history()
+        return len(self.state.state_history)
 
     def _check_collision(self, objects):
         """
@@ -1051,6 +1665,44 @@ class Vehicle:
             current_goal = self.goal_manager.get_current_goal()
             if current_goal:
                 self.update_target(current_goal.x, current_goal.y, current_goal.yaw)
+
+    def get_subsystem_manager_stats(self) -> dict:
+        """
+        서브 시스템 관리자 성능 통계 반환
+
+        Returns:
+            서브시스템별 업데이트 통계 데이터
+        """
+        return self.subsystem_manager.get_performance_stats()
+
+    def reset_subsystem_manager_stats(self):
+        """
+        서브 시스템 관리자 통계 초기화
+        """
+        for subsystem_name in self.subsystem_manager._update_intervals.keys():
+            self.subsystem_manager._update_counts[subsystem_name] = 0
+            self.subsystem_manager._skip_counts[subsystem_name] = 0
+
+    def print_subsystem_manager_stats(self, verbose=False):
+        """
+        서브 시스템 관리자 성능 통계 출력
+
+        Args:
+            verbose: 상세 정보 출력 여부
+        """
+        stats = self.get_subsystem_manager_stats()
+        print("\n=== Hz Manager Performance Stats ===")
+        for subsystem, data in stats.items():
+            print(f"{subsystem}:")
+            print(f"  Configured Hz: {data['configured_hz']:.1f}")
+            print(f"  Update Rate: {data['update_rate']:.2f}")
+            print(f"  Updates: {data['updates']}, Skips: {data['skips']}")
+            if verbose:
+                total = data['updates'] + data['skips']
+                if total > 0:
+                    actual_hz = data['updates'] / (total / 60.0) if total > 0 else 0  # 60 FPS 가정
+                    print(f"  Estimated Actual Hz: {actual_hz:.1f}")
+        print("==================================\n")
 
 # ======================
 # Vehicle Manager

@@ -5,7 +5,8 @@ import math
 import random
 import json
 import yaml
-from collections import deque
+import time
+from collections import deque, OrderedDict
 from typing import List, Tuple, Optional, Dict, Any, Union
 from dataclasses import dataclass
 from pathlib import Path
@@ -78,7 +79,7 @@ class LinearRoadSegment:
 
     def __init__(self, waypoints: List[Tuple[float, float, float]],
                  width: float = 6.0, speed_limit: float = 15.0,
-                 segment_id: Optional[str] = None):
+                 segment_id: Optional[str] = None, cache_config: Optional[Dict] = None):
         self.id = segment_id or f"seg_{id(self)}"
         self.waypoints = waypoints
         self.width = width
@@ -90,9 +91,21 @@ class LinearRoadSegment:
         self._cached_cumulative_lengths = None
         self._cached_boundary_lines = None
 
-        # 계산 캐시
-        self._projection_cache = {}
-        self._cache_max_size = 100
+        # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
+        self._cache_config = {
+            'max_cache_size': 1000,
+            'cleanup_interval': 300.0,
+            'max_cache_age': 1800.0
+        }
+
+        # 설정 파일에서 캐시 설정 로드
+        if cache_config:
+            self._cache_config.update(cache_config)
+
+        # 메모리 관리가 개선된 캐시 시스템
+        self._projection_cache = OrderedDict()
+        self._cache_access_times = {}
+        self._last_cleanup_time = time.time()
 
         self._precompute_geometry()
 
@@ -184,10 +197,11 @@ class LinearRoadSegment:
         """점을 도로에 투영 (투영점, 거리, 호장길이 반환)"""
         px, py = point
 
-        # 캐시 확인
+        # 캐시 확인 및 LRU 업데이트
         cache_key = (round(px, 2), round(py, 2))
-        if cache_key in self._projection_cache:
-            return self._projection_cache[cache_key]
+        cached_result = self._access_cache(cache_key)
+        if cached_result is not None:
+            return cached_result
 
         if not self.waypoints:
             return (0.0, 0.0, 0.0), float('inf'), 0.0
@@ -196,58 +210,104 @@ class LinearRoadSegment:
             wp = self.waypoints[0]
             dist = math.sqrt((px - wp[0])**2 + (py - wp[1])**2)
             result = ((wp[0], wp[1], wp[2]), dist, 0.0)
+
+            # 캐시 관리 후 저장
             self._manage_cache()
             self._projection_cache[cache_key] = result
+            self._cache_access_times[cache_key] = time.time()
             return result
 
         min_dist = float('inf')
         best_projection = None
         best_arc_length = 0.0
 
-        # 각 세그먼트에 대해 투영 계산
-        for i in range(len(self.waypoints) - 1):
-            p1 = self.waypoints[i]
-            p2 = self.waypoints[i + 1]
+        try:
+            # 각 세그먼트에 대해 투영 계산
+            for i in range(len(self.waypoints) - 1):
+                p1 = self.waypoints[i]
+                p2 = self.waypoints[i + 1]
 
-            # 세그먼트 벡터
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            length_sq = dx*dx + dy*dy
+                # 세그먼트 벡터
+                dx = p2[0] - p1[0]
+                dy = p2[1] - p1[1]
+                length_sq = dx*dx + dy*dy
 
-            if length_sq < 1e-10:
-                continue
+                if length_sq < 1e-10:
+                    continue
 
-            # 투영 매개변수 t 계산
-            t = max(0.0, min(1.0, ((px - p1[0]) * dx + (py - p1[1]) * dy) / length_sq))
+                # 투영 매개변수 t 계산
+                t = max(0.0, min(1.0, ((px - p1[0]) * dx + (py - p1[1]) * dy) / length_sq))
 
-            # 투영점
-            proj_x = p1[0] + t * dx
-            proj_y = p1[1] + t * dy
-            proj_yaw = math.atan2(dy, dx)
+                # 투영점
+                proj_x = p1[0] + t * dx
+                proj_y = p1[1] + t * dy
+                proj_yaw = math.atan2(dy, dx)
 
-            # 거리 계산
-            dist = math.sqrt((px - proj_x)**2 + (py - proj_y)**2)
+                # 거리 계산
+                dist = math.sqrt((px - proj_x)**2 + (py - proj_y)**2)
 
-            if dist < min_dist:
-                min_dist = dist
-                best_projection = (proj_x, proj_y, proj_yaw)
-                best_arc_length = self._cached_cumulative_lengths[i] + t * self._cached_segment_lengths[i]
+                if dist < min_dist:
+                    min_dist = dist
+                    best_projection = (proj_x, proj_y, proj_yaw)
+                    best_arc_length = self._cached_cumulative_lengths[i] + t * self._cached_segment_lengths[i]
 
-        result = (best_projection, min_dist, best_arc_length)
+            result = (best_projection, min_dist, best_arc_length)
 
-        # 캐시 저장
+        except Exception as e:
+            print(f"Warning: Error in point projection: {e}")
+            # 오류 발생 시 기본값 반환
+            result = ((px, py, 0.0), 0.0, 0.0)
+
+        # 캐시 관리 후 저장
         self._manage_cache()
         self._projection_cache[cache_key] = result
+        self._cache_access_times[cache_key] = time.time()
 
         return result
 
     def _manage_cache(self):
-        """캐시 크기 관리"""
-        if len(self._projection_cache) > self._cache_max_size:
-            # 절반 제거
-            items = list(self._projection_cache.items())
-            keep_size = self._cache_max_size // 2
-            self._projection_cache = dict(items[-keep_size:])
+        """개선된 캐시 크기 및 메모리 관리"""
+        current_time = time.time()
+
+        # 주기적 정리
+        cleanup_interval = self._cache_config.get('cleanup_interval', 300.0)
+        if current_time - self._last_cleanup_time > cleanup_interval:
+            self._cleanup_old_cache_entries(current_time)
+            self._last_cleanup_time = current_time
+
+        # LRU 기반 크기 제한
+        max_cache_size = self._cache_config.get('max_cache_size', 1000)
+        while len(self._projection_cache) > max_cache_size:
+            # 가장 오래된 항목 제거
+            oldest_key = next(iter(self._projection_cache))
+            del self._projection_cache[oldest_key]
+            if oldest_key in self._cache_access_times:
+                del self._cache_access_times[oldest_key]
+
+    def _cleanup_old_cache_entries(self, current_time: float):
+        """오래된 캐시 항목 정리"""
+        max_age = self._cache_config.get('max_cache_age', 1800.0)
+
+        expired_keys = []
+        for key, last_access in self._cache_access_times.items():
+            if current_time - last_access > max_age:
+                expired_keys.append(key)
+
+        for key in expired_keys:
+            if key in self._projection_cache:
+                del self._projection_cache[key]
+            if key in self._cache_access_times:
+                del self._cache_access_times[key]
+
+    def _access_cache(self, cache_key):
+        """캐시 액세스 시 LRU 업데이트"""
+        if cache_key in self._projection_cache:
+            # LRU 업데이트 - 항목을 맨 뒤로 이동
+            value = self._projection_cache.pop(cache_key)
+            self._projection_cache[cache_key] = value
+            self._cache_access_times[cache_key] = time.time()
+            return value
+        return None
 
     def get_boundary_lines(self) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
         """도로 경계선 계산"""
@@ -399,43 +459,57 @@ class FrenetCalculator:
     def calculate_frenet(self, vehicle_pos: Tuple[float, float, float],
                         segment: LinearRoadSegment) -> FrenetState:
         """차량 위치에 대한 Frenet 좌표 계산"""
-        x, y, yaw = vehicle_pos
+        try:
+            x, y, yaw = vehicle_pos
 
-        # 빠른 캐시 확인
-        if self._should_use_last_cache(vehicle_pos):
-            return self._last_result
+            # 빠른 캐시 확인
+            if self._should_use_last_cache(vehicle_pos):
+                return self._last_result
 
-        # 투영 계산
-        projected_point, distance, arc_length = segment.project_point((x, y))
+            # 투영 계산
+            projected_point, distance, arc_length = segment.project_point((x, y))
 
-        # 횡방향 거리 부호 계산
-        ref_x, ref_y, ref_yaw = projected_point
+            # 횡방향 거리 부호 계산
+            ref_x, ref_y, ref_yaw = projected_point
 
-        # 차량에서 참조점으로의 벡터
-        dx = x - ref_x
-        dy = y - ref_y
+            # 차량에서 참조점으로의 벡터
+            dx = x - ref_x
+            dy = y - ref_y
 
-        # 경로 방향에 수직인 벡터 (왼쪽 방향)
-        perp_x = -math.sin(ref_yaw)
-        perp_y = math.cos(ref_yaw)
+            # 경로 방향에 수직인 벡터 (왼쪽 방향)
+            perp_x = -math.sin(ref_yaw)
+            perp_y = math.cos(ref_yaw)
 
-        # 횡방향 거리 (왼쪽이 양수)
-        d = dx * perp_x + dy * perp_y
+            # 횡방향 거리 (왼쪽이 양수)
+            d = dx * perp_x + dy * perp_y
 
-        result = FrenetState(
-            s=arc_length,
-            d=d,
-            x_ref=ref_x,
-            y_ref=ref_y,
-            yaw_ref=ref_yaw,
-            segment_id=segment.id
-        )
+            result = FrenetState(
+                s=arc_length,
+                d=d,
+                x_ref=ref_x,
+                y_ref=ref_y,
+                yaw_ref=ref_yaw,
+                segment_id=segment.id
+            )
 
-        # 캐시 저장
-        self._last_vehicle_pos = vehicle_pos
-        self._last_result = result
+            # 캐시 저장
+            self._last_vehicle_pos = vehicle_pos
+            self._last_result = result
 
-        return result
+            return result
+
+        except Exception as e:
+            print(f"Warning: Error calculating Frenet coordinates: {e}")
+            # 오류 발생 시 기본값 반환
+            x, y, yaw = vehicle_pos
+            return FrenetState(
+                s=0.0,
+                d=0.0,
+                x_ref=x,
+                y_ref=y,
+                yaw_ref=yaw,
+                segment_id=segment.id if segment else "unknown"
+            )
 
     def _should_use_last_cache(self, vehicle_pos: Tuple[float, float, float]) -> bool:
         """마지막 캐시 사용 여부 판단"""
@@ -1014,11 +1088,16 @@ class SimpleGridIndex:
 class RoadNetwork:
     """도로 네트워크 관리 시스템"""
 
-    def __init__(self):
+    def __init__(self, config: Optional[Dict] = None):
         self.segments = {}  # {segment_id: LinearRoadSegment}
         self.connections = []  # List[RoadConnection]
         self.spatial_index = SimpleGridIndex()
         self.frenet_calculator = FrenetCalculator()
+
+        # 캐시 설정 추출
+        self._road_cache_config = None
+        if config and 'memory_management' in config:
+            self._road_cache_config = config['memory_management'].get('road_cache', {})
 
         # 메타데이터
         self.name = "Road Network"
@@ -1078,12 +1157,17 @@ class RoadNetwork:
 
     def calculate_frenet(self, vehicle_pos: Tuple[float, float, float]) -> Optional[FrenetState]:
         """차량 위치에 대한 Frenet 좌표 계산"""
-        closest_segment = self.find_closest_segment(vehicle_pos[:2])
+        try:
+            closest_segment = self.find_closest_segment(vehicle_pos[:2])
 
-        if not closest_segment:
+            if not closest_segment:
+                return None
+
+            return self.frenet_calculator.calculate_frenet(vehicle_pos, closest_segment)
+
+        except Exception as e:
+            print(f"Warning: Error in RoadNetwork calculate_frenet: {e}")
             return None
-
-        return self.frenet_calculator.calculate_frenet(vehicle_pos, closest_segment)
 
     def is_point_on_road(self, point: Tuple[float, float]) -> bool:
         """점이 도로 네트워크 위에 있는지 확인"""
@@ -1210,7 +1294,12 @@ class RoadConfigLoader:
     def create_network_from_config(self, config: Dict[str, Any],
                                   road_definitions: List[Dict[str, Any]]) -> RoadNetwork:
         """설정으로부터 네트워크 생성"""
-        network = RoadNetwork()
+        network = RoadNetwork(config)
+
+        # 캐시 설정 추출
+        road_cache_config = None
+        if 'memory_management' in config:
+            road_cache_config = config['memory_management'].get('road_cache', {})
 
         for road_def in road_definitions:
             waypoints = road_def.get('waypoints', [])
@@ -1230,7 +1319,8 @@ class RoadConfigLoader:
                     waypoints=converted_waypoints,
                     width=road_def.get('width', config.get('road_width', 6.0)),
                     speed_limit=road_def.get('speed_limit', config.get('default_speed', 15.0)),
-                    segment_id=road_def.get('id', f"road_{len(network.segments)}")
+                    segment_id=road_def.get('id', f"road_{len(network.segments)}"),
+                    cache_config=road_cache_config
                 )
                 network.add_segment(segment)
 
@@ -1275,7 +1365,7 @@ class RoadSystemAPI:
             'goal_sampling_rate': 0.1
         }
 
-        self.network = RoadNetwork()
+        self.network = RoadNetwork(config)
         self.path_planner = PathPlanner(self.config)
         self.config_loader = RoadConfigLoader()
         self.config_loader.set_path_planner(self.path_planner)
@@ -1325,7 +1415,8 @@ class RoadSystemAPI:
             waypoints=waypoints,
             width=width,
             speed_limit=speed_limit,
-            segment_id=road_id or f"straight_{len(self.network.segments)}"
+            segment_id=road_id or f"straight_{len(self.network.segments)}",
+            cache_config=self.network._road_cache_config
         )
         self.network.add_segment(segment)
         return self
@@ -1352,7 +1443,8 @@ class RoadSystemAPI:
                 waypoints=planned_path.waypoints,
                 width=width,
                 speed_limit=speed_limit,
-                segment_id=road_id
+                segment_id=road_id,
+                cache_config=self.network._road_cache_config
             )
             self.network.add_segment(segment)
             return True
@@ -1377,7 +1469,8 @@ class RoadSystemAPI:
             waypoints=waypoints,
             width=width,
             speed_limit=speed_limit,
-            segment_id=road_id
+            segment_id=road_id,
+            cache_config=self.network._road_cache_config
         )
         self.network.add_segment(segment)
         return self
