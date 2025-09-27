@@ -6,6 +6,7 @@ simulation:
   dt: 0.016         # seconds, time step for simulation (1/fps)
   hz:
     frenet_update: 10  # Frenet 좌표 업데이트 주파수 [Hz]
+    lidar_update: 20   # 라이다 스캔 주파수 [Hz]
   observation:
     vehicle_state_dim: 8
     lidar_dim: 13

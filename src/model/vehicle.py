@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Dict
 from collections import deque
 from math import degrees, pi, cos, sin, log, e, exp, sqrt
 import pygame
@@ -55,6 +55,10 @@ class VehicleState:
     _frenet_update_interval: float = field(default=0.1)  # config에서 설정 가능
     _last_frenet_position: tuple = field(default=None)
 
+    # 센서 업데이트 빈도 조절을 위한 변수들
+    _last_sensor_update_times: Dict[str, float] = field(default_factory=dict)
+    _sensor_update_intervals: Dict[str, float] = field(default_factory=dict)
+
     # 라이다 센서 데이터, 거리 배열
     lidar_data: List = field(default_factory=list)
 
@@ -73,6 +77,10 @@ class VehicleState:
     def set_frenet_update_interval(self, interval: float):
         """Frenet 업데이트 간격 설정"""
         self._frenet_update_interval = interval
+
+    def set_sensor_update_interval(self, sensor_type: str, interval: float):
+        """센서 업데이트 간격 설정"""
+        self._sensor_update_intervals[sensor_type] = interval
 
     def reset(self):
         """차량 상태 초기화"""
@@ -108,6 +116,9 @@ class VehicleState:
         # Frenet 업데이트 빈도 조절 변수 초기화
         self._last_frenet_update_time = 0.0
         self._last_frenet_position = None
+
+        # 센서 업데이트 빈도 조절 변수 초기화
+        self._last_sensor_update_times.clear()
 
         self.lidar_data.clear()
 
@@ -247,6 +258,27 @@ class VehicleState:
 
         return True
 
+    def should_update_sensor(self, sensor_type: str, current_time: float) -> bool:
+        """센서 업데이트 여부 판단"""
+        # 센서 타입에 대한 업데이트 간격이 설정되지 않은 경우 항상 업데이트
+        if sensor_type not in self._sensor_update_intervals:
+            return True
+
+        # 마지막 업데이트 시간 가져오기 (처음인 경우 0.0)
+        last_update_time = self._last_sensor_update_times.get(sensor_type, 0.0)
+
+        # 설정된 업데이트 간격
+        update_interval = self._sensor_update_intervals[sensor_type]
+
+        # 시간 간격 확인
+        time_elapsed = current_time - last_update_time
+        if time_elapsed >= update_interval:
+            # 업데이트 시간 기록
+            self._last_sensor_update_times[sensor_type] = current_time
+            return True
+
+        return False
+
     def update_position_from_rear_axle(self, cos_yaw, sin_yaw):
         """뒷바퀴 축 위치에서 heading 방향으로 이동, 차량 중심점 위치 업데이트"""
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
@@ -370,7 +402,7 @@ class VehicleState:
 
     def get_lidar_data(self):
         """라이다 센서 데이터 반환"""
-        return np.array(self.lidar_data)
+        return np.array(self.lidar_data, dtype=np.float32)
 
 # ======================
 # Vehicle Model
@@ -394,6 +426,14 @@ class Vehicle:
             frenet_interval = 1.0 / frenet_hz
             self.state.set_frenet_update_interval(frenet_interval)
 
+        # 센서 업데이트 간격 설정 (config에서 Hz 값을 읽어서 interval로 변환)
+        if simulation_config and 'hz' in simulation_config:
+            hz_config = simulation_config['hz']
+            if 'lidar_update' in hz_config:
+                lidar_hz = hz_config['lidar_update']
+                lidar_interval = 1.0 / lidar_hz
+                self.state.set_sensor_update_interval("lidar", lidar_interval)
+
         self.collision_body = RectangleObstacle(
             x=self.state.x, y=self.state.y,
             width=self.vehicle_config['length'], height=self.vehicle_config['width'],
@@ -405,6 +445,9 @@ class Vehicle:
 
         self.goal_manager = GoalManager(bounding_circle_colors=self.visual_config['bounding_circle_color'])
         self.sensor_manager = SensorManager(self, self.vehicle_config['sensors'], self.visual_config)
+
+        # 초기 센서 값 설정
+        self._update_sensor_data()
 
         # 그래픽 리소스 초기화
         self._load_graphics()
@@ -502,7 +545,7 @@ class Vehicle:
         self.sensor_manager.reset()
         self._load_graphics()
         self._update_collision_body()
-        self._update_lidar_data()
+        self._update_sensor_data()
 
     def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
         """차량 상태 업데이트"""
@@ -522,11 +565,11 @@ class Vehicle:
                 if vehicle.id != self.id:  # 자기 자신이 아닌 차량만 추가
                     objects.extend(vehicle.get_outer_circles_world())
 
-        # 차량 센서 업데이트
-        self.sensor_manager.update(dt, time_elapsed, objects)
-
-        # 센서 정보 업데이트
-        self._update_lidar_data()
+        # 차량 센서 업데이트 (조건부)
+        if self.state.should_update_sensor("lidar", time_elapsed):
+            self.sensor_manager.update(dt, time_elapsed, objects)
+            # 센서 정보 업데이트
+            self._update_sensor_data()
 
         # 도로 정보 업데이트 (시간 정보 전달)
         outside_road = self._update_road_data(road_manager, time_elapsed)
@@ -897,9 +940,9 @@ class Vehicle:
 
         return result
 
-    def _update_lidar_data(self):
+    def _update_sensor_data(self):
         """
-        라이다 센서의 noisy_distances 값을 차량 상태에 업데이트
+        센서의 값을 차량 상태에 업데이트
         """
         # 센서 매니저에서 모든 센서 가져오기
         sensors = self.sensor_manager.get_all_sensors()
