@@ -17,13 +17,11 @@ class MainMenu:
 
         # 메뉴 항목
         self.menu_items = [
-            "1. Manual Driving",
-            "2. Obstacle Driving",
-            "3. Goal Driving",
-            "4. Basic RL Driving Training(sac)",
-            "5. Basic RL Driving Training(ppo)",
-            "6. Basic RL Driving Testing",
-            "7. Quit"
+            "1. Goal Driving",
+            "2. Basic RL Driving Training(sac)",
+            "3. Basic RL Driving Training(ppo)",
+            "4. Basic RL Driving Testing",
+            "5. Quit"
         ]
 
     def show_main_menu(self):
@@ -59,30 +57,22 @@ class MainMenu:
                     return 'quit'
                 elif event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_1:
-                        # 수동 운전 모드
-                        pygame.quit()
-                        return 'manual'
-                    elif event.key == pygame.K_2:
-                        # 장애물 코스 운전 모드
-                        pygame.quit()
-                        return 'obstacles'
-                    elif event.key == pygame.K_3:
                         # 목표 주행 모드
                         pygame.quit()
                         return 'goal'
-                    elif event.key == pygame.K_4:
+                    elif event.key == pygame.K_2:
                         # 자율주행 학습 모드
                         pygame.quit()
                         return 'basic_rl_training(sac)'
-                    elif event.key == pygame.K_5:
+                    elif event.key == pygame.K_3:
                         # 자율주행 학습 모드
                         pygame.quit()
                         return 'basic_rl_training(ppo)'
-                    elif event.key == pygame.K_6:
+                    elif event.key == pygame.K_4:
                         # 자율주행 테스트 모드
                         pygame.quit()
                         return 'basic_rl_testing'
-                    elif event.key == pygame.K_7 or event.key == pygame.K_ESCAPE:
+                    elif event.key == pygame.K_5 or event.key == pygame.K_ESCAPE:
                         # 종료
                         running = False
                         return 'quit'
