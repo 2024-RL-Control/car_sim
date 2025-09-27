@@ -1,7 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 import pygame
 from src.examples.env_examples import manual_control, manual_control_with_goal, manual_control_with_obstacles
-from src.examples.env_rl import BasicRLDrivingEnv
+from src.env.env_rl import BasicRLDrivingEnv
 from src.ui.menu import MainMenu
 import cProfile
 import pstats
