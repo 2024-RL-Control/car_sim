@@ -54,9 +54,9 @@ class SubsystemManager:
         self._cached_data = OrderedDict()  # {subsystem_name: cached_result}
         self._interpolation_data = OrderedDict()  # {subsystem_name: interpolation_info}
 
-        # 캐시 액세스 시간 추적
+        # 캐시 액세스 시간 추적 (시뮬레이션 시간 기준)
         self._cache_access_times = {}  # {subsystem_name: last_access_time}
-        self._last_cleanup_time = time.time()
+        self._last_cleanup_time = 0.0  # 시뮬레이션 시간으로 초기화
 
         # Thread safety를 위한 락
         self._cache_lock = threading.RLock()
@@ -90,15 +90,16 @@ class SubsystemManager:
             self._setup_subsystem_manager(self._simulation_config)
             self._callbacks_registered = True
 
-    def _manage_cache_memory(self):
-        """캐시 메모리 관리 - LRU 정책 및 크기 제한 적용"""
-        with self._cache_lock:
-            current_time = time.time()
+    def _manage_cache_memory(self, current_simulation_time=None):
+        """캐시 메모리 관리 - LRU 정책 및 크기 제한 적용 (시뮬레이션 시간 기준)"""
+        if current_simulation_time is None:
+            return  # 시뮬레이션 시간이 제공되지 않으면 스킵
 
-            # 주기적 정리 체크
-            if current_time - self._last_cleanup_time > self._cache_config['cleanup_interval']:
-                self._cleanup_old_cache_entries(current_time)
-                self._last_cleanup_time = current_time
+        with self._cache_lock:
+            # 주기적 정리 체크 (시뮬레이션 시간 기준)
+            if current_simulation_time - self._last_cleanup_time > self._cache_config['cleanup_interval']:
+                self._cleanup_old_cache_entries(current_simulation_time)
+                self._last_cleanup_time = current_simulation_time
 
             # 캐시 크기 제한 적용
             max_size = self._cache_config['max_cache_size']
@@ -116,13 +117,13 @@ class SubsystemManager:
                 oldest_key = next(iter(self._interpolation_data))
                 del self._interpolation_data[oldest_key]
 
-    def _cleanup_old_cache_entries(self, current_time: float):
-        """오래된 캐시 항목 정리"""
+    def _cleanup_old_cache_entries(self, current_simulation_time: float):
+        """오래된 캐시 항목 정리 (시뮬레이션 시간 기준)"""
         max_age = self._cache_config.get('max_cache_age', 3600.0)
 
         expired_keys = []
         for key, last_access in self._cache_access_times.items():
-            if current_time - last_access > max_age:
+            if current_simulation_time - last_access > max_age:
                 expired_keys.append(key)
 
         for key in expired_keys:
@@ -133,13 +134,14 @@ class SubsystemManager:
             if key in self._cache_access_times:
                 del self._cache_access_times[key]
 
-    def _access_cache(self, subsystem_name: str, cache_dict: OrderedDict):
-        """캐시 액세스 시 LRU 업데이트"""
+    def _access_cache(self, subsystem_name: str, cache_dict: OrderedDict, current_simulation_time: float = None):
+        """캐시 액세스 시 LRU 업데이트 (시뮬레이션 시간 기준)"""
         if subsystem_name in cache_dict:
             # LRU 업데이트 - 항목을 맨 뒤로 이동
             value = cache_dict.pop(subsystem_name)
             cache_dict[subsystem_name] = value
-            self._cache_access_times[subsystem_name] = time.time()
+            if current_simulation_time is not None:
+                self._cache_access_times[subsystem_name] = current_simulation_time
             return value
         return None
 
@@ -279,7 +281,7 @@ class SubsystemManager:
         """서브시스템의 초기화 콜백 함수 등록"""
         self._initialization_callbacks[subsystem_name] = init_callback
 
-    def initialize_subsystem(self, subsystem_name: str, *args, **kwargs):
+    def initialize_subsystem(self, subsystem_name: str, current_simulation_time: float = 0.0, *args, **kwargs):
         """서브시스템 초기화 실행"""
         # 콜백이 등록되지 않았다면 지연 등록 시도
         self._ensure_callbacks_registered()
@@ -289,7 +291,7 @@ class SubsystemManager:
                 result = self._initialization_callbacks[subsystem_name](*args, **kwargs)
                 with self._cache_lock:
                     self._cached_data[subsystem_name] = result
-                    self._cache_access_times[subsystem_name] = time.time()
+                    self._cache_access_times[subsystem_name] = current_simulation_time
                 return result
             except Exception as e:
                 print(f"Warning: Error initializing {subsystem_name}: {e}")
@@ -400,8 +402,8 @@ class SubsystemManager:
         # 콜백이 등록되지 않았다면 지연 등록 시도
         self._ensure_callbacks_registered()
 
-        # 메모리 관리 수행
-        self._manage_cache_memory()
+        # 메모리 관리 수행 (시뮬레이션 시간 기준)
+        self._manage_cache_memory(current_time)
 
         should_update = self.should_update(subsystem_name, current_time, velocity, position, context)
 
@@ -419,23 +421,23 @@ class SubsystemManager:
             except Exception as e:
                 print(f"Warning: Error executing update for {subsystem_name}: {e}")
                 # 오류 발생 시 캐시된 데이터 반환 시도
-                return self.get_cached_data(subsystem_name)
+                return self.get_cached_data(subsystem_name, current_time)
         else:
             # 캐시된 데이터 반환 (보간 가능)
             return self._get_cached_or_interpolated_data(
                 subsystem_name, current_time, position, context
             )
 
-    def get_cached_data(self, subsystem_name: str):
+    def get_cached_data(self, subsystem_name: str, current_simulation_time: float = None):
         """캐시된 데이터 반환"""
         with self._cache_lock:
-            return self._access_cache(subsystem_name, self._cached_data)
+            return self._access_cache(subsystem_name, self._cached_data, current_simulation_time)
 
     def _get_cached_or_interpolated_data(self, subsystem_name: str, current_time: float,
                                        position: tuple = None, context: dict = None):
         """캐시된 데이터 또는 보간된 데이터 반환"""
         with self._cache_lock:
-            cached_data = self._access_cache(subsystem_name, self._cached_data)
+            cached_data = self._access_cache(subsystem_name, self._cached_data, current_time)
 
         if cached_data is None:
             return None
@@ -640,7 +642,7 @@ class SubsystemManager:
             self._cached_data.clear()
             self._interpolation_data.clear()
             self._cache_access_times.clear()
-            self._last_cleanup_time = time.time()
+            self._last_cleanup_time = 0.0  # 시뮬레이션 시간으로 초기화
 
     def reset_and_reinitialize(self, *args, **kwargs):
         """모든 서브시스템 초기화 후 재초기화 실행"""
@@ -663,6 +665,101 @@ class SubsystemManager:
                 'cleanup_interval': self._cache_config['cleanup_interval'],
                 'last_cleanup_time': self._last_cleanup_time
             }
+
+    def validate_timing_configuration(self, dt: float, hz_config: Dict[str, float]) -> Dict[str, Any]:
+        """
+        시뮬레이션 타이밍 설정의 일관성 검증
+
+        Args:
+            dt: 고정 시뮬레이션 시간 간격 (초)
+            hz_config: 서브시스템별 Hz 설정 딕셔너리
+
+        Returns:
+            검증 결과 딕셔너리
+        """
+        validation_result = {
+            'is_valid': True,
+            'warnings': [],
+            'errors': [],
+            'recommendations': []
+        }
+
+        simulation_hz = 1.0 / dt if dt > 0 else float('inf')
+
+        # Hz 설정 검증
+        for subsystem_name, subsystem_hz in hz_config.items():
+            # 1. 시뮬레이션 주파수보다 높은 서브시스템 Hz 확인
+            if subsystem_hz > simulation_hz:
+                validation_result['warnings'].append(
+                    f"{subsystem_name}: {subsystem_hz}Hz는 시뮬레이션 주파수 {simulation_hz:.1f}Hz보다 높습니다. "
+                    f"실제로는 최대 {simulation_hz:.1f}Hz로 제한됩니다."
+                )
+                validation_result['recommendations'].append(
+                    f"{subsystem_name}: Hz를 {simulation_hz:.1f} 이하로 설정하는 것을 권장합니다."
+                )
+
+            # 2. 비효율적인 Hz 설정 확인 (시뮬레이션 Hz의 배수가 아닌 경우)
+            if simulation_hz % subsystem_hz != 0 and subsystem_hz < simulation_hz:
+                closest_efficient_hz = simulation_hz / round(simulation_hz / subsystem_hz)
+                validation_result['recommendations'].append(
+                    f"{subsystem_name}: 현재 {subsystem_hz}Hz보다 {closest_efficient_hz:.1f}Hz가 더 효율적입니다."
+                )
+
+            # 3. 너무 낮은 Hz 설정 경고 (안전 관련 서브시스템)
+            safety_critical_systems = ['collision_check', 'lidar_update']
+            if subsystem_name in safety_critical_systems and subsystem_hz < 10:
+                validation_result['warnings'].append(
+                    f"{subsystem_name}: {subsystem_hz}Hz는 안전 관련 시스템으로는 너무 낮을 수 있습니다."
+                )
+
+        # 4. 전체적인 성능 영향 평가
+        total_operations_per_sim_step = sum(
+            min(hz / simulation_hz, 1.0) for hz in hz_config.values()
+        )
+
+        if total_operations_per_sim_step > 0.8:
+            validation_result['warnings'].append(
+                f"서브시스템들의 총 연산 부하({total_operations_per_sim_step:.2f})가 높습니다. "
+                "성능 저하가 발생할 수 있습니다."
+            )
+
+        # 검증 결과 종합
+        if validation_result['warnings'] or validation_result['errors']:
+            validation_result['is_valid'] = len(validation_result['errors']) == 0
+
+        return validation_result
+
+    def print_timing_validation_report(self, dt: float, hz_config: Dict[str, float]):
+        """타이밍 검증 결과를 보기 좋게 출력"""
+        result = self.validate_timing_configuration(dt, hz_config)
+
+        print("=== 시뮬레이션 타이밍 설정 검증 결과 ===")
+        print(f"시뮬레이션 dt: {dt:.4f}초 ({1/dt:.1f}Hz)")
+        print(f"전체 검증 상태: {'양호' if result['is_valid'] else '문제 발견'}")
+        print()
+
+        if result['errors']:
+            print("오류:")
+            for error in result['errors']:
+                print(f"  - {error}")
+            print()
+
+        if result['warnings']:
+            print("경고:")
+            for warning in result['warnings']:
+                print(f"  - {warning}")
+            print()
+
+        if result['recommendations']:
+            print("권장사항:")
+            for recommendation in result['recommendations']:
+                print(f"  - {recommendation}")
+            print()
+
+        print("서브시스템별 Hz 설정:")
+        for name, hz in hz_config.items():
+            efficiency = "효율적" if (1/dt) % hz == 0 else "비효율적"
+            print(f"  - {name}: {hz}Hz ({efficiency})")
 
 # ======================
 # State Management
@@ -862,11 +959,11 @@ class VehicleState:
         self.x = self.rear_axle_x + self.half_wheelbase * cos_yaw
         self.y = self.rear_axle_y + self.half_wheelbase * sin_yaw
 
-    def update_state_history(self):
+    def update_state_history(self, simulation_time: float = None):
         """현재 상태 복사본을 이력에 추가"""
         # 현재 상태의 중요 필드들을 딕셔너리로 복사
         state_snapshot = {
-            'timestamp': time.time(),  # 타임스탬프
+            'timestamp': simulation_time if simulation_time is not None else 0.0,  # 시뮬레이션 시간 타임스탬프
             'x': self.rear_axle_x,
             'y': self.rear_axle_y,
             'yaw': self.yaw,
@@ -1133,7 +1230,7 @@ class Vehicle:
     def _update_road_data_internal(self, road_manager, current_time: float = None):
         """내부용 road data 업데이트 - 서브 시스템 관리자에서 호출"""
         if current_time is None:
-            current_time = time.time()
+            current_time = 0.0  # 시뮬레이션 시간 기본값
 
         # road_manager를 통해 Frenet 좌표 계산
         frenet_point, frenet_d, target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
