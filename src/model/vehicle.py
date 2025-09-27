@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List
 from collections import deque
-from math import degrees, pi, cos, sin, log, e, exp
+from math import degrees, pi, cos, sin, log, e, exp, sqrt
 import pygame
 import numpy as np
 import time
@@ -52,7 +52,7 @@ class VehicleState:
 
     # Frenet 업데이트 빈도 조절을 위한 변수들
     _last_frenet_update_time: float = field(default=0.0)
-    _frenet_update_interval: float = field(default=0.1)  # 100ms (10Hz)
+    _frenet_update_interval: float = field(default=0.1)  # config에서 설정 가능
     _last_frenet_position: tuple = field(default=None)
 
     # 라이다 센서 데이터, 거리 배열
@@ -69,6 +69,10 @@ class VehicleState:
 
     # 환경 속성
     terrain_type: str = "asphalt"  # 현재 지형 유형
+
+    def set_frenet_update_interval(self, interval: float):
+        """Frenet 업데이트 간격 설정"""
+        self._frenet_update_interval = interval
 
     def reset(self):
         """차량 상태 초기화"""
@@ -213,22 +217,32 @@ class VehicleState:
         self.rear_axle_x = self.x - self.half_wheelbase * cos(self.yaw)
         self.rear_axle_y = self.y - self.half_wheelbase * sin(self.yaw)
 
-    def should_update_frenet(self, current_time: float) -> bool:
-        """Frenet 좌표 업데이트 여부 판단"""
+    def should_update_frenet(self, current_time: float, velocity: float = 0.0) -> bool:
+        """Frenet 좌표 업데이트 여부 판단 - 적응적 업데이트 빈도"""
+        # 속도에 따른 적응적 업데이트 간격 조정
+        base_interval = self._frenet_update_interval
+        if velocity > 10.0:  # 고속 주행 시 더 자주 업데이트
+            adaptive_interval = base_interval * 0.5
+        elif velocity < 2.0:  # 저속 주행 시 덜 자주 업데이트
+            adaptive_interval = base_interval * 2.0
+        else:
+            adaptive_interval = base_interval
+
         # 시간 간격 확인
         time_elapsed = current_time - self._last_frenet_update_time
-        if time_elapsed < self._frenet_update_interval:
+        if time_elapsed < adaptive_interval:
             return False
 
-        # 위치 변화 확인 (너무 작은 변화면 업데이트 생략)
+        # 위치 변화 확인 (속도에 따른 적응적 기준)
         if self._last_frenet_position is not None:
             current_pos = (self.x, self.y)
             dx = current_pos[0] - self._last_frenet_position[0]
             dy = current_pos[1] - self._last_frenet_position[1]
             distance_moved = (dx*dx + dy*dy)**0.5
 
-            # 이동 거리가 0.1m 미만이면 업데이트 생략
-            if distance_moved < 0.1:
+            # 속도에 따른 적응적 거리 기준
+            min_distance = max(0.05, min(0.3, velocity * 0.02))  # 0.05m ~ 0.3m
+            if distance_moved < min_distance:
                 return False
 
         return True
@@ -240,21 +254,50 @@ class VehicleState:
 
     def update_road_data(self, road_manager, current_time: float = None):
         """
-        도로 데이터 기반 차량 상태 업데이트 - 빈도 조절 적용
+        도로 데이터 기반 차량 상태 업데이트 - 적응적 빈도 및 보간 적용
         """
         if current_time is None:
             current_time = time.time()
 
+        # 현재 속도 계산 (적응적 업데이트용)
+        current_velocity = sqrt(self.vel_long**2 + self.vel_lat**2)
+
         # Frenet 좌표 업데이트 여부 확인
-        if not self.should_update_frenet(current_time):
-            # 기존 데이터 사용, outside_road만 간단히 체크
-            if self.frenet_d is not None:
-                road_width = 6.0  # 기본 도로 폭 (설정으로부터 가져올 수도 있음)
+        if not self.should_update_frenet(current_time, current_velocity):
+            # 보간을 사용한 부드러운 전환
+            if (self.frenet_d is not None and self.frenet_point is not None and
+                self._last_frenet_position is not None):
+
+                # 이전 위치에서 현재 위치로의 변화량 계산
+                dx = self.x - self._last_frenet_position[0]
+                dy = self.y - self._last_frenet_position[1]
+
+                # 도로 방향으로의 투영 (간단한 보간)
+                if self.frenet_point and len(self.frenet_point) >= 3:
+                    road_yaw = self.frenet_point[2]
+
+                    # 도로 방향과 수직 방향의 단위 벡터
+                    road_dir_x = cos(road_yaw)
+                    road_dir_y = sin(road_yaw)
+                    perp_dir_x = -sin(road_yaw)
+                    perp_dir_y = cos(road_yaw)
+
+                    # 현재 위치에서의 d 값 보간 계산
+                    ref_x, ref_y = self.frenet_point[0], self.frenet_point[1]
+                    to_vehicle_x = self.x - ref_x
+                    to_vehicle_y = self.y - ref_y
+
+                    # 수직 거리 계산 (좌측이 양수)
+                    interpolated_d = to_vehicle_x * perp_dir_x + to_vehicle_y * perp_dir_y
+
+                    # 보간된 값으로 업데이트
+                    self.frenet_d = interpolated_d
+
+                road_width = 8.0  # 기본 도로 폭
                 outside_road = abs(self.frenet_d) > (road_width / 2)
                 return outside_road
-            # Frenet 데이터가 없으면 정상적으로 계산
 
-        # Frenet 좌표 업데이트
+        # 완전한 Frenet 좌표 업데이트
         self.frenet_point, self.frenet_d, self.target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.x, self.y, self.yaw))
 
         # 업데이트 시간과 위치 기록
@@ -335,14 +378,21 @@ class VehicleState:
 class Vehicle:
     """차량 모델링, 제어 및 시각화를 담당하는 클래스"""
 
-    def __init__(self, vehicle_id=None, vehicle_config=None, physics_config=None, visual_config=None):
+    def __init__(self, vehicle_id=None, vehicle_config=None, physics_config=None, visual_config=None, simulation_config=None):
         """차량 객체 초기화"""
         self.id = vehicle_id if vehicle_id is not None else id(self)
         self.vehicle_config = vehicle_config
         self.physics_config = physics_config
         self.visual_config = visual_config
+        self.simulation_config = simulation_config
         self.state = VehicleState()
         self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
+
+        # Frenet 업데이트 간격 설정 (config에서 Hz 값을 읽어서 interval로 변환)
+        if simulation_config and 'hz' in simulation_config and 'frenet_update' in simulation_config['hz']:
+            frenet_hz = simulation_config['hz']['frenet_update']
+            frenet_interval = 1.0 / frenet_hz
+            self.state.set_frenet_update_interval(frenet_interval)
 
         self.collision_body = RectangleObstacle(
             x=self.state.x, y=self.state.y,
@@ -964,7 +1014,7 @@ class Vehicle:
 class VehicleManager:
     """차량들을 관리하는 클래스"""
 
-    def __init__(self, road_manager, vehicle_config=None, physics_config=None, visual_config=None):
+    def __init__(self, road_manager, vehicle_config=None, physics_config=None, visual_config=None, simulation_config=None):
         """
         차량 관리자 초기화
 
@@ -972,6 +1022,7 @@ class VehicleManager:
             vehicle_config: 차량 설정
             physics_config: 물리 설정
             visual_config: 시각화 설정
+            simulation_config: 시뮬레이션 설정
         """
         self.vehicles = []  # 차량 목록
         self.vehicle_map = {}  # {vehicle_id: vehicle} 매핑
@@ -990,8 +1041,9 @@ class VehicleManager:
         self.vehicle_config = vehicle_config
         self.physics_config = physics_config
         self.visual_config = visual_config
+        self.simulation_config = simulation_config
 
-    def create_vehicle(self, x=0.0, y=0.0, yaw=None, vehicle_id=None, vehicle_config=None,physics_config=None, visual_config=None):
+    def create_vehicle(self, x=0.0, y=0.0, yaw=None, vehicle_id=None, vehicle_config=None, physics_config=None, visual_config=None, simulation_config=None):
         """
         새 차량 생성 및 추가
 
@@ -1003,6 +1055,7 @@ class VehicleManager:
             vehicle_config: 차량 설정 (None이면 기본값 사용)
             physics_config: 물리 설정 (None이면 기본값 사용)
             visual_config: 시각화 설정 (None이면 기본값 사용)
+            simulation_config: 시뮬레이션 설정 (None이면 기본값 사용)
 
         Returns:
             생성된 차량 객체
@@ -1017,13 +1070,15 @@ class VehicleManager:
         v_config = vehicle_config or self.vehicle_config
         p_config = physics_config or self.physics_config
         vis_config = visual_config or self.visual_config
+        sim_config = simulation_config or self.simulation_config
 
         # 차량 생성
         vehicle = Vehicle(
             vehicle_id=vehicle_id,
             vehicle_config=v_config,
             physics_config=p_config,
-            visual_config=vis_config
+            visual_config=vis_config,
+            simulation_config=sim_config
         )
 
         # 위치 설정
@@ -1384,7 +1439,8 @@ class VehicleManager:
                     vehicle_id=vehicle_id,
                     vehicle_config=vehicle_config,
                     physics_config=physics_config,
-                    visual_config=visual_config
+                    visual_config=visual_config,
+                    simulation_config=self.simulation_config
                 )
 
                 # 상태 복원 및 목적지 정보 복원

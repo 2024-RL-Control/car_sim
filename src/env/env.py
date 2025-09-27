@@ -59,7 +59,8 @@ class CarSimulatorEnv(gym.Env):
             road_manager=self.road_manager,
             vehicle_config=self.config['vehicle'],
             physics_config=self.config['physics'],
-            visual_config=self.config['visualization']
+            visual_config=self.config['visualization'],
+            simulation_config=self.config['simulation']
         )
 
         # 초기 차량들 생성
@@ -300,7 +301,7 @@ class CarSimulatorEnv(gym.Env):
         self.obstacle_manager.clear_obstacles()
 
         # 도로 시스템 초기화
-        self.road_manager.clear_network()
+        self.road_manager.reset()
 
         return self._get_obs()
 
