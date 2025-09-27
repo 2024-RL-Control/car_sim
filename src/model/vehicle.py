@@ -502,6 +502,7 @@ class Vehicle:
         self.sensor_manager.reset()
         self._load_graphics()
         self._update_collision_body()
+        self._update_lidar_data()
 
     def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
         """차량 상태 업데이트"""
@@ -906,11 +907,11 @@ class Vehicle:
         # 라이다 센서 찾기
         for sensor_id, sensor in sensors.items():
             if sensor.sensor_type == 'LidarSensor':
-                # 라이다 데이터 가져오기
+                # 라이다 데이터 가져오기 (기본값 포함)
                 lidar_data = sensor.get_data()
-                if lidar_data:
-                    # noisy_distances 추출하여 상태에 저장
-                    self.state.update_lidar_data(lidar_data)
+                # 이제 get_data()는 항상 데이터 반환 (기본값 포함)
+                self.state.update_lidar_data(lidar_data)
+                break  # 첫 번째 라이다 센서만 사용
 
     def _draw_history_trajectory(self, screen, world_to_screen_func):
         """차량 궤적 그리기"""

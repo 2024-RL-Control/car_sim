@@ -459,10 +459,12 @@ class LidarSensor(BaseSensor):
         최신 스캔 데이터 반환
 
         Returns:
-            List[float]: 정규화된 최신 라이다 스캔 거리 데이터 또는 None
+            List[float]: 정규화된 최신 라이다 스캔 거리 데이터 또는 기본값
         """
         if not self.current_data:
-            return None
+            # 라이다 데이터가 없을 경우 기본값 반환 (최대 거리로 채움)
+            return [1.0] * self.num_samples
+
         ranges = self.current_data.ranges
         distances = [measurement.distance / self.max_range for measurement in ranges]
         return distances

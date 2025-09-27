@@ -294,17 +294,13 @@ class BasicRLDrivingEnv(gym.Env):
         while not success:
             try:
                 # 환경 초기화
-                _ = self.env.reset(seed=seed, options=options)
+                observations = self.env.reset(seed=seed, options=options)
 
                 # 장애물, 차량, 목적지 다시 설정
                 self.setup_environment()
 
                 # 에이전트 활성화 상태 초기화
                 self.active_agents = [True] * self.num_vehicles
-
-                # 초기 행동으로 0을 사용하여 첫 번째 스텝 실행 (LIDAR, 궤적 데이터 초기화 필요)
-                actions = np.zeros((self.num_vehicles, 3))
-                observations, _, _, _, _ = self.step(actions)
 
                 success = True
             except Exception as e:
