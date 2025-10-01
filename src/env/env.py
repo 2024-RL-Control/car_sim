@@ -394,8 +394,9 @@ class CarSimulatorEnv(gym.Env):
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
         cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width'])
+        cos_heading_error, sin_heading_error = state.encoding_angle(state.heading_error)
 
-        # 기본 차량 상태 (8, )
+        # 기본 차량 상태 (10, )
         obs = np.array([
             progress,               # -1 ~ 1
             # state.steer,            # -1 ~ 1
@@ -410,6 +411,8 @@ class CarSimulatorEnv(gym.Env):
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
+            cos_heading_error,      # -1 ~ 1
+            sin_heading_error       # -1 ~ 1
         ], dtype=np.float32)
 
         # (2, 2), (cos_diff, sin_diff)

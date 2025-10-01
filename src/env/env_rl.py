@@ -218,6 +218,7 @@ class BasicRLDrivingEnv(gym.Env):
         self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
         print(f"사용 중인 디바이스: {self.device}")
 
         # 환경 바운더리 설정
@@ -627,10 +628,10 @@ class BasicRLDrivingEnv(gym.Env):
         env = Monitor(dummy_env, log_dir)
         env = DummyVecEnv([lambda: env])
 
-        # 신경망 아키텍처 설정
+        # 신경망 아키텍처 설정 (강화학습 개선)
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [128, 64, 64, 32, 16],
+            "net_arch": [128, 128, 64, 32],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
@@ -638,17 +639,17 @@ class BasicRLDrivingEnv(gym.Env):
             # "features_extractor_class": CustomFeatureExtractor,
             # # 추출기 아키텍처
             # "features_extractor_kwargs": {
-            #     "net_arch": [32, 32]
+            #     "net_arch": [32, 32, 32]
             # },
             # "share_features_extractor": True,
         }
 
         if algorithm == 'sac':
-            # SAC 하이퍼파라미터 설정 (최적화)
-            buffer_size = self.max_step // 2  # 더 큰 버퍼
-            learning_rate = 1e-3  # 더 높은 학습률
-            batch_size = 256
-            learning_starts = 20000  # 더 빠른 학습 시작
+            # SAC 하이퍼파라미터 설정 (강화학습 개선)
+            buffer_size = self.max_step // 2  # 더 큰 버퍼 (//4 -> //2)
+            learning_rate = 1e-3  # 안정적인 학습률 (3e-3 -> 1e-3)
+            batch_size = 128  # 더 작은 배치 사이즈로 안정성 향상 (256 -> 128)
+            learning_starts = 5000  # 더 빠른 학습 시작 (20000 -> 5000)
             n_envs = 1
 
             # 공유 리플레이 버퍼 생성
@@ -661,7 +662,7 @@ class BasicRLDrivingEnv(gym.Env):
                 handle_timeout_termination=False
             )
 
-            # 커스텀 SAC 모델 생성
+            # 커스텀 SAC 모델 생성 (강화학습 개선)
             model = SACVehicleAlgorithm(
                 "MlpPolicy",
                 env,
@@ -670,12 +671,12 @@ class BasicRLDrivingEnv(gym.Env):
                 buffer_size=0,
                 learning_starts=learning_starts,
                 batch_size=batch_size,
-                tau=0.003,
-                gamma=0.995,
-                ent_coef=0.1,
-                train_freq=10,
-                gradient_steps=5,
-                target_update_interval=12,
+                tau=0.005,  # 타겟 네트워크 업데이트 속도 조정 (0.003 -> 0.005)
+                gamma=0.99,  # 할인 인수 조정 (0.995 -> 0.99)
+                ent_coef=0.05,  # 엔트로피 계수 감소로 안정성 향상 (0.1 -> 0.05)
+                train_freq=4,  # 훈련 빈도 증가 (10 -> 4)
+                gradient_steps=2,  # 그라디언트 스텝 감소 (5 -> 2)
+                target_update_interval=2,  # 타겟 업데이트 간격 감소 (12 -> 2)
                 verbose=1,
                 tensorboard_log=log_dir,
                 device=self.device

@@ -799,6 +799,7 @@ class VehicleState:
     frenet_d: float = 0.0
     frenet_point: tuple = None
     target_vel_long: float = 0.0
+    heading_error: float = 0.0
 
     # 라이다 센서 데이터, 거리 배열
     lidar_data: List = field(default_factory=list)
@@ -845,6 +846,7 @@ class VehicleState:
         self.frenet_d = 0.0
         self.frenet_point = None
         self.target_vel_long = 0.0
+        self.heading_error = 0.0
 
         self.lidar_data.clear()
 
@@ -1233,12 +1235,13 @@ class Vehicle:
             current_time = 0.0  # 시뮬레이션 시간 기본값
 
         # road_manager를 통해 Frenet 좌표 계산
-        frenet_point, frenet_d, target_vel_long, outside_road = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
+        frenet_point, frenet_d, target_vel_long, outside_road, heading_error = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
 
         # 상태 업데이트
         self.state.frenet_point = frenet_point
         self.state.frenet_d = frenet_d
         self.state.target_vel_long = target_vel_long
+        self.state.heading_error = heading_error
 
         return outside_road
 

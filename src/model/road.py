@@ -56,8 +56,6 @@ class PlannedPath:
     """계획된 경로 정보"""
     waypoints: List[Tuple[float, float, float]]
     total_length: float
-    max_curvature: float
-    recommended_speed: float
     planning_mode: str
 
 
@@ -90,6 +88,7 @@ class LinearRoadSegment:
         self._cached_segment_lengths = None
         self._cached_cumulative_lengths = None
         self._cached_boundary_lines = None
+        self._cached_curvatures = None  # 각 waypoint에서의 곡률
 
         # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
         self._cache_config = {
@@ -115,6 +114,7 @@ class LinearRoadSegment:
             self._cached_segment_lengths = []
             self._cached_cumulative_lengths = [0.0]
             self._cached_total_length = 0.0
+            self._cached_curvatures = [0.0]
             return
 
         # 세그먼트 길이 계산
@@ -132,9 +132,64 @@ class LinearRoadSegment:
         self._cached_cumulative_lengths = cumulative
         self._cached_total_length = cumulative[-1]
 
+        # 곡률 계산 (Menger curvature)
+        self._cached_curvatures = self._compute_curvatures()
+
     def get_length(self) -> float:
         """총 길이 반환"""
         return self._cached_total_length or 0.0
+
+    def _compute_curvatures(self) -> List[float]:
+        """각 waypoint에서의 곡률 계산 (Menger curvature)"""
+        n = len(self.waypoints)
+
+        if n < 3:
+            return [0.0] * n
+
+        curvatures = []
+
+        for i in range(n):
+            if i == 0:
+                # 첫 번째 점: 다음 세그먼트의 곡률 사용
+                curvatures.append(self._calculate_curvature_at_index(1))
+            elif i == n - 1:
+                # 마지막 점: 이전 세그먼트의 곡률 사용
+                curvatures.append(self._calculate_curvature_at_index(n - 2))
+            else:
+                # 중간 점: i-1, i, i+1 세 점의 곡률 계산
+                curvatures.append(self._calculate_curvature_at_index(i))
+
+        return curvatures
+
+    def _calculate_curvature_at_index(self, i: int) -> float:
+        """인덱스 i를 중심으로 한 세 점의 곡률 계산"""
+        if i <= 0 or i >= len(self.waypoints) - 1:
+            return 0.0
+
+        p1 = self.waypoints[i - 1]
+        p2 = self.waypoints[i]
+        p3 = self.waypoints[i + 1]
+
+        # 세 변의 길이 계산
+        a = math.sqrt((p2[0] - p1[0])**2 + (p2[1] - p1[1])**2)  # p1-p2
+        b = math.sqrt((p3[0] - p2[0])**2 + (p3[1] - p2[1])**2)  # p2-p3
+        c = math.sqrt((p3[0] - p1[0])**2 + (p3[1] - p1[1])**2)  # p1-p3
+
+        # 너무 짧은 세그먼트는 0 반환
+        if a < 0.01 or b < 0.01 or c < 0.01:
+            return 0.0
+
+        # 삼각형 면적 계산 (외적 사용)
+        cross_product = abs((p2[0] - p1[0]) * (p3[1] - p1[1]) -
+                          (p2[1] - p1[1]) * (p3[0] - p1[0]))
+        area = 0.5 * cross_product
+
+        # Menger curvature: k = 4*Area / (a*b*c)
+        denominator = a * b * c
+        if denominator > 1e-10:
+            return 4.0 * area / denominator
+
+        return 0.0
 
     def sample_centerline(self, interval: float = 0.5) -> List[Tuple[float, float, float]]:
         """중심선을 지정된 간격으로 샘플링"""
@@ -374,6 +429,72 @@ class LinearRoadSegment:
         """점이 도로 위에 있는지 확인"""
         _, distance, _ = self.project_point(point)
         return distance <= self.width / 2
+
+    def get_curvature_at_s(self, s: float) -> float:
+        """호장 길이 s에서의 곡률 반환 (선형 보간)"""
+        if not self._cached_curvatures or not self._cached_cumulative_lengths:
+            return 0.0
+
+        # s를 범위 내로 제한
+        s = max(0.0, min(s, self._cached_total_length))
+
+        # s에 해당하는 세그먼트 찾기
+        for i in range(len(self._cached_cumulative_lengths) - 1):
+            s_start = self._cached_cumulative_lengths[i]
+            s_end = self._cached_cumulative_lengths[i + 1]
+
+            if s_start <= s <= s_end:
+                # 세그먼트 내에서의 비율 계산
+                segment_length = s_end - s_start
+                if segment_length < 1e-10:
+                    return self._cached_curvatures[i]
+
+                # 선형 보간
+                t = (s - s_start) / segment_length
+                curvature_start = self._cached_curvatures[i]
+                curvature_end = self._cached_curvatures[i + 1]
+
+                return curvature_start + t * (curvature_end - curvature_start)
+
+        # 끝점인 경우
+        return self._cached_curvatures[-1] if self._cached_curvatures else 0.0
+
+    def get_max_curvature_in_range(self, s_start: float, s_end: float) -> float:
+        """호장 길이 범위 [s_start, s_end]에서의 최대 곡률 반환 (lookahead)
+
+        Args:
+            s_start: 시작 호장 길이 [m]
+            s_end: 종료 호장 길이 [m]
+
+        Returns:
+            범위 내 최대 곡률 [1/m]
+        """
+        if not self._cached_curvatures or not self._cached_cumulative_lengths:
+            return 0.0
+
+        # 범위를 도로 길이 내로 제한
+        s_start = max(0.0, min(s_start, self._cached_total_length))
+        s_end = max(0.0, min(s_end, self._cached_total_length))
+
+        if s_start >= s_end:
+            return self.get_curvature_at_s(s_start)
+
+        max_curvature = 0.0
+
+        # 범위에 포함되는 waypoint들의 곡률 확인
+        for i in range(len(self._cached_cumulative_lengths)):
+            s_i = self._cached_cumulative_lengths[i]
+
+            # waypoint가 범위 내에 있으면 곡률 확인
+            if s_start <= s_i <= s_end:
+                max_curvature = max(max_curvature, self._cached_curvatures[i])
+
+        # 시작점과 끝점의 보간된 곡률도 확인
+        curvature_start = self.get_curvature_at_s(s_start)
+        curvature_end = self.get_curvature_at_s(s_end)
+        max_curvature = max(max_curvature, curvature_start, curvature_end)
+
+        return max_curvature
 
     def get_bounding_box(self) -> Tuple[float, float, float, float]:
         """바운딩 박스 계산"""
@@ -722,6 +843,7 @@ class PathPlanner:
         self.default_speed = self.config.get('default_speed', 15.0)
         self.min_speed = self.config.get('min_speed', 5.0)
         self.max_speed = self.config.get('max_speed', 25.0)
+        self.max_lateral_accel = self.config.get('max_lateral_acceleration', 4.0)
 
     def plan_path(self, start: Tuple[float, float, float],
                  end: Tuple[float, float, float],
@@ -730,23 +852,37 @@ class PathPlanner:
         """경로 계획 메인 메서드"""
 
         if mode == 'auto':
-            # 자동 모드 선택
+            # 자동 모드 선택 (로컬 좌표계 기반 4사분면)
             dx = end[0] - start[0]
             dy = end[1] - start[1]
             distance = math.sqrt(dx*dx + dy*dy)
 
-            # 목표 방향과 시작 방향의 차이
-            target_yaw = math.atan2(dy, dx)
-            yaw_diff = abs(normalize_angle(target_yaw - start[2]))
+            # 로컬 좌표계 변환 (시작점 기준)
+            cos_yaw = math.cos(-start[2])
+            sin_yaw = math.sin(-start[2])
+            dx_local = dx * cos_yaw - dy * sin_yaw
+            dy_local = dx * sin_yaw + dy * cos_yaw
+
+            # 로컬 좌표계에서 목적지 방향 (차량 진행 방향 기준)
+            local_target_angle = math.atan2(dy_local, dx_local)
+
+            # 출발지와 목적지의 yaw 차이
+            yaw_diff = abs(normalize_angle(end[2] - start[2]))
 
             if len(obstacles) > 0:
                 mode = 'rrt'
-            elif yaw_diff < math.radians(5):  # 5도 이내
-                mode = 'straight'
-            elif distance > 20 and yaw_diff < math.radians(45):  # 45도 이내, 긴 거리
-                mode = 'curve'
-            else:
+            elif dy_local < 0:  # 3,4사분면 (뒤쪽)
                 mode = 'rrt'
+            elif abs(local_target_angle) <= math.radians(5) and yaw_diff <= math.radians(5):
+                # 목적지가 앞쪽 -5도~5도 & yaw 차이 5도 이내
+                mode = 'straight'
+            elif abs(local_target_angle) <= math.radians(60) and yaw_diff <= math.radians(90):
+                # 목적지가 앞쪽 -60도~60도 & yaw 차이 90도 이내
+                mode = 'curve'
+            else:  # 1,2사분면 & 그 외
+                mode = 'rrt'
+
+        print(f"Path planning mode: {mode}")
 
         if mode == 'rrt':
             waypoints, total_length = self._rrt_with_dubins(start, end, obstacles)
@@ -758,15 +894,9 @@ class PathPlanner:
         if not waypoints:
             return None
 
-        # 곡률과 권장 속도 계산
-        max_curvature = self._calculate_max_curvature(waypoints)
-        recommended_speed = self._calculate_recommended_speed(waypoints)
-
         return PlannedPath(
             waypoints=waypoints,
             total_length=total_length,
-            max_curvature=max_curvature,
-            recommended_speed=recommended_speed,
             planning_mode=mode
         )
 
@@ -855,8 +985,24 @@ class PathPlanner:
 
         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
 
+        base_step = self.config.get("base_step_size", 1.0)
+        min_factor = self.config.get("min_step_factor", 1.0)
+        max_factor = self.config.get("max_step_factor", 10.0)
+        max_distance = self.config.get("max_distance", 50.0)  # 기준 거리 [m]
+
         for i_iter in range(self.config.get("max_iterations", 1000)):
-            current_step_size = self.config.get("base_step_size", 10.0)
+            # 동적 step size 계산 (목표까지의 거리 기반)
+            closest_node = min(nodes.keys(),
+                             key=lambda n: math.sqrt((n[0]-goal[0])**2 + (n[1]-goal[1])**2))
+            distance_to_goal = math.sqrt((closest_node[0]-goal[0])**2 + (closest_node[1]-goal[1])**2)
+
+            # 거리 비율 계산 (0~1)
+            distance_ratio = min(distance_to_goal / max_distance, 1.0)
+
+            # step_factor 계산 (가까울수록 작게, 멀수록 크게)
+            step_factor = min_factor + (max_factor - min_factor) * distance_ratio
+            # 최종 step size
+            current_step_size = base_step * step_factor
 
             if random.random() < self.config.get("goal_sampling_rate", 0.1):
                 sample = goal
@@ -962,42 +1108,6 @@ class PathPlanner:
                     waypoints.append((point[0], point[1], point[2] if len(point) > 2 else 0.0))
 
         return waypoints, total_length
-
-    def _calculate_max_curvature(self, waypoints):
-        """최대 곡률 계산"""
-        if len(waypoints) < 3:
-            return 0.0
-
-        max_curvature = 0.0
-
-        for i in range(1, len(waypoints) - 1):
-            p1 = waypoints[i-1]
-            p2 = waypoints[i]
-            p3 = waypoints[i+1]
-
-            v1 = (p2[0] - p1[0], p2[1] - p1[1])
-            v2 = (p3[0] - p2[0], p3[1] - p2[1])
-
-            len_v1 = math.sqrt(v1[0]**2 + v1[1]**2)
-            len_v2 = math.sqrt(v2[0]**2 + v2[1]**2)
-
-            if len_v1 > 0.01 and len_v2 > 0.01:
-                cross_product = abs(v1[0] * v2[1] - v1[1] * v2[0])
-                curvature = 2 * cross_product / (len_v1 * len_v2 * (len_v1 + len_v2))
-                max_curvature = max(max_curvature, curvature)
-
-        return max_curvature
-
-    def _calculate_recommended_speed(self, waypoints):
-        """권장 속도 계산"""
-        max_curvature = self._calculate_max_curvature(waypoints)
-
-        max_safe_curvature = 0.2
-        normalized_curvature = min(max_curvature / max_safe_curvature, 1.0)
-
-        speed = self.max_speed - normalized_curvature * (self.max_speed - self.min_speed)
-        return max(self.min_speed, min(self.max_speed, speed))
-
 
 # =============================================================================
 # 6. 네트워크 및 공간 인덱싱
@@ -1155,19 +1265,20 @@ class RoadNetwork:
 
         return closest_segment
 
-    def calculate_frenet(self, vehicle_pos: Tuple[float, float, float]) -> Optional[FrenetState]:
+    def calculate_frenet(self, vehicle_pos: Tuple[float, float, float]) -> Optional[Tuple[FrenetState, LinearRoadSegment]]:
         """차량 위치에 대한 Frenet 좌표 계산"""
         try:
             closest_segment = self.find_closest_segment(vehicle_pos[:2])
 
             if not closest_segment:
-                return None
+                return None, None
 
-            return self.frenet_calculator.calculate_frenet(vehicle_pos, closest_segment)
+            frenet_state = self.frenet_calculator.calculate_frenet(vehicle_pos, closest_segment)
+            return frenet_state, closest_segment
 
         except Exception as e:
             print(f"Warning: Error in RoadNetwork calculate_frenet: {e}")
-            return None
+            return None, None
 
     def is_point_on_road(self, point: Tuple[float, float]) -> bool:
         """점이 도로 네트워크 위에 있는지 확인"""
@@ -1370,6 +1481,9 @@ class RoadSystemAPI:
         self.config_loader = RoadConfigLoader()
         self.config_loader.set_path_planner(self.path_planner)
 
+        # 속도 계산을 위한 lookahead 거리 설정 [m]
+        self.lookahead_distance = self.config.get('lookahead_distance', 15.0)
+
     # === 네트워크 생성 및 로딩 ===
 
     def load_config_from_yaml(self, config_file: str) -> 'RoadSystemAPI':
@@ -1478,11 +1592,27 @@ class RoadSystemAPI:
     # === 차량 위치 계산 (핵심 API) ===
 
     def get_vehicle_road_info(self, vehicle_pos: Tuple[float, float, float]) -> Optional[Dict[str, Any]]:
-        """차량의 도로 정보 계산"""
-        frenet_state = self.network.calculate_frenet(vehicle_pos)
+        """차량의 도로 정보 계산 (Frenet 좌표, 권장 속도, heading error 포함)"""
+        frenet_state, closest_segment = self.network.calculate_frenet(vehicle_pos)
 
         if not frenet_state:
             return None
+
+        # 권장 속도 계산 (Lookahead 범위 최대 곡률 기반)
+        if closest_segment:
+            s_current = frenet_state.s
+            s_lookahead = s_current + self.lookahead_distance
+            max_curvature_ahead = closest_segment.get_max_curvature_in_range(
+                s_current, s_lookahead
+            )
+            recommended_speed = self._calculate_speed_from_curvature(max_curvature_ahead)
+        else:
+            recommended_speed = self.config.get('default_speed', 15.0)
+
+        # Heading error 계산 (차량 기준 상대 각도)
+        vehicle_yaw = vehicle_pos[2]
+        road_yaw = frenet_state.yaw_ref
+        heading_error = normalize_angle(road_yaw - vehicle_yaw)
 
         return {
             'frenet_state': frenet_state,
@@ -1494,24 +1624,58 @@ class RoadSystemAPI:
             's_dot': frenet_state.s_dot,
             'd_dot': frenet_state.d_dot,
             'road_center_point': (frenet_state.x_ref, frenet_state.y_ref),
-            'road_yaw': frenet_state.yaw_ref
+            'road_yaw': frenet_state.yaw_ref,
+            'recommended_speed': recommended_speed,
+            'heading_error': heading_error
         }
 
+    def _calculate_speed_from_curvature(self, curvature: float) -> float:
+        """곡률로부터 권장 속도 계산 (물리 기반 선형)
+
+        Args:
+            curvature: 경로의 곡률 [1/m]
+
+        Returns:
+            권장 속도 [m/s]
+        """
+        min_speed = self.config.get('min_speed', 5.0)
+        max_speed = self.config.get('max_speed', 25.0)
+        max_lateral_accel = self.config.get('max_lateral_acceleration', 4.0)
+
+        # 곡률이 거의 0이면 (직선 경로) 최대 속도 사용
+        if curvature < 1e-6:
+            return max_speed
+
+        # 물리 기반 속도 계산: v = sqrt(a_lat_max / curvature)
+        safe_speed = math.sqrt(max_lateral_accel / curvature)
+
+        # min_speed와 max_speed 사이로 제한
+        return max(min_speed, min(max_speed, safe_speed))
+
     def get_vehicle_update_data(self, vehicle_position: Tuple[float, float, float]):
-        """기존 API 호환성을 위한 메서드"""
+        """차량 업데이트 데이터 계산 (곡률 기반 동적 권장 속도)
+
+        Returns:
+            Tuple[road_center_point, d, recommended_speed, is_outside_road, heading_error]
+            - road_center_point: 도로 중심점 (x, y)
+            - d: 횡방향 거리 [m] (왼쪽 양수)
+            - recommended_speed: 곡률 기반 권장 종방향 속도 [m/s]
+            - is_outside_road: 도로 이탈 여부
+            - heading_error: 차량 기준 heading error [rad] (road_yaw - vehicle_yaw, -π~π)
+                            > 0: 도로가 왼쪽 → 좌회전 필요
+                            < 0: 도로가 오른쪽 → 우회전 필요
+        """
         info = self.get_vehicle_road_info(vehicle_position)
 
         if not info:
-            return None, None, None, True
-
-        closest_segment = self.network.get_segment(info['segment_id'])
-        average_target_vel = closest_segment.speed_limit if closest_segment else self.config['default_speed']
+            return None, None, None, True, None
 
         return (
             info['road_center_point'],
-            info['d'],  # 원래 d 값 (부호 있음)
-            average_target_vel,
-            not info['is_on_road']
+            info['d'],
+            info['recommended_speed'],
+            not info['is_on_road'],
+            info['heading_error']
         )
 
     def get_road_wdith(self, segment_id: str) -> Optional[float]:

@@ -421,10 +421,10 @@ class PhysicsEngine:
             vehicle_config: 차량 설정
         """
         # 서브스텝 시간 간격 계산
-        substep_dt = dt / physics_config['physics_substeps']
+        substep_dt = dt / physics_config['substeps']
 
         # 각 서브스텝마다 물리 업데이트 수행
-        for _ in range(physics_config['physics_substeps']):
+        for _ in range(physics_config['substeps']):
             # 입력 처리
             InputProcessor.process_inputs(state, action, substep_dt, vehicle_config, physics_config)
 

@@ -6,9 +6,9 @@ simulation:
   dt: 0.016         # seconds, time step for simulation (1/fps)
   hz:
     frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
-    lidar_update: 20       # 라이다 스캔 주파수 [Hz] (시뮬레이션 시간 기준)
-    trajectory_update: 20  # 궤적 예측 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
-    collision_check: 30    # 충돌 검사 주파수 [Hz] (시뮬레이션 시간 기준) - 안전 관련 높은 빈도
+    lidar_update: 10       # 라이다 스캔 주파수 [Hz] (시뮬레이션 시간 기준)
+    trajectory_update: 10  # 궤적 예측 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
+    collision_check: 20    # 충돌 검사 주파수 [Hz] (시뮬레이션 시간 기준) - 안전 관련 높은 빈도
     goal_check: 5          # 목적지 도달 확인 주파수 [Hz] (시뮬레이션 시간 기준) - 비교적 낮은 빈도
     state_history: 2       # 상태 이력 저장 주파수 [Hz] (시뮬레이션 시간 기준) - 메모리 효율성
   memory_management:
@@ -24,52 +24,55 @@ simulation:
       cleanup_interval: 300.0     # 캐시 정리 주기 [seconds]
       max_cache_age: 1800.0       # 최대 캐시 보존 시간 [seconds]
   observation:
-    vehicle_state_dim: 8
+    vehicle_state_dim: 10
     lidar_dim: 13
     trajectory_dim: 0
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   reinforcement_learning:
-    action_selection_hz: 10     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_selection_hz: 5     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
   train_max_steps: 2000000
-  train_max_episode_steps: 5000    # maximum steps per episode (더 짧은 에피소드)
+  train_max_episode_steps: 1500    # maximum steps per episode - 강화학습 개선을 위해 단축 (5000->1500)
   eval_episode: 10  # number of episodes for evaluation
-  num_vehicles: 1  # number of vehicles on the environment
+  num_vehicles: 1  # number of vehicles on the environment - 강화학습 개선을 위해 단일 차량으로 단순화
   boundary:         # [m]
-    x_min: -70
-    x_max: 70
-    y_min: -30
-    y_max: 30
+    x_min: -50
+    x_max: 50
+    y_min: -80
+    y_max: 80
   obstacle:
-    num_static_obstacles: 0
-    num_dynamic_obstacles: 5
-    buffer_distance: 40  # [m]
+    num_static_obstacles: 3        # 강화학습 개선을 위해 다양성 증가 (1->3)
+    num_dynamic_obstacles: 1       # 강화학습 개선을 위해 동적 장애물 추가 (0->1)
+    buffer_distance: 20  # [m]
     boundary:            # [m]
       x_min: -10
       x_max: 10
-      y_min: -70
-      y_max: 70
+      y_min: -300
+      y_max: 300
   path_planning:
     max_iterations: 1000          # maximum iterations for path planning
-    base_step_size: 0.1           # Base for variable RRT step [m]
-    min_step_factor: 1.0          # Min multiplier for base_step_size
-    max_step_factor: 10.0          # Max multiplier for base_step_size
+    base_step_size: 1.0           # Base for variable RRT step [m]
+    min_step_factor: 0.5          # Min multiplier for base_step_size
+    max_step_factor: 10.0         # Max multiplier for base_step_size
+    max_distance: 50.0            # 기준 거리 [m] for step size calculation
     goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
-    goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
+    goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
     road_width: 8.0               # Default road width [m]
     min_radius: 5.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 15
     min_speed: 5
     max_speed: 30
+    max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
+    lookahead_distance: 15.0       # lookahead distance for speed calculation [m]
   rewards:
     goal_reached_reward: 500.0        # reward for reaching the goal
     collision_penalty: -100.0          # penalty for collision
     outside_road_penalty: -100.0       # penalty for going outside the road
-    progress_factor: 0.6              # reward factor for reducing distance to goal
-    lane_keeping_factor: 0.2          # reward factor for staying in the lane
-    speed_factor: 0.2                 # reward factor for maintaining/reaching target speed
+    progress_factor: 2.0              # reward factor for reducing distance to goal - 강화학습 개선을 위해 증가
+    lane_keeping_factor: 1.0          # reward factor for staying in the lane - 강화학습 개선을 위해 증가
+    speed_factor: 0.5                 # reward factor for maintaining/reaching target speed - 강화학습 개선을 위해 활성화
 
 # Visualization parameters
 visualization:
@@ -120,7 +123,7 @@ vehicle:
 
   # Powertrain Parameters
   max_accel: 4.0         # 최대 가속도 [m/s²]
-  max_brake: 4.0         # 최대 제동 [m/s²]
+  max_brake: 6.0         # 최대 제동 [m/s²]
   max_speed: 65.0        # 최대 속도 [m/s] (약 234 km/h)
   min_speed: -20.0       # 최소 속도 [m/s] (약 -72 km/h)
   max_vel_lat: 23.0      # 최대 횡방향 속도 [m/s], 종방향 속도에 대한 휴리스틱 값
@@ -144,12 +147,11 @@ vehicle:
 
 # Physics parameters
 physics:
-  substeps: 4
+  substeps: 1            # 학습 단순화를 위해 4->2로 감소
   gravity: 9.81          # 중력가속도 [m/s²]
   air_density: 1.225     # 공기 밀도 [kg/m³]
   drag_coeff: 0.30       # 공기저항 계수
   roll_resist: 0.015     # 구름저항 계수
-  physics_substeps: 4    # 물리 시뮬레이션 세부 단계
   terrain_friction:
     asphalt: 1.0    # 아스팔트 (기준)
     gravel: 0.8     # 자갈
@@ -159,11 +161,11 @@ physics:
     ice: 0.1        # 얼음
   min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
   min_turning_radius: 4.0       # meters, minimum turning radius for vehicle dynamics
-  throttle_response_rate: 20.0   # 1/s
-  steering_response_rate: 15.0   # 1/s
-  min_steer_speed_factor: 0.8   # minimum steering speed factor
-  max_steer_speed_factor: 0.2   # maximum steering speed factor
-  steer_speed_threshold: 15.0   # m/s, threshold for steering speed factor
+  throttle_response_rate: 25.0   # 1/s - 학습 단순화를 위해 증가 (20.0->25.0)
+  steering_response_rate: 20.0   # 1/s - 학습 단순화를 위해 증가 (15.0->20.0)
+  min_steer_speed_factor: 0.9   # minimum steering speed factor - 학습 단순화를 위해 증가
+  max_steer_speed_factor: 0.7   # maximum steering speed factor - 학습 단순화를 위해 증가
+  steer_speed_threshold: 20.0   # m/s, threshold for steering speed factor - 속도 의존성 감소
 
   # RL 친화적 물리 모델 개선 파라미터
   brake_priority_threshold: 0.1      # brake input threshold for engine reduction
