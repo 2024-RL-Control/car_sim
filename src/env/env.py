@@ -496,7 +496,7 @@ class CarSimulatorEnv(gym.Env):
         current_vel = state.vel_long * 3.6 # m/s to km/h
         target_vel = state.target_vel_long or 0  # 목표 속도가 없을 경우 0으로 설정
         speed_diff = current_vel - target_vel
-        sigma = 10.0
+        sigma = 3.0
         speed_norm = exp(-((speed_diff**2) / (2 * sigma**2))) # 가우시안 커널
         if speed_norm < 1e-4:
             speed_norm = 0

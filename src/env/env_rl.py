@@ -631,7 +631,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정 (강화학습 개선)
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [128, 128, 64, 32, 16, 8],
+            "net_arch": [128, 128, 64, 32, 16],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 

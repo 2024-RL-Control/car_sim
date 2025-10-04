@@ -981,6 +981,9 @@ class PathPlanner:
         collision_dist = self.width / 2.0
         obstacles_array = np.array(obstacles) if obstacles else np.array([])
 
+        # 기존 경로 선분 캐시 [x1, y1, x2, y2] 형태
+        cached_segments = []
+
         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
 
         base_step = self.config.get("base_step_size", 1.0)
@@ -1023,6 +1026,10 @@ class PathPlanner:
                 if len(obstacles_array) > 0 and self._is_collision_path(path_points, obstacles_array, collision_dist):
                     continue
 
+                # 기존 경로와의 교차 검사
+                if self._is_path_crossing_cached(path_points, cached_segments):
+                    continue
+
                 parent_node = nodes[node_from_option]
                 new_cost = parent_node.cost + opt_data[0]
 
@@ -1031,6 +1038,14 @@ class PathPlanner:
                                           new_cost, parent_pos=node_from_option)
                     edges[(node_from_option, sample)] = RRTEdge(node_from_option, sample,
                                                               path_points, opt_data[0])
+
+                    # 새 경로의 선분들을 캐시에 추가
+                    if len(path_points) >= 2:
+                        segments = np.column_stack([
+                            path_points[:-1, :2],  # 시작점 (x1, y1)
+                            path_points[1:, :2]    # 끝점 (x2, y2)
+                        ])  # shape: (N-1, 4)
+                        cached_segments.append(segments)
 
                     if self._is_goal(sample, goal):
                         return self._reconstruct_path(start, sample, nodes, edges)
@@ -1062,6 +1077,60 @@ class PathPlanner:
         collision_matrix = dist_sq_matrix < obstacles_radii_sq[np.newaxis, :]
 
         return np.any(collision_matrix)
+
+    def _vectorized_segments_intersect(self, seg1, seg2):
+        """벡터화된 선분 교차 검사 (CCW 알고리즘)
+
+        Args:
+            seg1: 새 경로 선분들 (shape: (N, 4)) - [x1, y1, x2, y2]
+            seg2: 기존 경로 선분들 (shape: (M, 4)) - [x1, y1, x2, y2]
+
+        Returns:
+            True if any pair intersects, False otherwise
+        """
+        # Broadcasting: (N, 1, 2) vs (1, M, 2) → (N, M, 2)
+        p1 = seg1[:, np.newaxis, :2]  # (N, 1, 2) - seg1의 시작점
+        p2 = seg1[:, np.newaxis, 2:]  # (N, 1, 2) - seg1의 끝점
+        p3 = seg2[np.newaxis, :, :2]  # (1, M, 2) - seg2의 시작점
+        p4 = seg2[np.newaxis, :, 2:]  # (1, M, 2) - seg2의 끝점
+
+        # CCW 계산 (Counter-clockwise)
+        def ccw(A, B, C):
+            return ((C[..., 1] - A[..., 1]) * (B[..., 0] - A[..., 0]) >
+                    (B[..., 1] - A[..., 1]) * (C[..., 0] - A[..., 0]))
+
+        # 교차 조건: p1-p2 기준 p3, p4가 반대편 AND p3-p4 기준 p1, p2가 반대편
+        # 결과: (N, M) boolean matrix
+        intersections = ((ccw(p1, p3, p4) != ccw(p2, p3, p4)) &
+                         (ccw(p1, p2, p3) != ccw(p1, p2, p4)))
+
+        return np.any(intersections)
+
+    def _is_path_crossing_cached(self, new_path, cached_segments):
+        """새 경로가 캐시된 기존 경로 선분들과 교차하는지 검사
+
+        Args:
+            new_path: 새로 생성된 경로 (numpy array, shape: (N, 2))
+            cached_segments: 기존 선분 리스트 [array(M1, 4), array(M2, 4), ...]
+                            각 행은 [x1, y1, x2, y2]
+
+        Returns:
+            True if paths cross, False otherwise
+        """
+        if not cached_segments or len(new_path) < 2:
+            return False
+
+        # 1. 새 경로의 선분들을 [x1, y1, x2, y2] 형태로 변환
+        new_segments = np.column_stack([
+            new_path[:-1, :2],  # (N-1, 2)
+            new_path[1:, :2]    # (N-1, 2)
+        ])  # (N-1, 4)
+
+        # 2. 캐시된 선분들을 하나의 배열로 통합
+        existing_segments = np.vstack(cached_segments)  # (M, 4)
+
+        # 3. 벡터화된 교차 검사
+        return self._vectorized_segments_intersect(new_segments, existing_segments)
 
     def _is_goal(self, sample, goal):
         """목표 도달 확인"""
