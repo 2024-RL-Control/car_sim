@@ -51,7 +51,7 @@ simulation:
       y_min: -100
       y_max: 100
   path_planning:
-    max_iterations: 2000          # maximum iterations for path planning
+    max_iterations: 1000          # maximum iterations for path planning
     base_step_size: 1.0           # Base for variable RRT step [m]
     min_step_factor: 0.2          # Min multiplier for base_step_size
     max_step_factor: 10.0         # Max multiplier for base_step_size
@@ -59,6 +59,7 @@ simulation:
     goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
     goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
     nearest_neighbor_count: 20    # RRT nearest neighbor search count for KD-Tree optimization
+    kdtree_rebuild_interval: 15   # KD-Tree 재구성 주기 [iterations]
     road_width: 8.0               # Default road width [m]
     min_radius: 6.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]

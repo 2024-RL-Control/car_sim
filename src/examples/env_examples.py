@@ -69,8 +69,13 @@ def create_random_goal(env, vehicle_id, min_distance=25.0, max_distance=50.0):
             # 차량별 다른 색상 사용
             colors = [(0, 255, 0), (255, 255, 0), (0, 255, 255), (255, 0, 255), (0, 0, 255)]
             goal_color = colors[vehicle_id % len(colors)]
-            env.add_goal_for_vehicle(vehicle_id, new_x, new_y, target_yaw, 2.0, goal_color)
-            break
+            try:
+                env.add_goal_for_vehicle(vehicle_id, new_x, new_y, target_yaw, 2.0, goal_color)
+                break  # 성공
+            except RuntimeError as e:
+                vehicle.clear_goals()  # 실패한 목적지 제거
+                print(f"Reset failed: {e}")
+                continue  # 새로운 랜덤 목적지 생성
 
 def manual_control_with_goal():
     """목표가 있는 차량 수동 제어"""

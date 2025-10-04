@@ -1002,7 +1002,7 @@ class PathPlanner:
         k_nearest = self.config.get("nearest_neighbor_count", 15)  # KD-Tree 최근접 이웃 수
 
         # KD-Tree 재구성 주기 설정
-        kdtree_rebuild_interval = 15  # 15회마다 재구성
+        kdtree_rebuild_interval = self.config.get("kdtree_rebuild_interval", 15)  # 15회마다 재구성
         kdtree = None
         distance_to_goal = float('inf')
         current_step_size = base_step * max_factor
@@ -1081,9 +1081,8 @@ class PathPlanner:
                         return self._reconstruct_path(start, sample, nodes, edges)
                 break
 
-        # RRT 실패시 직선 경로로 fallback
-        print("Warning: RRT failed, falling back to straight line")
-        return self._straight_line(start, goal)
+        # RRT 실패시 예외 발생
+        raise RuntimeError("RRT path planning failed")
 
     def _select_options(self, nodes, sample, nb_options):
         """Dubins 옵션 선택"""
