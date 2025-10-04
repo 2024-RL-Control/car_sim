@@ -1616,6 +1616,7 @@ class RoadSystemAPI:
         segment_length = closest_segment.get_length() if closest_segment else 0.0
 
         return {
+            'closest_segment': closest_segment,
             'frenet_state': frenet_state,
             'segment_id': frenet_state.segment_id,
             'distance_to_center': abs(frenet_state.d),
@@ -1658,7 +1659,8 @@ class RoadSystemAPI:
         """차량 업데이트 데이터 계산 (곡률 기반 동적 권장 속도)
 
         Returns:
-            Tuple[road_center_point, d, recommended_speed, is_outside_road, heading_error, frenet_s, segment_length]
+            Tuple[closest_segment, road_center_point, d, recommended_speed, is_outside_road, heading_error, frenet_s, segment_length]
+            - closest_segment: 가장 가까운 도로 세그먼트 객체 (없으면 None)
             - road_center_point: 도로 중심점 (x, y)
             - d: 횡방향 거리 [m] (왼쪽 양수)
             - recommended_speed: 곡률 기반 권장 종방향 속도 [m/s]
@@ -1672,9 +1674,10 @@ class RoadSystemAPI:
         info = self.get_vehicle_road_info(vehicle_position)
 
         if not info:
-            return None, None, None, True, None, None, None
+            return None, None, None, None, True, None, None, None
 
         return (
+            info['closest_segment'],
             info['road_center_point'],
             info['d'],
             info['recommended_speed'],

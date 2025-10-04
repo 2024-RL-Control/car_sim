@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional, Any, Callable
+from typing import List, Dict, Optional, Any, Callable, Tuple
 from collections import deque, OrderedDict
 from math import degrees, pi, cos, sin, log, e, exp, sqrt
 import pygame
@@ -803,6 +803,10 @@ class VehicleState:
     heading_error: float = 0.0
     segment_length: float = 0.0    # 현재 세그먼트 전체 길이 [m]
 
+    # 도로 경계선 캐시 (라이다 센서 최적화용)
+    cached_road_boundaries: Optional[np.ndarray] = None  # Shape: (N, 4) - [x1, y1, x2, y2]
+    cached_segment_id: str = ""    # 캐시 무효화 감지용
+
     # 라이다 센서 데이터, 거리 배열
     lidar_data: List = field(default_factory=list)
 
@@ -851,6 +855,9 @@ class VehicleState:
         self.target_vel_long = 0.0
         self.heading_error = 0.0
         self.segment_length = 0.0
+
+        self.cached_road_boundaries = None
+        self.cached_segment_id = ""
 
         self.lidar_data.clear()
 
@@ -1069,9 +1076,6 @@ class Vehicle:
         self.state = VehicleState()
         self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
 
-        # 도로 관리자 참조 (step()에서 설정됨)
-        self._road_manager = None
-
         # Subsystem 관리자 초기화
         self.subsystem_manager = SubsystemManager(vehicle_instance=self, simulation_config=self.simulation_config)
 
@@ -1105,9 +1109,6 @@ class Vehicle:
 
     def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
         """차량 상태 업데이트"""
-
-        # 도로 관리자 참조 저장 (update_target에서 사용)
-        self._road_manager = road_manager
 
         # 물리 모델 적용
         PhysicsEngine.update(self.state, action, dt, self.physics_config, self.vehicle_config)
@@ -1261,13 +1262,41 @@ class Vehicle:
 
         return outside_road
 
+    def _convert_boundaries_to_segments(self, left_boundary: List[Tuple[float, float]],
+                                        right_boundary: List[Tuple[float, float]]) -> np.ndarray:
+        """도로 경계선을 line segment 배열로 변환
+
+        Args:
+            left_boundary: 왼쪽 경계선 좌표 리스트 [(x, y), ...]
+            right_boundary: 오른쪽 경계선 좌표 리스트 [(x, y), ...]
+
+        Returns:
+            np.ndarray: Shape (N, 4) - 각 row는 [x1, y1, x2, y2] 형태의 line segment
+        """
+        segments = []
+
+        # 왼쪽 경계선을 line segments로 변환
+        for i in range(len(left_boundary) - 1):
+            x1, y1 = left_boundary[i]
+            x2, y2 = left_boundary[i + 1]
+            segments.append([x1, y1, x2, y2])
+
+        # 오른쪽 경계선을 line segments로 변환
+        for i in range(len(right_boundary) - 1):
+            x1, y1 = right_boundary[i]
+            x2, y2 = right_boundary[i + 1]
+            segments.append([x1, y1, x2, y2])
+
+        # NumPy 배열로 변환
+        return np.array(segments, dtype=np.float64) if segments else np.empty((0, 4), dtype=np.float64)
+
     def _update_road_data_internal(self, road_manager, current_time: float = None):
         """내부용 road data 업데이트 - 서브 시스템 관리자에서 호출"""
         if current_time is None:
             current_time = 0.0  # 시뮬레이션 시간 기본값
 
         # road_manager를 통해 Frenet 좌표 계산 (frenet_s, segment_length 포함)
-        frenet_point, frenet_d, target_vel_long, outside_road, heading_error, frenet_s, segment_length = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
+        closest_segment, frenet_point, frenet_d, target_vel_long, outside_road, heading_error, frenet_s, segment_length = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
 
         # 상태 업데이트
         self.state.frenet_point = frenet_point
@@ -1277,11 +1306,25 @@ class Vehicle:
         self.state.target_vel_long = target_vel_long
         self.state.heading_error = heading_error
 
+        # 도로 경계선 캐싱 (segment가 변경되었을 때만)
+        if closest_segment is not None:
+            segment_id = closest_segment.id if hasattr(closest_segment, 'id') else str(id(closest_segment))
+
+            if segment_id != self.state.cached_segment_id:
+                # 경계선 데이터 가져오기
+                left_boundary, right_boundary = closest_segment.get_boundary_lines()
+
+                # line segment 배열로 변환 및 캐싱
+                self.state.cached_road_boundaries = self._convert_boundaries_to_segments(
+                    left_boundary, right_boundary
+                )
+                self.state.cached_segment_id = segment_id
+
         return outside_road
 
     def _update_sensor_callback(self, dt, time_elapsed, objects):
         """센서 업데이트 콜백"""
-        self.sensor_manager.update(dt, time_elapsed, objects)
+        self.sensor_manager.update(dt, time_elapsed, objects, road_boundaries=self.state.cached_road_boundaries)
         self._update_sensor_data()
         return self.state.get_lidar_data()
 

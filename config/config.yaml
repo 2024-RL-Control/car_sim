@@ -134,7 +134,7 @@ vehicle:
       sensor_type: "LIDAR"
       relative_pos: [0.0, 0.0]  # 차량 중심 기준 상대 위치 [m]
       relative_angle: 0.0       # 차량 방향 기준 상대 각도 [degrees] - 저장 시 도 단위 사용
-      num_samples: 15           # 샘플(레이) 수
+      num_samples: 13           # 샘플(레이) 수
       angle_start: -150.0       # 시작 각도 [degrees] - 저장 시 도 단위 사용
       angle_end: 150.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       concentration: 1.5        # 각도 집중도 (0~1: 가장자리 집중, 1: 균등, >1: 중앙 집중)
