@@ -181,6 +181,7 @@ class LidarSensor(BaseSensor):
         self.num_samples = int(sensor_config.get('num_samples', 360))
         self.angle_start = radians(sensor_config.get('angle_start', -180.0))
         self.angle_end = radians(sensor_config.get('angle_end', 180.0))
+        self.concentration = float(sensor_config.get('concentration', 0.8))
         self.max_range = float(sensor_config.get('max_range', 50.0))
         self.min_range = float(sensor_config.get('min_range', 0.1))
 
@@ -214,6 +215,7 @@ class LidarSensor(BaseSensor):
             "num_samples": self.num_samples,
             "angle_start": degrees(self.angle_start),
             "angle_end": degrees(self.angle_end),
+            "concentration": self.concentration,
             "max_range": self.max_range,
             "min_range": self.min_range,
             "scan_rate": self.scan_rate,
@@ -234,7 +236,9 @@ class LidarSensor(BaseSensor):
         """
         레이 방향 벡터 미리 계산하여 저장 (최적화)
         """
-        self.ray_angles = np.linspace(self.angle_start, self.angle_end, self.num_samples)
+        t = np.linspace(-1, 1, self.num_samples)
+        t_concentrated = np.sign(t) * np.abs(t) ** self.concentration
+        self.ray_angles = self.angle_start + (self.angle_end - self.angle_start) * (t_concentrated + 1) / 2
         self.ray_directions = np.array([(np.cos(angle), np.sin(angle)) for angle in self.ray_angles])
 
     def update(self, dt, time_elapsed=0, objects=None):
