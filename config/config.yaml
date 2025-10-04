@@ -33,7 +33,7 @@ simulation:
     action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
   train_max_steps: 1000000
-  train_max_episode_steps: 3000    # maximum steps per episode - 강화학습 개선을 위해 단축 (5000->1500)
+  train_max_episode_steps: 1500    # maximum steps per episode - 강화학습 개선을 위해 단축 (5000->1500)
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment - 강화학습 개선을 위해 단일 차량으로 단순화
   boundary:         # [m]
