@@ -493,21 +493,32 @@ class CarSimulatorEnv(gym.Env):
         reward += lane_keeping_reward
 
         # 목표 속도 유지 보상 (도로가 제안하는 속도와 가까울수록 높은 보상)
-        current_vel = state.vel_long * 3.6 # m/s to km/h
-        target_vel = state.target_vel_long or 0  # 목표 속도가 없을 경우 0으로 설정
-        speed_diff = current_vel - target_vel
-        sigma = 3.0
-        speed_norm = exp(-((speed_diff**2) / (2 * sigma**2))) # 가우시안 커널
-        if speed_norm < 1e-4:
-            speed_norm = 0
+        current_vel = state.vel_long  # m/s 단위 유지
+        target_vel = state.target_vel_long or self.config['simulation']['path_planning']['default_speed']
+
+        # 적응형 sigma: 목표 속도의 20%를 허용 범위로 설정
+        sigma = max(2.0, target_vel * 0.2)
+
+        # 속도 초과에 더 큰 페널티 적용 (안전성)
+        if current_vel > target_vel:
+            speed_diff = (current_vel - target_vel) * 1.5
+        else:
+            speed_diff = current_vel - target_vel
+
+        speed_norm = exp(-((speed_diff**2) / (2 * sigma**2)))  # 가우시안 커널
         speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
 
         # 정지 페널티
-        stop = state.vel_long < 0.1  # 속도가 0.1 이하인 경우 정지로 간주, 후진 포함
-        if stop:
+        is_stopped = abs(state.vel_long) < 0.01  # 더 엄격한 정지 판정
+        if is_stopped:
             delta = state.get_delta_progress()
-            reward += -abs(delta)
+            stop_penalty = -abs(delta) * 2.0  # 페널티 강화
+            reward += stop_penalty
+
+        # 후진 페널티
+        if state.vel_long < -0.1:
+            reward += -1.0
 
         # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, Delta: {-abs(delta) if stop else 0}")
         return reward

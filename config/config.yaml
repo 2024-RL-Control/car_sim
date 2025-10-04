@@ -39,17 +39,17 @@ simulation:
   boundary:         # [m]
     x_min: -50
     x_max: 50
-    y_min: -80
-    y_max: 80
+    y_min: -50
+    y_max: 50
   obstacle:
-    num_static_obstacles: 5        # 강화학습 개선을 위해 다양성 증가 (1->3)
-    num_dynamic_obstacles: 3       # 강화학습 개선을 위해 동적 장애물 추가 (0->2)
-    buffer_distance: 20  # [m]
+    num_static_obstacles: 0
+    num_dynamic_obstacles: 0
+    buffer_distance: 10  # [m]
     boundary:            # [m]
       x_min: -10
       x_max: 10
-      y_min: -100
-      y_max: 100
+      y_min: -10
+      y_max: 10
   path_planning:
     max_iterations: 250           # maximum iterations for path planning
     base_step_size: 1.0           # Base for variable RRT step [m]
@@ -69,12 +69,12 @@ simulation:
     max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
     lookahead_distance: 18.0       # lookahead distance for speed calculation [m]
   rewards:
-    goal_reached_reward: 500.0        # reward for reaching the goal
-    collision_penalty: -100.0          # penalty for collision
-    outside_road_penalty: -100.0       # penalty for going outside the road
-    progress_factor: 1.0              # reward factor for reducing distance to goal - 강화학습 개선을 위해 증가
-    lane_keeping_factor: 0.5          # reward factor for staying in the lane - 강화학습 개선을 위해 증가
-    speed_factor: 0.5                 # reward factor for maintaining/reaching target speed - 강화학습 개선을 위해 활성화
+    goal_reached_reward: 1500.0       # reward for reaching the goal
+    collision_penalty: -300.0         # penalty for collision
+    outside_road_penalty: -250.0      # penalty for going outside the road
+    progress_factor: 4.0              # reward factor for reducing distance to goal
+    lane_keeping_factor: 1.0          # reward factor for staying in the lane
+    speed_factor: 0.8                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:

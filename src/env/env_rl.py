@@ -377,8 +377,8 @@ class BasicRLDrivingEnv(gym.Env):
         # 차량 배치 가능 공간은 외곽 영역
         # 상하좌우 네 영역 중 랜덤 선택
         for i in range(self.num_vehicles):
-            # placement_area = random.choice(['top', 'bottom', 'left', 'right'])
-            placement_area = 'left'
+            placement_area = random.choice(['top', 'bottom', 'left', 'right'])
+            # placement_area = 'left'
             boundary = self.vehicle_area[placement_area]
             x = random.uniform(boundary['x_min'], boundary['x_max'])
             y = random.uniform(boundary['y_min'], boundary['y_max'])
@@ -413,10 +413,10 @@ class BasicRLDrivingEnv(gym.Env):
             yaw_volatility = random.uniform(-pi/7, pi/7)
             if vehicle_placement == 'top':
                 boundary = self.vehicle_area['bottom']
-                yaw = pi/2 + yaw_volatility
+                yaw = -pi/2 + yaw_volatility
             elif vehicle_placement == 'bottom':
                 boundary = self.vehicle_area['top']
-                yaw = -pi/2 + yaw_volatility
+                yaw = pi/2 + yaw_volatility
             elif vehicle_placement == 'left':
                 boundary = self.vehicle_area['right']
                 yaw = 0 + yaw_volatility
@@ -631,7 +631,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정 (강화학습 개선)
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [128, 128, 64, 32, 16],
+            "net_arch": [128, 128, 128, 64, 32, 16],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
