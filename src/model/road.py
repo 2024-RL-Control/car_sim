@@ -10,6 +10,7 @@ from collections import deque, OrderedDict
 from typing import List, Tuple, Optional, Dict, Any, Union
 from dataclasses import dataclass
 from pathlib import Path
+from scipy.spatial import KDTree
 
 
 # =============================================================================
@@ -990,11 +991,17 @@ class PathPlanner:
         min_factor = self.config.get("min_step_factor", 1.0)
         max_factor = self.config.get("max_step_factor", 10.0)
         max_distance = self.config.get("max_distance", 50.0)  # 기준 거리 [m]
+        k_nearest = self.config.get("nearest_neighbor_count", 15)  # KD-Tree 최근접 이웃 수
 
         for i_iter in range(self.config.get("max_iterations", 1000)):
-            # 동적 step size 계산 (목표까지의 거리 기반)
-            closest_node = min(nodes.keys(),
-                             key=lambda n: math.sqrt((n[0]-goal[0])**2 + (n[1]-goal[1])**2))
+            # KD-Tree 구성 (현재 노드들의 위치)
+            node_keys = list(nodes.keys())
+            node_positions = np.array([[n[0], n[1]] for n in node_keys])
+            kdtree = KDTree(node_positions)
+
+            # KD-Tree로 goal에 가장 가까운 노드 찾기
+            _, closest_idx = kdtree.query([goal[0], goal[1]])
+            closest_node = node_keys[closest_idx]
             distance_to_goal = math.sqrt((closest_node[0]-goal[0])**2 + (closest_node[1]-goal[1])**2)
 
             # 거리 비율 계산 (0~1)
@@ -1015,7 +1022,8 @@ class PathPlanner:
                 rand_yaw = random.uniform(-math.pi, math.pi)
                 sample = (rand_x, rand_y, rand_yaw)
 
-            options = self._select_options(nodes, sample, 10)
+            # KD-Tree 기반 최적화된 옵션 선택
+            options = self._select_options_optimized(nodes, node_positions, kdtree, sample, 10, k_nearest)
             for node_from_option, opt_data in options:
                 if opt_data[0] == float('inf'):
                     break
@@ -1060,6 +1068,40 @@ class PathPlanner:
         options = []
         for node in nodes:
             options.extend([(node, opt) for opt in self.local_planner.all_options(node, sample)])
+        options.sort(key=lambda x: x[1][0])
+        return options[:nb_options]
+
+    def _select_options_optimized(self, nodes, node_positions, kdtree, sample, nb_options, k_nearest):
+        """KD-Tree 기반 최적화된 Dubins 옵션 선택
+
+        Args:
+            nodes: 노드 딕셔너리
+            node_positions: 노드 위치 배열 (N, 2)
+            kdtree: KDTree 객체
+            sample: 샘플 위치 (x, y, yaw)
+            nb_options: 반환할 최대 옵션 수
+            k_nearest: 검색할 최근접 이웃 수
+
+        Returns:
+            상위 nb_options 개의 (node, dubins_option) 튜플 리스트
+        """
+        # sample 근처 k개 노드 찾기
+        k_search = min(k_nearest, len(node_positions))
+        distances, indices = kdtree.query([sample[0], sample[1]], k=k_search)
+
+        # 근접 노드들에 대해서만 Dubins 경로 계산
+        options = []
+        node_keys = list(nodes.keys())
+
+        # indices가 스칼라인 경우 리스트로 변환
+        if k_search == 1:
+            indices = [indices]
+
+        for idx in indices:
+            node = node_keys[idx]
+            options.extend([(node, opt) for opt in self.local_planner.all_options(node, sample)])
+
+        # 비용 기준 정렬
         options.sort(key=lambda x: x[1][0])
         return options[:nb_options]
 

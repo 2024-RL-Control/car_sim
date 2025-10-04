@@ -23,7 +23,7 @@ def print_basic_controls(menu_name):
 # ==============
 # Manual Control With Goal
 # ==============
-def create_random_goal(env, vehicle_id, min_distance=10.0, max_distance=40.0):
+def create_random_goal(env, vehicle_id, min_distance=25.0, max_distance=50.0):
     """
     지정된 차량에 대한 랜덤 목적지 생성
 
