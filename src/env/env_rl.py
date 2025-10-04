@@ -217,8 +217,8 @@ class BasicRLDrivingEnv(gym.Env):
         self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
         self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
         print(f"사용 중인 디바이스: {self.device}")
 
         # 환경 바운더리 설정
@@ -631,7 +631,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정 (강화학습 개선)
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [128, 128, 64, 32],
+            "net_arch": [128, 128, 64, 32, 16, 8],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
@@ -646,7 +646,7 @@ class BasicRLDrivingEnv(gym.Env):
 
         if algorithm == 'sac':
             # SAC 하이퍼파라미터 설정 (강화학습 개선)
-            buffer_size = self.max_step // 2  # 더 큰 버퍼 (//4 -> //2)
+            buffer_size = self.max_step // 4  # 더 큰 버퍼 (//4 -> //2)
             learning_rate = 1e-3  # 안정적인 학습률 (3e-3 -> 1e-3)
             batch_size = 128  # 더 작은 배치 사이즈로 안정성 향상 (256 -> 128)
             learning_starts = 5000  # 더 빠른 학습 시작 (20000 -> 5000)

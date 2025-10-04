@@ -29,11 +29,11 @@ simulation:
     trajectory_dim: 0
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   reinforcement_learning:
-    action_selection_hz: 5     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_selection_hz: 10     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
-  train_max_steps: 2000000
-  train_max_episode_steps: 1500    # maximum steps per episode - 강화학습 개선을 위해 단축 (5000->1500)
+  train_max_steps: 10000000
+  train_max_episode_steps: 2500    # maximum steps per episode - 강화학습 개선을 위해 단축 (5000->1500)
   eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment - 강화학습 개선을 위해 단일 차량으로 단순화
   boundary:         # [m]
@@ -43,13 +43,13 @@ simulation:
     y_max: 80
   obstacle:
     num_static_obstacles: 3        # 강화학습 개선을 위해 다양성 증가 (1->3)
-    num_dynamic_obstacles: 1       # 강화학습 개선을 위해 동적 장애물 추가 (0->1)
+    num_dynamic_obstacles: 2       # 강화학습 개선을 위해 동적 장애물 추가 (0->2)
     buffer_distance: 20  # [m]
     boundary:            # [m]
       x_min: -10
       x_max: 10
-      y_min: -300
-      y_max: 300
+      y_min: -100
+      y_max: 100
   path_planning:
     max_iterations: 1000          # maximum iterations for path planning
     base_step_size: 1.0           # Base for variable RRT step [m]
@@ -59,20 +59,20 @@ simulation:
     goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
     goal_sampling_rate: 0.3       # goal sampling rate for path planning [0, 1]
     road_width: 8.0               # Default road width [m]
-    min_radius: 5.0               # minimum turning radius for path planning [m]
+    min_radius: 6.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 15
     min_speed: 5
     max_speed: 30
     max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
-    lookahead_distance: 15.0       # lookahead distance for speed calculation [m]
+    lookahead_distance: 18.0       # lookahead distance for speed calculation [m]
   rewards:
     goal_reached_reward: 500.0        # reward for reaching the goal
     collision_penalty: -100.0          # penalty for collision
     outside_road_penalty: -100.0       # penalty for going outside the road
-    progress_factor: 2.0              # reward factor for reducing distance to goal - 강화학습 개선을 위해 증가
-    lane_keeping_factor: 1.0          # reward factor for staying in the lane - 강화학습 개선을 위해 증가
-    speed_factor: 0.5                 # reward factor for maintaining/reaching target speed - 강화학습 개선을 위해 활성화
+    progress_factor: 1.5              # reward factor for reducing distance to goal - 강화학습 개선을 위해 증가
+    lane_keeping_factor: 0.5          # reward factor for staying in the lane - 강화학습 개선을 위해 증가
+    speed_factor: 1.0                 # reward factor for maintaining/reaching target speed - 강화학습 개선을 위해 활성화
 
 # Visualization parameters
 visualization:
@@ -160,7 +160,7 @@ physics:
     snow: 0.3       # 눈
     ice: 0.1        # 얼음
   min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
-  min_turning_radius: 4.0       # meters, minimum turning radius for vehicle dynamics
+  min_turning_radius: 3.5       # meters, minimum turning radius for vehicle dynamics
   throttle_response_rate: 25.0   # 1/s - 학습 단순화를 위해 증가 (20.0->25.0)
   steering_response_rate: 20.0   # 1/s - 학습 단순화를 위해 증가 (15.0->20.0)
   min_steer_speed_factor: 0.9   # minimum steering speed factor - 학습 단순화를 위해 증가

@@ -797,9 +797,11 @@ class VehicleState:
 
     # frenet 좌표
     frenet_d: float = 0.0
+    frenet_s: float = 0.0          # 현재 호장 길이 [m]
     frenet_point: tuple = None
     target_vel_long: float = 0.0
     heading_error: float = 0.0
+    segment_length: float = 0.0    # 현재 세그먼트 전체 길이 [m]
 
     # 라이다 센서 데이터, 거리 배열
     lidar_data: List = field(default_factory=list)
@@ -844,9 +846,11 @@ class VehicleState:
         self.yaw_diff_to_target = 0.0
 
         self.frenet_d = 0.0
+        self.frenet_s = 0.0
         self.frenet_point = None
         self.target_vel_long = 0.0
         self.heading_error = 0.0
+        self.segment_length = 0.0
 
         self.lidar_data.clear()
 
@@ -894,15 +898,37 @@ class VehicleState:
         return cos(angle), sin(angle)
 
     def get_progress(self):
-        """거리 정규화, -1.0 ~ 1.0 범위로 목표 도달 진행률 반환"""
-        if self.initial_distance_to_target == 0:
-            return 0.0
-        raw = (self.initial_distance_to_target - self.curr_distance_to_target) / self.initial_distance_to_target
-        progress = max(-1.0, min(1.0, raw))  # -1.0 ~ 1.0 범위로 제한
-        return progress
+        """Frenet 기반 목표 도달 진행률 반환 (-1.0 ~ 1.0)
+
+        현재 위치가 도로 세그먼트의 몇 퍼센트 지점인지를 기준으로
+        진행률을 계산합니다. 곡선 도로에서도 정확합니다.
+
+        Returns:
+            진행률: -1.0 ~ 1.0 범위
+        """
+        # 세그먼트 길이가 0이면 유클리드 거리 기반 계산 (fallback)
+        if self.segment_length < 1e-6:
+            if self.initial_distance_to_target == 0:
+                return 0.0
+            raw = (self.initial_distance_to_target - self.curr_distance_to_target) / self.initial_distance_to_target
+            return max(-1.0, min(1.0, raw))
+
+        # Frenet 호장 길이 기반 진행률 계산
+        # progress = 현재 s / 세그먼트 전체 길이
+        progress = self.frenet_s / self.segment_length
+
+        return max(0.0 , min(1.0, progress))
 
     def get_delta_progress(self):
-        """목표 도달 진행률 변화량 계산"""
+        """목표 도달 진행률 변화량 계산
+
+        이전 프레임과 현재 프레임 사이의 거리 변화를 반환합니다.
+        양수: 목표에 가까워짐 (전진), 음수: 목표에서 멀어짐 (후진/이탈)
+
+        Returns:
+            거리 변화량 [m]
+        """
+        # 목표까지의 거리 감소량
         return self.prev_distance_to_target - self.curr_distance_to_target
 
     def scale_frenet_d(self, d, road_width=6.0):
@@ -1043,6 +1069,9 @@ class Vehicle:
         self.state = VehicleState()
         self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
 
+        # 도로 관리자 참조 (step()에서 설정됨)
+        self._road_manager = None
+
         # Subsystem 관리자 초기화
         self.subsystem_manager = SubsystemManager(vehicle_instance=self, simulation_config=self.simulation_config)
 
@@ -1076,6 +1105,9 @@ class Vehicle:
 
     def step(self, action, dt, time_elapsed, road_manager, obstacles=[], vehicles=[]):
         """차량 상태 업데이트"""
+
+        # 도로 관리자 참조 저장 (update_target에서 사용)
+        self._road_manager = road_manager
 
         # 물리 모델 적용
         PhysicsEngine.update(self.state, action, dt, self.physics_config, self.vehicle_config)
@@ -1234,12 +1266,14 @@ class Vehicle:
         if current_time is None:
             current_time = 0.0  # 시뮬레이션 시간 기본값
 
-        # road_manager를 통해 Frenet 좌표 계산
-        frenet_point, frenet_d, target_vel_long, outside_road, heading_error = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
+        # road_manager를 통해 Frenet 좌표 계산 (frenet_s, segment_length 포함)
+        frenet_point, frenet_d, target_vel_long, outside_road, heading_error, frenet_s, segment_length = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
 
         # 상태 업데이트
         self.state.frenet_point = frenet_point
         self.state.frenet_d = frenet_d
+        self.state.frenet_s = frenet_s if frenet_s is not None else 0.0
+        self.state.segment_length = segment_length if segment_length is not None else 0.0
         self.state.target_vel_long = target_vel_long
         self.state.heading_error = heading_error
 

@@ -882,8 +882,6 @@ class PathPlanner:
             else:  # 1,2사분면 & 그 외
                 mode = 'rrt'
 
-        print(f"Path planning mode: {mode}")
-
         if mode == 'rrt':
             waypoints, total_length = self._rrt_with_dubins(start, end, obstacles)
         elif mode == 'curve':
@@ -1614,6 +1612,9 @@ class RoadSystemAPI:
         road_yaw = frenet_state.yaw_ref
         heading_error = normalize_angle(road_yaw - vehicle_yaw)
 
+        # 세그먼트 전체 길이
+        segment_length = closest_segment.get_length() if closest_segment else 0.0
+
         return {
             'frenet_state': frenet_state,
             'segment_id': frenet_state.segment_id,
@@ -1626,7 +1627,8 @@ class RoadSystemAPI:
             'road_center_point': (frenet_state.x_ref, frenet_state.y_ref),
             'road_yaw': frenet_state.yaw_ref,
             'recommended_speed': recommended_speed,
-            'heading_error': heading_error
+            'heading_error': heading_error,
+            'segment_length': segment_length
         }
 
     def _calculate_speed_from_curvature(self, curvature: float) -> float:
@@ -1656,7 +1658,7 @@ class RoadSystemAPI:
         """차량 업데이트 데이터 계산 (곡률 기반 동적 권장 속도)
 
         Returns:
-            Tuple[road_center_point, d, recommended_speed, is_outside_road, heading_error]
+            Tuple[road_center_point, d, recommended_speed, is_outside_road, heading_error, frenet_s, segment_length]
             - road_center_point: 도로 중심점 (x, y)
             - d: 횡방향 거리 [m] (왼쪽 양수)
             - recommended_speed: 곡률 기반 권장 종방향 속도 [m/s]
@@ -1664,18 +1666,22 @@ class RoadSystemAPI:
             - heading_error: 차량 기준 heading error [rad] (road_yaw - vehicle_yaw, -π~π)
                             > 0: 도로가 왼쪽 → 좌회전 필요
                             < 0: 도로가 오른쪽 → 우회전 필요
+            - frenet_s: Frenet 호장 길이 [m]
+            - segment_length: 현재 세그먼트 전체 길이 [m]
         """
         info = self.get_vehicle_road_info(vehicle_position)
 
         if not info:
-            return None, None, None, True, None
+            return None, None, None, True, None, None, None
 
         return (
             info['road_center_point'],
             info['d'],
             info['recommended_speed'],
             not info['is_on_road'],
-            info['heading_error']
+            info['heading_error'],
+            info['s'],
+            info['segment_length']
         )
 
     def get_road_wdith(self, segment_id: str) -> Optional[float]:

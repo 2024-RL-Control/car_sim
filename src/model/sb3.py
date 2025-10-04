@@ -300,8 +300,23 @@ class TensorBoardLogger(BaseCallback):
             self._log_metrics()
 
         if self.metrics_store.episode_count > self.last_episode_count:
-            episode = self.metrics_store.episodes[-1]
+            # 최근 10개 에피소드 메트릭
+            mean_reward = self.metrics_store.get_recent_mean_reward(window=10)
+            mean_length = self.metrics_store.get_recent_mean_length(window=10)
 
+            self.logger.record("rollout/episode_reward_mean_10", mean_reward)
+            self.logger.record("rollout/episode_length_mean_10", mean_length)
+            self.logger.record("rollout/best_reward", self.metrics_store.best_reward)
+
+            # 차량 메트릭
+            collision_rate = self.metrics_store.get_collision_rate(window=50)
+            goal_rate = self.metrics_store.get_goal_success_rate(window=50)
+
+            self.logger.record("vehicles/collision_rate", collision_rate)
+            self.logger.record("vehicles/goal_success_rate", goal_rate)
+
+            # 방금전 에피소드 메트릭
+            episode = self.metrics_store.episodes[-1]
             self.logger.record("rollout/episode_reward", episode.reward)
             self.logger.record("rollout/episode_length", episode.length)
             self.logger.dump(episode.timesteps)
@@ -359,21 +374,6 @@ class TensorBoardLogger(BaseCallback):
 
     def _log_metrics(self):
         """메트릭 로깅"""
-        # 기본 RL 메트릭
-        mean_reward = self.metrics_store.get_recent_mean_reward(window=10)
-        mean_length = self.metrics_store.get_recent_mean_length(window=10)
-
-        self.logger.record("rollout/episode_reward_mean_10", mean_reward)
-        self.logger.record("rollout/episode_length_mean_10", mean_length)
-        self.logger.record("rollout/best_reward", self.metrics_store.best_reward)
-
-        # 차량 메트릭
-        collision_rate = self.metrics_store.get_collision_rate(window=50)
-        goal_rate = self.metrics_store.get_goal_success_rate(window=50)
-
-        self.logger.record("vehicles/collision_rate", collision_rate)
-        self.logger.record("vehicles/goal_success_rate", goal_rate)
-
         # 성능 메트릭
         perf_metrics = self.metrics_store.get_performance_metrics()
         for key, value in perf_metrics.items():
