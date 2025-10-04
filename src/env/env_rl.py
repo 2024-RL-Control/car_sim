@@ -252,7 +252,7 @@ class BasicRLDrivingEnv(gym.Env):
         self.max_episode_steps = self.env.config['simulation']['train_max_episode_steps']
 
         # 에피소드 정보 저장용
-        self.episode_count = 0
+        self.episode_count = -1
 
         # ActionController 초기화
         rl_config = self.env.config['simulation'].get('reinforcement_learning', {})
