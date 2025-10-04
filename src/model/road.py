@@ -975,7 +975,7 @@ class PathPlanner:
         return waypoints, total_length
 
     def _rrt_with_dubins(self, start, end, obstacles):
-        """RRT-Dubins 경로 계획"""
+        """RRT-Dubins 경로 계획 (성능 최적화)"""
         nodes = {}
         edges = {}
         goal = end
@@ -985,7 +985,15 @@ class PathPlanner:
         # 기존 경로 선분 캐시 [x1, y1, x2, y2] 형태
         cached_segments = []
 
+        # 공간 인덱싱을 위한 그리드 (셀 크기 = max_distance)
+        segment_grid = {}  # {(grid_x, grid_y): [segment_indices]}
+        grid_cell_size = self.config.get("max_distance", 50.0)
+
         nodes[start] = RRTNode(start, 0, 0, parent_pos=None)
+
+        # 노드 위치 관리용 리스트
+        node_keys = [start]
+        node_positions = [[start[0], start[1]]]
 
         base_step = self.config.get("base_step_size", 1.0)
         min_factor = self.config.get("min_step_factor", 1.0)
@@ -993,25 +1001,31 @@ class PathPlanner:
         max_distance = self.config.get("max_distance", 50.0)  # 기준 거리 [m]
         k_nearest = self.config.get("nearest_neighbor_count", 15)  # KD-Tree 최근접 이웃 수
 
+        # KD-Tree 재구성 주기 설정
+        kdtree_rebuild_interval = 15  # 15회마다 재구성
+        kdtree = None
+        distance_to_goal = float('inf')
+        current_step_size = base_step * max_factor
+
         for i_iter in range(self.config.get("max_iterations", 1000)):
-            # KD-Tree 구성 (현재 노드들의 위치)
-            node_keys = list(nodes.keys())
-            node_positions = np.array([[n[0], n[1]] for n in node_keys])
-            kdtree = KDTree(node_positions)
+            # KD-Tree 주기적 재구성 (성능 최적화)
+            if i_iter % kdtree_rebuild_interval == 0:
+                node_positions_array = np.array(node_positions)
+                kdtree = KDTree(node_positions_array)
 
-            # KD-Tree로 goal에 가장 가까운 노드 찾기
-            _, closest_idx = kdtree.query([goal[0], goal[1]])
-            closest_node = node_keys[closest_idx]
-            distance_to_goal = math.sqrt((closest_node[0]-goal[0])**2 + (closest_node[1]-goal[1])**2)
+                # Goal 거리도 재구성 시에만 계산
+                _, closest_idx = kdtree.query([goal[0], goal[1]])
+                closest_node = node_keys[closest_idx]
+                distance_to_goal = math.sqrt((closest_node[0]-goal[0])**2 + (closest_node[1]-goal[1])**2)
 
-            # 거리 비율 계산 (0~1)
-            distance_ratio = min(distance_to_goal / max_distance, 1.0)
+                # 거리 비율 계산 (0~1)
+                distance_ratio = min(distance_to_goal / max_distance, 1.0)
 
-            # step_factor 계산 (가까울수록 작게, 멀수록 크게)
-            step_factor = min_factor + (max_factor - min_factor) * distance_ratio
-            # 최종 step size
-            current_step_size = base_step * step_factor
+                # step_factor 계산 (가까울수록 작게, 멀수록 크게)
+                step_factor = min_factor + (max_factor - min_factor) * distance_ratio
+                current_step_size = base_step * step_factor
 
+            # 샘플링
             if random.random() < self.config.get("goal_sampling_rate", 0.1):
                 sample = goal
             else:
@@ -1023,7 +1037,7 @@ class PathPlanner:
                 sample = (rand_x, rand_y, rand_yaw)
 
             # KD-Tree 기반 최적화된 옵션 선택
-            options = self._select_options_optimized(nodes, node_positions, kdtree, sample, 10, k_nearest)
+            options = self._select_options_optimized(nodes, node_positions_array, kdtree, sample, 10, k_nearest)
             for node_from_option, opt_data in options:
                 if opt_data[0] == float('inf'):
                     break
@@ -1034,8 +1048,8 @@ class PathPlanner:
                 if len(obstacles_array) > 0 and self._is_collision_path(path_points, obstacles_array, collision_dist):
                     continue
 
-                # 기존 경로와의 교차 검사
-                if self._is_path_crossing_cached(path_points, cached_segments):
+                # 공간 인덱싱 기반 교차 검사
+                if self._is_path_crossing_spatial(path_points, cached_segments, segment_grid, grid_cell_size):
                     continue
 
                 parent_node = nodes[node_from_option]
@@ -1047,13 +1061,21 @@ class PathPlanner:
                     edges[(node_from_option, sample)] = RRTEdge(node_from_option, sample,
                                                               path_points, opt_data[0])
 
-                    # 새 경로의 선분들을 캐시에 추가
+                    # 노드 위치 추가
+                    node_keys.append(sample)
+                    node_positions.append([sample[0], sample[1]])
+
+                    # 새 경로의 선분들을 캐시 및 그리드에 추가
                     if len(path_points) >= 2:
                         segments = np.column_stack([
                             path_points[:-1, :2],  # 시작점 (x1, y1)
                             path_points[1:, :2]    # 끝점 (x2, y2)
                         ])  # shape: (N-1, 4)
+                        segment_idx = len(cached_segments)
                         cached_segments.append(segments)
+
+                        # 그리드에 등록
+                        self._add_segments_to_grid(segments, segment_idx, segment_grid, grid_cell_size)
 
                     if self._is_goal(sample, goal):
                         return self._reconstruct_path(start, sample, nodes, edges)
@@ -1147,6 +1169,83 @@ class PathPlanner:
                          (ccw(p1, p2, p3) != ccw(p1, p2, p4)))
 
         return np.any(intersections)
+
+    def _add_segments_to_grid(self, segments, segment_idx, segment_grid, grid_cell_size):
+        """세그먼트를 공간 그리드에 추가
+
+        Args:
+            segments: 선분 배열 (shape: (N, 4)) - [x1, y1, x2, y2]
+            segment_idx: 캐시된 세그먼트 인덱스
+            segment_grid: 그리드 딕셔너리 {(grid_x, grid_y): [indices]}
+            grid_cell_size: 그리드 셀 크기 [m]
+        """
+        for seg in segments:
+            x1, y1, x2, y2 = seg
+            # 선분이 걸치는 모든 그리드 셀 계산
+            min_x, max_x = min(x1, x2), max(x1, x2)
+            min_y, max_y = min(y1, y2), max(y1, y2)
+
+            grid_x_min = int(min_x // grid_cell_size)
+            grid_x_max = int(max_x // grid_cell_size)
+            grid_y_min = int(min_y // grid_cell_size)
+            grid_y_max = int(max_y // grid_cell_size)
+
+            for gx in range(grid_x_min, grid_x_max + 1):
+                for gy in range(grid_y_min, grid_y_max + 1):
+                    grid_key = (gx, gy)
+                    if grid_key not in segment_grid:
+                        segment_grid[grid_key] = []
+                    if segment_idx not in segment_grid[grid_key]:
+                        segment_grid[grid_key].append(segment_idx)
+
+    def _is_path_crossing_spatial(self, new_path, cached_segments, segment_grid, grid_cell_size):
+        """공간 인덱싱 기반 경로 교차 검사
+
+        Args:
+            new_path: 새로 생성된 경로 (numpy array, shape: (N, 2))
+            cached_segments: 기존 선분 리스트 [array(M1, 4), array(M2, 4), ...]
+            segment_grid: 그리드 딕셔너리 {(grid_x, grid_y): [indices]}
+            grid_cell_size: 그리드 셀 크기 [m]
+
+        Returns:
+            True if paths cross, False otherwise
+        """
+        if not cached_segments or len(new_path) < 2:
+            return False
+
+        # 1. 새 경로의 선분들을 [x1, y1, x2, y2] 형태로 변환
+        new_segments = np.column_stack([
+            new_path[:-1, :2],  # (N-1, 2)
+            new_path[1:, :2]    # (N-1, 2)
+        ])  # (N-1, 4)
+
+        # 2. 새 경로가 걸치는 그리드 셀들 찾기
+        relevant_segment_indices = set()
+        for seg in new_segments:
+            x1, y1, x2, y2 = seg
+            min_x, max_x = min(x1, x2), max(x1, x2)
+            min_y, max_y = min(y1, y2), max(y1, y2)
+
+            grid_x_min = int(min_x // grid_cell_size)
+            grid_x_max = int(max_x // grid_cell_size)
+            grid_y_min = int(min_y // grid_cell_size)
+            grid_y_max = int(max_y // grid_cell_size)
+
+            for gx in range(grid_x_min, grid_x_max + 1):
+                for gy in range(grid_y_min, grid_y_max + 1):
+                    grid_key = (gx, gy)
+                    if grid_key in segment_grid:
+                        relevant_segment_indices.update(segment_grid[grid_key])
+
+        # 3. 관련 세그먼트만 교차 검사
+        if not relevant_segment_indices:
+            return False
+
+        relevant_segments = [cached_segments[i] for i in relevant_segment_indices]
+        existing_segments = np.vstack(relevant_segments)  # (M, 4)
+
+        # 4. 벡터화된 교차 검사
+        return self._vectorized_segments_intersect(new_segments, existing_segments)
 
     def _is_path_crossing_cached(self, new_path, cached_segments):
         """새 경로가 캐시된 기존 경로 선분들과 교차하는지 검사
