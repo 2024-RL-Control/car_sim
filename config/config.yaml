@@ -8,8 +8,8 @@ simulation:
     frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
     lidar_update: 10       # 라이다 스캔 주파수 [Hz] (시뮬레이션 시간 기준)
     trajectory_update: 10  # 궤적 예측 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
-    collision_check: 20    # 충돌 검사 주파수 [Hz] (시뮬레이션 시간 기준) - 안전 관련 높은 빈도
-    goal_check: 10         # 목적지 도달 확인 주파수 [Hz] (시뮬레이션 시간 기준) - 비교적 낮은 빈도
+    collision_check: 20    # 충돌 검사 주파수 [Hz] (시뮬레이션 시간 기준)
+    goal_check: 10         # 목적지 도달 확인 주파수 [Hz] (시뮬레이션 시간 기준)
     state_history: 2       # 상태 이력 저장 주파수 [Hz] (시뮬레이션 시간 기준) - 메모리 효율성
   memory_management:
     # SubsystemManager 캐시 설정
@@ -33,9 +33,9 @@ simulation:
     action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
   train_max_steps: 1000000
-  train_max_episode_steps: 1500    # maximum steps per episode - 강화학습 개선을 위해 단축 (5000->1500)
+  train_max_episode_steps: 1500    # maximum steps per episode
   eval_episode: 10  # number of episodes for evaluation
-  num_vehicles: 1  # number of vehicles on the environment - 강화학습 개선을 위해 단일 차량으로 단순화
+  num_vehicles: 1  # number of vehicles on the environment
   boundary:         # [m]
     x_min: -50
     x_max: 50
@@ -164,11 +164,11 @@ physics:
     ice: 0.1        # 얼음
   min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
   min_turning_radius: 3.5       # meters, minimum turning radius for vehicle dynamics
-  throttle_response_rate: 25.0   # 1/s - 학습 단순화를 위해 증가 (20.0->25.0)
-  steering_response_rate: 20.0   # 1/s - 학습 단순화를 위해 증가 (15.0->20.0)
-  min_steer_speed_factor: 0.9   # minimum steering speed factor - 학습 단순화를 위해 증가
-  max_steer_speed_factor: 0.7   # maximum steering speed factor - 학습 단순화를 위해 증가
-  steer_speed_threshold: 20.0   # m/s, threshold for steering speed factor - 속도 의존성 감소
+  throttle_response_rate: 25.0   # 1/s
+  steering_response_rate: 20.0   # 1/s
+  min_steer_speed_factor: 0.9   # minimum steering speed factor
+  max_steer_speed_factor: 0.7   # maximum steering speed factor
+  steer_speed_threshold: 20.0   # m/s, threshold for steering speed factor
 
   # RL 친화적 물리 모델 개선 파라미터
   brake_priority_threshold: 0.1      # brake input threshold for engine reduction

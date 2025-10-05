@@ -217,8 +217,8 @@ class BasicRLDrivingEnv(gym.Env):
         self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
         self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
 
-        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
         print(f"사용 중인 디바이스: {self.device}")
 
         # 환경 바운더리 설정
@@ -645,12 +645,18 @@ class BasicRLDrivingEnv(gym.Env):
         }
 
         if algorithm == 'sac':
-            # SAC 하이퍼파라미터 설정 (강화학습 개선)
-            buffer_size = self.max_step // 4  # 더 큰 버퍼 (//4 -> //2)
-            learning_rate = 1e-3  # 안정적인 학습률 (3e-3 -> 1e-3)
-            batch_size = 128  # 더 작은 배치 사이즈로 안정성 향상 (256 -> 128)
-            learning_starts = 5000  # 더 빠른 학습 시작 (20000 -> 5000)
-            n_envs = 1
+            # SAC 하이퍼파라미터 설정
+            buffer_size             = self.max_step // 5
+            learning_rate           = 3e-4
+            batch_size              = 256
+            learning_starts         = 5000
+            n_envs                  = 1
+            tau                     = 0.005     # 타겟 네트워크 업데이트 속도
+            gamma                   = 0.995     # 할인 인수
+            ent_coef                = "auto"    # 엔트로피 계수
+            train_freq              = 1         # 훈련 빈도
+            gradient_steps          = 1         # 그라디언트 스텝
+            target_update_interval  = 1         # 타겟 업데이트 간격
 
             # 공유 리플레이 버퍼 생성
             shared_buffer = ReplayBuffer(
@@ -662,7 +668,7 @@ class BasicRLDrivingEnv(gym.Env):
                 handle_timeout_termination=False
             )
 
-            # 커스텀 SAC 모델 생성 (강화학습 개선)
+            # 커스텀 SAC 모델 생성
             model = SACVehicleAlgorithm(
                 "MlpPolicy",
                 env,
@@ -671,12 +677,12 @@ class BasicRLDrivingEnv(gym.Env):
                 buffer_size=0,
                 learning_starts=learning_starts,
                 batch_size=batch_size,
-                tau=0.005,  # 타겟 네트워크 업데이트 속도 조정 (0.003 -> 0.005)
-                gamma=0.99,  # 할인 인수 조정 (0.995 -> 0.99)
-                ent_coef=0.05,  # 엔트로피 계수 감소로 안정성 향상 (0.1 -> 0.05)
-                train_freq=4,  # 훈련 빈도 증가 (10 -> 4)
-                gradient_steps=2,  # 그라디언트 스텝 감소 (5 -> 2)
-                target_update_interval=2,  # 타겟 업데이트 간격 감소 (12 -> 2)
+                tau=tau,
+                gamma=gamma,
+                ent_coef=ent_coef,
+                train_freq=train_freq,
+                gradient_steps=gradient_steps,
+                target_update_interval=target_update_interval,
                 verbose=1,
                 tensorboard_log=log_dir,
                 device=self.device
@@ -685,14 +691,17 @@ class BasicRLDrivingEnv(gym.Env):
             # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
             model.replay_buffer = shared_buffer
         elif algorithm == 'ppo':
-            # PPO 하이퍼파라미터 설정 (최적화)
-            n_steps       = 2048  # 더 많은 스텝
-            batch_size    = 256   # 더 큰 배치 크기
-            n_epochs      = 5     # 더 많은 에포크
-            gamma         = 0.995 # 더 긴 시간 지평선
+            # PPO 하이퍼파라미터 설정
+            learning_rate = 3e-4
+            n_steps       = 1024
+            batch_size    = 256
+            n_epochs      = 10
+            gamma         = 0.995
             gae_lambda    = 0.95
-            clip_range    = 0.2
-            learning_rate = 3e-4  # 더 높은 학습률
+            clip_range    = 0.2     # 클리핑 범위
+            ent_coef      = 0.01    # 엔트로피 보너스, 정책 탐험 장려
+            vf_coef       = 0.5     # 가치 함수 손실 계수
+            max_grad_norm = 0.5     # 그라디언트 클리핑
 
             # 커스텀 PPO 모델 생성
             model = PPOVehicleAlgorithm(
@@ -705,6 +714,9 @@ class BasicRLDrivingEnv(gym.Env):
                 gamma=gamma,
                 gae_lambda=gae_lambda,
                 clip_range=clip_range,
+                ent_coef=ent_coef,
+                vf_coef=vf_coef,
+                max_grad_norm=max_grad_norm,
                 policy_kwargs=policy_kwargs,
                 verbose=1,
                 tensorboard_log=log_dir,
