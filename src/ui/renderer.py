@@ -70,8 +70,8 @@ class Renderer:
 
         # 화면 영역(viewport)에서 보이는 월드 좌표 범위 계산
         if self.config['visualization']['camera_follow']:
-            screen_width = self.config['visualization']['window_width']
-            screen_height = self.config['visualization']['window_height']
+            screen_width = self.config['visualization']['window_width'] * scale
+            screen_height = self.config['visualization']['window_height'] * scale
         else:
             screen_width = (self.config['simulation']['boundary']['x_max'] - self.config['simulation']['boundary']['x_min']) * scale
             screen_height = (self.config['simulation']['boundary']['y_max'] - self.config['simulation']['boundary']['y_min']) * scale

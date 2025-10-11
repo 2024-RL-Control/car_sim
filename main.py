@@ -1,7 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 import pygame
-from src.examples.env_examples import manual_control, manual_control_with_goal, manual_control_with_obstacles
-from src.examples.env_rl import BasicRLDrivingEnv
+from src.examples.env_examples import manual_control_with_goal
+from src.env.env_rl import BasicRLDrivingEnv
 from src.ui.menu import MainMenu
 import cProfile
 import pstats
@@ -20,11 +20,7 @@ if __name__ == "__main__":
         selected_option = menu.show_main_menu()
 
         # 선택된 옵션에 따라 실행
-        if selected_option == 'manual':
-            manual_control()
-        elif selected_option == 'obstacles':
-            manual_control_with_obstacles()
-        elif selected_option == 'goal':
+        if selected_option == 'goal':
             manual_control_with_goal()
         elif selected_option == 'basic_rl_training(sac)':
             env = BasicRLDrivingEnv()

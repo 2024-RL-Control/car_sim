@@ -10,7 +10,7 @@ import os
 from collections import deque
 from ..model.vehicle import VehicleManager
 from ..model.object import ObstacleManager
-from ..model.road import RoadNetworkManager
+from ..model.road import RoadSystemAPI
 from ..utils.config_utils import load_config
 from ..ui.camera import Camera
 from ..ui.keyboard import KeyboardHandler
@@ -36,6 +36,8 @@ class CarSimulatorEnv(gym.Env):
         # config.yaml에서 설정 로드
         self.config = load_config(config_path)
 
+        self.fixed_dt = self.config['simulation']['dt']
+
         self.max_vel_long = self.config['vehicle']['max_speed']
         self.min_vel_long = self.config['vehicle']['min_speed']
         self.max_acc_long = self.config['vehicle']['max_accel']
@@ -50,14 +52,15 @@ class CarSimulatorEnv(gym.Env):
         self.obstacle_manager = ObstacleManager(bounding_circle_colors=self.config['visualization']['bounding_circle_color'])
 
         # 도로 시스템 초기화
-        self.road_manager = RoadNetworkManager(self.config['simulation']['path_planning'])
+        self.road_manager = RoadSystemAPI(self.config['simulation']['path_planning'])
 
         # 차량 관리자 초기화
         self.vehicle_manager = VehicleManager(
             road_manager=self.road_manager,
             vehicle_config=self.config['vehicle'],
             physics_config=self.config['physics'],
-            visual_config=self.config['visualization']
+            visual_config=self.config['visualization'],
+            simulation_config=self.config['simulation']
         )
 
         # 초기 차량들 생성
@@ -84,20 +87,27 @@ class CarSimulatorEnv(gym.Env):
 
         # 각 차량의 조작 공간
         self.action_space = spaces.Box(
-            low=np.array([0.0, 0.0, -1.0]),   # 엔진[0,1], 브레이크[0,1], 조향[-1,1]
-            high=np.array([1.0, 1.0,  1.0]),
-            shape=(3,),
+            low=np.array([-1.0, -1.0]),   # 가속[-1,1], 조향[-1,1]
+            high=np.array([1.0,  1.0]),
+            shape=(2,),
             dtype=np.float64
         )
 
         # 각 차량의 관측 공간, 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
-        obs_dim = 91  # 13(기본상태) + 36(LIDAR) + 42(궤적)
+        self.obs_dim = self._calculate_obs_dim()
         self.observation_space = spaces.Box(
             low=-1.0,
             high=1.0,
-            shape=(obs_dim,),
+            shape=(self.obs_dim,),
             dtype=np.float64
         )
+
+    def _calculate_obs_dim(self):
+        """관측 차원 동적 계산"""
+        vehicle_state_dim = self.config['simulation']['observation']['vehicle_state_dim']  # 차량 상태 데이터
+        lidar_dim = self.config['simulation']['observation']['lidar_dim']  # 라이다 데이터
+        trajectory_dim = self.config['simulation']['observation']['trajectory_dim']  # 경로 데이터
+        return vehicle_state_dim + lidar_dim + trajectory_dim
 
     def _init_pygame(self):
         """Pygame 초기화 및 그래픽 리소스 로드"""
@@ -208,7 +218,7 @@ class CarSimulatorEnv(gym.Env):
         current_time = time.time()
         # dt = current_time - self._last_update_time
         # dt = max(min(dt, 0.1), 1e-2)  # 최소 0.01초, 최대 0.1초
-        dt = 0.05  # 고정된 시간 간격 (10ms)
+        dt = self.fixed_dt  # 설정 가능한 시간 간격
 
         # 물리 시뮬레이션 시작시간
         physics_start = time.time()
@@ -322,8 +332,8 @@ class CarSimulatorEnv(gym.Env):
         goal_id = self.vehicle_manager.add_goal_for_vehicle(vehicle_id, x, y, yaw, radius, color)
         if goal_id is not None:
             vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
-            road = self.add_road(vehicle, x, y, yaw, mode=mode)
-            return road
+            bool = self.add_road(vehicle, x, y, yaw, mode=mode)
+            return goal_id
         else:
             return goal_id
 
@@ -355,7 +365,7 @@ class CarSimulatorEnv(gym.Env):
                 raise ValueError("위치가 다른 차량과 충돌합니다")
             objects.extend(body)
 
-        return self.road_manager.connect(vehicle.get_position(), (x, y, yaw), objects, mode=mode)
+        return self.road_manager.add_point_to_point_road(vehicle.get_position(), (x, y, yaw), obstacles=objects)
 
     def _get_obs(self):
         """
@@ -383,34 +393,38 @@ class CarSimulatorEnv(gym.Env):
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
         cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
-        frenet_d = state.scale_frenet_d(state.frenet_d)
+        frenet_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width'])
+        cos_heading_error, sin_heading_error = state.encoding_angle(state.heading_error)
 
-        # 기본 차량 상태 (13, )
+        # 기본 차량 상태 (10, )
         obs = np.array([
             progress,               # -1 ~ 1
-            state.steer,            # -1 ~ 1
-            state.throttle_engine,  # 0 ~ 1
-            state.throttle_brake,   # 0 ~ 1
+            # state.steer,            # -1 ~ 1
+            # state.throttle_engine,  # 0 ~ 1
+            # state.throttle_brake,   # 0 ~ 1
             cos_yaw,                # -1 ~ 1
             sin_yaw,                # -1 ~ 1
             scale_vel_long,         # -1 ~ 1
-            scale_acc_long,         # -1 ~ 1
+            # scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
-            scale_acc_lat,          # -1 ~ 1
+            # scale_acc_lat,          # -1 ~ 1
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
+            cos_heading_error,      # -1 ~ 1
+            sin_heading_error       # -1 ~ 1
         ], dtype=np.float32)
 
-        # (6, 7), (norm_distance, cos_diff, sin_diff, scale_vel_long, scale_acc_long, scale_vel_lat, scale_acc_lat)
-        trajectory_data = state.get_trajectory_data(self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long, self.max_vel_lat, self.max_acc_lat)
-        # if len(trajectory_data) !=0:
-        #     print(trajectory_data[0][0], trajectory_data[1][0], trajectory_data[2][0])
+        # (2, 2), (cos_diff, sin_diff)
+        # trajectory_data = state.get_trajectory_data()
 
-        # (36, ), 0 ~ 1, 정규화된 데이터
+        # obs = np.concatenate((obs, trajectory_data.flatten()))
+
+        # (13, ), 0 ~ 1, 정규화된 데이터
         lidar_data = state.get_lidar_data()
+        obs = np.concatenate((obs, lidar_data))
 
-        obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (91, )
+        # obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (27, )
         return obs
 
     def _calculate_rewards(self, collisions, outside_roads, reached_targets):
@@ -473,27 +487,38 @@ class CarSimulatorEnv(gym.Env):
         # --- 주행 안정성 보상 ---
 
         # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
-        frenet_d_norm = state.scale_frenet_d(state.frenet_d) # np.tanh(d/10)로 정규화 [-1 ~ 1]
-        frenet_d_norm = min(abs(frenet_d_norm) / 0.3 , 1.0)  # 절대값으로 변환하여 0.3을 기준으로 정규화
+        frenet_d_norm = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width']) # [-1 ~ 1]
+        frenet_d_norm = min(abs(frenet_d_norm), 1.0)  # 절대값으로 변환하여 1.0을 기준으로 정규화
         lane_keeping_reward = (1 - frenet_d_norm) * rewards['lane_keeping_factor']
         reward += lane_keeping_reward
 
         # 목표 속도 유지 보상 (도로가 제안하는 속도와 가까울수록 높은 보상)
-        current_vel = state.vel_long * 3.6 # m/s to km/h
-        target_vel = state.target_vel_long or 0  # 목표 속도가 없을 경우 0으로 설정
-        speed_diff = current_vel - target_vel
-        sigma = 10.0
-        speed_norm = exp(-((speed_diff**2) / (2 * sigma**2))) # 가우시안 커널
-        if speed_norm < 1e-4:
-            speed_norm = 0
+        current_vel = state.vel_long  # m/s 단위 유지
+        target_vel = state.target_vel_long or self.config['simulation']['path_planning']['default_speed']
+
+        # 적응형 sigma: 목표 속도의 20%를 허용 범위로 설정
+        sigma = max(2.0, target_vel * 0.2)
+
+        # 속도 초과에 더 큰 페널티 적용 (안전성)
+        if current_vel > target_vel:
+            speed_diff = (current_vel - target_vel) * 1.5
+        else:
+            speed_diff = current_vel - target_vel
+
+        speed_norm = exp(-((speed_diff**2) / (2 * sigma**2)))  # 가우시안 커널
         speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
 
         # 정지 페널티
-        stop = state.vel_long < 0.1  # 속도가 0.1 이하인 경우 정지로 간주, 후진 포함
-        if stop:
+        is_stopped = abs(state.vel_long) < 0.01  # 더 엄격한 정지 판정
+        if is_stopped:
             delta = state.get_delta_progress()
-            reward += -abs(delta)
+            stop_penalty = -abs(delta) * 2.0  # 페널티 강화
+            reward += stop_penalty
+
+        # 후진 페널티
+        if state.vel_long < -0.1:
+            reward += -1.0
 
         # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, Delta: {-abs(delta) if stop else 0}")
         return reward
