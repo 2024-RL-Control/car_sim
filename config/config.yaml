@@ -69,7 +69,7 @@ simulation:
     max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
     lookahead_distance: 18.0       # lookahead distance for speed calculation [m]
   rewards:
-    goal_reached_reward: 1500.0       # reward for reaching the goal
+    goal_reached_reward: 600.0       # reward for reaching the goal
     collision_penalty: -300.0         # penalty for collision
     outside_road_penalty: -150.0      # penalty for going outside the road
     progress_factor: 0.8              # reward factor for reducing distance to goal

@@ -739,7 +739,7 @@ class BasicRLDrivingEnv(gym.Env):
             'num_static_obstacles': self.num_static_obstacles,
             'num_dynamic_obstacles': self.num_dynamic_obstacles,
             'max_episodes_history': 1000,  # 메트릭 히스토리
-            'max_steps_history': 10000,
+            'max_steps_history': 3000,
             'max_checkpoints': 10,
             'gpu_memory_limit': 5,  # GPU 메모리 제한 (GB)
             'checkpoint_freq': 10000,
