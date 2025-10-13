@@ -24,7 +24,7 @@ simulation:
       cleanup_interval: 300.0     # 캐시 정리 주기 [seconds]
       max_cache_age: 1800.0       # 최대 캐시 보존 시간 [seconds]
   observation:
-    vehicle_state_dim: 10
+    vehicle_state_dim: 12
     lidar_dim: 13
     trajectory_dim: 0
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
