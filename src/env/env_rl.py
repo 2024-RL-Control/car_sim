@@ -255,17 +255,16 @@ class BasicRLDrivingEnv(gym.Env):
         self.episode_count = -1
 
         # ActionController 초기화
-        rl_config = self.env.config['simulation'].get('reinforcement_learning', {})
-        self.action_hz = rl_config.get('action_selection_hz', 15)
-        self.action_hold_behavior = rl_config.get('action_hold_behavior', True)
-        self.debug_action_timing = rl_config.get('debug_action_timing', False)
+        self.rl_config = self.env.config['simulation']['reinforcement_learning']
+        self.rl_callback_config = self.rl_config['callbacks']
 
-        if self.action_hold_behavior:
+        action_hold_behavior = self.rl_config.get('action_hold_behavior', True)
+        if action_hold_behavior:
             self.action_controller = ActionController(
-                action_hz=self.action_hz,
+                action_hz=self.rl_config.get('action_selection_hz', 15),
                 num_vehicles=self.num_vehicles,
                 action_dim=self.env.action_space.shape[0],
-                debug=self.debug_action_timing
+                debug=self.rl_config.get('debug_action_timing', False)
             )
             print(f"ActionController 활성화: {self.action_hz}Hz로 행동 선택")
         else:
@@ -735,17 +734,18 @@ class BasicRLDrivingEnv(gym.Env):
         callback_config = {
             'algorithm': algorithm,
             'num_vehicles': self.num_vehicles,
-            'max_episode_steps': self.max_episode_steps,
             'num_static_obstacles': self.num_static_obstacles,
             'num_dynamic_obstacles': self.num_dynamic_obstacles,
-            'max_episodes_history': 1000,  # 메트릭 히스토리
-            'max_steps_history': 3000,
-            'max_checkpoints': 10,
-            'gpu_memory_limit': 5,  # GPU 메모리 제한 (GB)
-            'checkpoint_freq': 10000,
-            'save_best_model': True,
-            'monitoring_freq': 1000,  # 메모리 등 하드웨어 모니터링 빈도
-            'verbose': 1
+            'max_episode_steps': self.max_episode_steps,
+            'max_episodes_history': self.rl_callback_config['max_episodes_history'],
+            'max_steps_history': self.rl_callback_config['max_steps_history'],
+            'gpu_memory_limit': self.rl_callback_config['gpu_memory_limit'],
+            'monitoring_freq': self.rl_callback_config['monitoring_freq'],
+            'logging_freq': self.rl_callback_config['logging_freq'],
+            'checkpoint_freq': self.rl_callback_config['checkpoint_freq'],
+            'max_checkpoints': self.rl_callback_config['max_checkpoints'],
+            'save_best_model': self.rl_callback_config['save_best_model'],
+            'verbose': self.rl_callback_config['verbose']
         }
 
         # 최적화된 콜백 시스템 생성

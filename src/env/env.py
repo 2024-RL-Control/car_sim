@@ -489,8 +489,8 @@ class CarSimulatorEnv(gym.Env):
         # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
         frenet_d_norm = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width']) # [-1 ~ 1]
         frenet_d_norm = min(abs(frenet_d_norm), 1.0)  # 절대값으로 변환하여 1.0을 기준으로 정규화
-        # 도로 폭의 25%를 sigma로 설정하여 중앙에 가까울수록 높은 보상
-        lane_sigma = 0.25
+        # 도로 폭의 30%를 sigma로 설정하여 중앙에 가까울수록 높은 보상
+        lane_sigma = 0.15
         lane_keeping_norm = exp(-((frenet_d_norm**2) / (2 * lane_sigma**2)))
         lane_keeping_reward = lane_keeping_norm * rewards['lane_keeping_factor']
         # lane_keeping_reward = (1 - frenet_d_norm) * rewards['lane_keeping_factor']
@@ -517,13 +517,13 @@ class CarSimulatorEnv(gym.Env):
         is_stop = abs(state.vel_long) < 0.01  # 더 엄격한 정지 판정
         if is_stop:
             delta = state.get_delta_progress()
-            stop_penalty = -delta * 10.0  # 페널티 강화
+            stop_penalty = -delta * 5.0  # 페널티 강화
             reward += stop_penalty
 
         # 후진 페널티
         is_reversing = state.vel_long < -0.1  # 후진 속도 임계값
         if is_reversing:
-            reward += -0.15
+            reward += -0.1
 
         # print(f"Delta: {state.get_delta_progress()}")
         # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, {speed_reward}")

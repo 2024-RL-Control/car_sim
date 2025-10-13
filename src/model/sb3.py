@@ -619,7 +619,7 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         metrics_store,
         config.get('checkpoint_freq', 10000),
         models_dir,
-        config.get('algorithm', 'model'),
+        config.get('algorithm'),
         config.get('max_checkpoints', 5),
         config.get('save_best_model', True),
         config.get('verbose', 0)
