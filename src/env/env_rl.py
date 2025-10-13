@@ -260,13 +260,14 @@ class BasicRLDrivingEnv(gym.Env):
 
         action_hold_behavior = self.rl_config.get('action_hold_behavior', True)
         if action_hold_behavior:
+            action_hz = self.rl_config.get('action_selection_hz', 10)
             self.action_controller = ActionController(
-                action_hz=self.rl_config.get('action_selection_hz', 15),
+                action_hz=action_hz,
                 num_vehicles=self.num_vehicles,
                 action_dim=self.env.action_space.shape[0],
                 debug=self.rl_config.get('debug_action_timing', False)
             )
-            print(f"ActionController 활성화: {self.action_hz}Hz로 행동 선택")
+            print(f"ActionController 활성화: {action_hz}Hz로 행동 선택")
         else:
             self.action_controller = None
             print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
