@@ -525,6 +525,6 @@ class CarSimulatorEnv(gym.Env):
         if is_reversing:
             reward += -0.3
 
-        print(f"Delta: {state.get_delta_progress()}")
+        # print(f"Delta: {state.get_delta_progress()}")
         # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, {speed_reward}")
         return reward
