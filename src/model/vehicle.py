@@ -796,6 +796,8 @@ class VehicleState:
     yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
 
     # frenet 좌표
+    prev_progress: float = 0.0     # 이전 목표까지의 진행률 [0 ~ 1.0]
+    curr_progress: float = 0.0     # 현재 목표까지의 진행률 [0 ~ 1.0]
     frenet_d: float = 0.0
     frenet_s: float = 0.0          # 현재 호장 길이 [m]
     frenet_point: tuple = None
@@ -849,6 +851,8 @@ class VehicleState:
         self.curr_distance_to_target = 0.0
         self.yaw_diff_to_target = 0.0
 
+        self.prev_progress = 0.0
+        self.curr_progress = 0.0
         self.frenet_d = 0.0
         self.frenet_s = 0.0
         self.frenet_point = None
@@ -905,6 +909,9 @@ class VehicleState:
         return cos(angle), sin(angle)
 
     def get_progress(self):
+        return self.curr_progress
+
+    def calc_progress(self):
         """Frenet 기반 목표 도달 진행률 반환 (-1.0 ~ 1.0)
 
         현재 위치가 도로 세그먼트의 몇 퍼센트 지점인지를 기준으로
@@ -930,13 +937,12 @@ class VehicleState:
         """목표 도달 진행률 변화량 계산
 
         이전 프레임과 현재 프레임 사이의 거리 변화를 반환합니다.
-        양수: 목표에 가까워짐 (전진), 음수: 목표에서 멀어짐 (후진/이탈)
+        음수: 목표에 가까워짐 (전진), 양수: 목표에서 멀어짐 (후진/이탈)
 
         Returns:
-            거리 변화량 [m]
+            거리 변화율
         """
-        # 목표까지의 거리 감소량
-        return self.prev_distance_to_target - self.curr_distance_to_target
+        return self.prev_progress - self.curr_progress
 
     def scale_frenet_d(self, d, road_width=6.0):
         """frenet_d 값의 스케일링 (도로 폭에 따라 -1.0 ~ 1.0 범위로)"""
@@ -1514,6 +1520,11 @@ class Vehicle:
         dy = self.state.y - self.state.target_y
         self.state.curr_distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
+        self._update_progress()
+
+    def _update_progress(self):
+        self.state.prev_progress = self.state.curr_progress
+        self.state.curr_progress = self.state.calc_progress()
 
     def draw(self, screen, world_to_screen_func, is_active=False, debug=False):
         """차량 및 타이어 렌더링"""

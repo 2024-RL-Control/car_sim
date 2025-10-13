@@ -489,7 +489,11 @@ class CarSimulatorEnv(gym.Env):
         # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
         frenet_d_norm = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width']) # [-1 ~ 1]
         frenet_d_norm = min(abs(frenet_d_norm), 1.0)  # 절대값으로 변환하여 1.0을 기준으로 정규화
-        lane_keeping_reward = (1 - frenet_d_norm) * rewards['lane_keeping_factor']
+        # 도로 폭의 25%를 sigma로 설정하여 중앙에 가까울수록 높은 보상
+        lane_sigma = 0.25
+        lane_keeping_norm = exp(-((frenet_d_norm**2) / (2 * lane_sigma**2)))
+        lane_keeping_reward = lane_keeping_norm * rewards['lane_keeping_factor']
+        # lane_keeping_reward = (1 - frenet_d_norm) * rewards['lane_keeping_factor']
         reward += lane_keeping_reward
 
         # 목표 속도 유지 보상 (도로가 제안하는 속도와 가까울수록 높은 보상)
@@ -497,7 +501,7 @@ class CarSimulatorEnv(gym.Env):
         target_vel = state.target_vel_long or self.config['simulation']['path_planning']['default_speed']
 
         # 적응형 sigma: 목표 속도의 20%를 허용 범위로 설정
-        sigma = max(2.0, target_vel * 0.2)
+        vel_sigma = max(1.0, target_vel * 0.2)
 
         # 속도 초과에 더 큰 페널티 적용 (안전성)
         if current_vel > target_vel:
@@ -505,20 +509,22 @@ class CarSimulatorEnv(gym.Env):
         else:
             speed_diff = current_vel - target_vel
 
-        speed_norm = exp(-((speed_diff**2) / (2 * sigma**2)))  # 가우시안 커널
+        speed_norm = exp(-((speed_diff**2) / (2 * vel_sigma**2)))  # 가우시안 커널
         speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
 
         # 정지 페널티
-        is_stopped = abs(state.vel_long) < 0.01  # 더 엄격한 정지 판정
-        if is_stopped:
+        is_stop = abs(state.vel_long) < 0.01  # 더 엄격한 정지 판정
+        if is_stop:
             delta = state.get_delta_progress()
-            stop_penalty = -abs(delta) * 2.0  # 페널티 강화
+            stop_penalty = -delta * 10.0  # 페널티 강화
             reward += stop_penalty
 
         # 후진 페널티
-        if state.vel_long < -0.1:
-            reward += -1.0
+        is_reversing = state.vel_long < -0.1  # 후진 속도 임계값
+        if is_reversing:
+            reward += -0.3
 
-        # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, Delta: {-abs(delta) if stop else 0}")
+        print(f"Delta: {state.get_delta_progress()}")
+        # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, {speed_reward}")
         return reward

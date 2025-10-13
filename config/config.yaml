@@ -63,18 +63,18 @@ simulation:
     road_width: 8.0               # Default road width [m]
     min_radius: 6.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
-    default_speed: 15
-    min_speed: 5
-    max_speed: 30
+    default_speed: 4.17           # default speed for path planning [m/s] (15 km/h)
+    min_speed: 1.4                # minimum speed for path planning [m/s] (5 km/h)
+    max_speed: 13.9               # maximum speed for path planning [m/s] (50 km/h)
     max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
     lookahead_distance: 18.0       # lookahead distance for speed calculation [m]
   rewards:
     goal_reached_reward: 1500.0       # reward for reaching the goal
     collision_penalty: -300.0         # penalty for collision
-    outside_road_penalty: -250.0      # penalty for going outside the road
-    progress_factor: 4.0              # reward factor for reducing distance to goal
-    lane_keeping_factor: 1.0          # reward factor for staying in the lane
-    speed_factor: 0.8                 # reward factor for maintaining/reaching target speed
+    outside_road_penalty: -150.0      # penalty for going outside the road
+    progress_factor: 0.8              # reward factor for reducing distance to goal
+    lane_keeping_factor: 0.4          # reward factor for staying in the lane
+    speed_factor: 0.3                 # reward factor for maintaining/reaching target speed
 
 # Visualization parameters
 visualization:
