@@ -4,13 +4,13 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
-  hz:
-    frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
-    lidar_update: 10       # 라이다 스캔 주파수 [Hz] (시뮬레이션 시간 기준)
-    trajectory_update: 10  # 궤적 예측 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
-    collision_check: 20    # 충돌 검사 주파수 [Hz] (시뮬레이션 시간 기준)
-    goal_check: 10         # 목적지 도달 확인 주파수 [Hz] (시뮬레이션 시간 기준)
-    state_history: 2       # 상태 이력 저장 주파수 [Hz] (시뮬레이션 시간 기준) - 메모리 효율성
+  hz: # (시뮬레이션 시간 기준)
+    frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz]
+    lidar_update: 10       # 라이다 스캔 주파수 [Hz]
+    trajectory_update: 2   # 궤적 예측 업데이트 주파수 [Hz]
+    collision_check: 20    # 충돌 검사 주파수 [Hz]
+    goal_check: 10         # 목적지 도달 확인 주파수 [Hz]
+    state_history: 5       # 상태 이력 저장 주파수 [Hz]
   memory_management:
     # SubsystemManager 캐시 설정
     subsystem_cache:

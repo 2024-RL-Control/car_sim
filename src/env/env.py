@@ -396,7 +396,7 @@ class CarSimulatorEnv(gym.Env):
         frenet_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width'])
         cos_heading_error, sin_heading_error = state.encoding_angle(state.heading_error)
 
-        # 기본 차량 상태 (10, )
+        # 기본 차량 상태 (12, )
         obs = np.array([
             progress,               # -1 ~ 1
             # state.steer,            # -1 ~ 1
@@ -405,9 +405,9 @@ class CarSimulatorEnv(gym.Env):
             cos_yaw,                # -1 ~ 1
             sin_yaw,                # -1 ~ 1
             scale_vel_long,         # -1 ~ 1
-            # scale_acc_long,         # -1 ~ 1
+            scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
-            # scale_acc_lat,          # -1 ~ 1
+            scale_acc_lat,          # -1 ~ 1
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
@@ -415,14 +415,14 @@ class CarSimulatorEnv(gym.Env):
             sin_heading_error       # -1 ~ 1
         ], dtype=np.float32)
 
+        # (13, ), 0 ~ 1, 정규화된 데이터
+        lidar_data = state.get_lidar_data()
+        obs = np.concatenate((obs, lidar_data))
+
         # (2, 2), (cos_diff, sin_diff)
         # trajectory_data = state.get_trajectory_data()
 
         # obs = np.concatenate((obs, trajectory_data.flatten()))
-
-        # (13, ), 0 ~ 1, 정규화된 데이터
-        lidar_data = state.get_lidar_data()
-        obs = np.concatenate((obs, lidar_data))
 
         # obs = np.concatenate((obs, trajectory_data.flatten(), lidar_data)) # (27, )
         return obs
@@ -523,7 +523,7 @@ class CarSimulatorEnv(gym.Env):
         # 후진 페널티
         is_reversing = state.vel_long < -0.1  # 후진 속도 임계값
         if is_reversing:
-            reward += -0.3
+            reward += -0.15
 
         # print(f"Delta: {state.get_delta_progress()}")
         # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, {speed_reward}")
