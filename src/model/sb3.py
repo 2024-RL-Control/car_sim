@@ -139,6 +139,16 @@ class MetricsStore:
         )
         return total_goals / max(1, len(recent_episodes))
 
+    def get_outside_road_rate(self, window: int = 100) -> float:
+        """도로 이탈률 계산"""
+        if not self.episodes:
+            return 0.0
+        recent_episodes = list(self.episodes)[-window:]
+        total_outside = sum(
+            sum(ep.outside_roads.values()) for ep in recent_episodes
+        )
+        return total_outside / max(1, len(recent_episodes))
+
     def get_termination_rate(self, window: int = 100) -> float:
         """조기 종료 비율 계산"""
         if not self.episodes:
@@ -149,27 +159,31 @@ class MetricsStore:
         )
         return total_early_terminations / max(1, len(recent_episodes))
 
-    def get_rates(self, window: int = 100) -> tuple[float, float, float]:
-        """충돌률과 목표 달성률, 조기 종료 비율 반환"""
+    def get_rates(self, window: int = 100) -> tuple[float, float, float, float]:
+        """목표 달성률, 조기 종료 비율, 도로 이탈율, 충돌률 반환"""
         if not self.episodes:
-            return 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0
         recent_episodes = list(self.episodes)[-window:]
         length = len(recent_episodes)
 
-        total_collisions = sum(
-            sum(ep.collisions.values()) for ep in recent_episodes
-        )
         total_goals = sum(
             sum(ep.goals_reached.values()) for ep in recent_episodes
         )
         total_early_terminations = sum(
             1 for ep in recent_episodes if ep.early_termination
         )
+        total_outside = sum(
+            sum(ep.outside_roads.values()) for ep in recent_episodes
+        )
+        total_collisions = sum(
+            sum(ep.collisions.values()) for ep in recent_episodes
+        )
 
-        collision_rate = total_collisions / max(1, length)
         success_rate = total_goals / max(1, length)
         termination_rate = total_early_terminations / max(1, length)
-        return collision_rate, success_rate, termination_rate
+        outside_road_rate = total_outside / max(1, length)
+        collision_rate = total_collisions / max(1, length)
+        return success_rate, termination_rate, outside_road_rate, collision_rate
 
     def get_performance_metrics(self) -> Dict[str, float]:
         """성능 메트릭 반환"""
@@ -270,16 +284,16 @@ class VehicleSpecificCallback(BaseCallback):
 
             if vehicle_rewards:
                 # 차량별 보상 통계
-                self.logger.record(f"vehicle_{vehicle_id}/mean_reward", np.mean(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/std_reward", np.std(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/max_reward", np.max(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/min_reward", np.min(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward_mean", np.mean(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward_std", np.std(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward_max", np.max(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward_min", np.min(vehicle_rewards))
 
                 # 차량별 성능 지표
                 num_episodes = len(recent_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/collision_rate", vehicle_collisions / num_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/goal_success_rate", vehicle_goals / num_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/outside_road_rate", vehicle_outside_roads / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate_success", vehicle_goals / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate_outside", vehicle_outside_roads / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate_collision", vehicle_collisions / num_episodes)
 
 
 class SystemPerformanceCallback(BaseCallback):
@@ -345,14 +359,15 @@ class TensorBoardLogger(BaseCallback):
 
             self.logger.record("rollout/episode_reward_mean_10", mean_reward)
             self.logger.record("rollout/episode_length_mean_10", mean_length)
-            self.logger.record("rollout/best_reward", self.metrics_store.best_reward)
+            self.logger.record("rollout/episode_best_reward", self.metrics_store.best_reward)
 
             # 메트릭
-            collision_rate, success_rate, termination_rate = self.metrics_store.get_rates(window=20)
+            success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=20)
 
-            self.logger.record("rollout/collision_rate", collision_rate)
-            self.logger.record("rollout/success_rate", success_rate)
-            self.logger.record("rollout/termination_rate", termination_rate)
+            self.logger.record("rollout/rate_success", success_rate)
+            self.logger.record("rollout/rate_termination", termination_rate)
+            self.logger.record("rollout/rate_outside", outside_road_rate)
+            self.logger.record("rollout/rate_collision", collision_rate)
 
             # 방금전 에피소드 메트릭
             episode = self.metrics_store.episodes[-1]
@@ -400,9 +415,10 @@ class TensorBoardLogger(BaseCallback):
         metric_dict = {
             "rollout/episode_reward_mean_10": 0.0,
             "rollout/episode_length_mean_10": 0.0,
-            "rollout/collision_rate": 0.0,
-            "rollout/success_rate": 0.0,
-            "rollout/termination_rate": 0.0,
+            "rollout/rate_success": 0.0,
+            "rollout/rate_termination": 0.0,
+            "rollout/rate_outside": 0.0,
+            "rollout/rate_collision": 0.0,
             "performance/steps_per_second": 0.0,
         }
 
@@ -467,8 +483,8 @@ class CustomCSVLogger(BaseCallback):
     def _init_csv(self):
         """CSV 파일 초기화"""
         headers = [
-            "elapsed_time", "episode", "timesteps", "reward", "length", "termination",
-            "collision_rate", "success_rate", "best_reward"
+            "elapsed_time", "episode", "timesteps", "reward", "length", "rate_success", "termination",
+            "rate_collision", "best_reward"
         ]
 
         with open(self.csv_file, 'w', encoding='utf-8') as f:
@@ -486,9 +502,9 @@ class CustomCSVLogger(BaseCallback):
         try:
             episode = self.metrics_store.episodes[-1]
 
+            success_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
             termination = 1.0 if episode.early_termination else 0.0
             collision_rate = sum(episode.collisions.values()) / max(1, len(episode.collisions))
-            success_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
 
             row = [
                 f"{episode.elapsed_time:.2f}",
@@ -496,9 +512,9 @@ class CustomCSVLogger(BaseCallback):
                 episode.timesteps,
                 f"{episode.reward:.4f}",
                 episode.length,
+                f"{success_rate:.4f}",
                 f"{termination:.4f}",
                 f"{collision_rate:.4f}",
-                f"{success_rate:.4f}",
                 f"{self.metrics_store.best_reward:.4f}"
             ]
 
@@ -559,15 +575,16 @@ class SmartCheckpointManager(BaseCallback):
 
     def _save_checkpoint_metadata(self):
         """체크포인트 메타데이터 저장"""
-        collision_rate, success_rate, termination_rate = self.metrics_store.get_rates(window=20)
+        success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=20)
         metadata = {
             'timestep': self.num_timesteps,
             'episode': self.metrics_store.episode_count,
             'mean_reward': self.metrics_store.get_recent_mean_reward(10),
             'best_reward': self.metrics_store.best_reward,
-            'collision_rate': collision_rate,
-            'success_rate': success_rate,
-            'termination_rate': termination_rate,
+            'rate_success': success_rate,
+            'rate_termination': termination_rate,
+            'rate_outside': outside_road_rate,
+            'rate_collision': collision_rate,
             'timestamp': time.time()
         }
 
