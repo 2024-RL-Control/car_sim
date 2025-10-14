@@ -191,15 +191,15 @@ class MetricsStore:
 
         if self.training_start_time:
             elapsed_time = time.time() - self.training_start_time
-            metrics['elapsed_hours'] = elapsed_time / 3600
-            metrics['steps_per_second'] = self.total_timesteps / elapsed_time if elapsed_time > 0 else 0
+            metrics['time/elapsed(h)'] = elapsed_time / 3600
+            metrics['step/per_second(num)'] = self.total_timesteps / elapsed_time if elapsed_time > 0 else 0
 
         if self.step_times:
-            metrics['avg_step_time_ms'] = np.mean(self.step_times) * 1000
+            metrics['step/avg_time(ms)'] = np.mean(self.step_times) * 1000
 
         if self.gpu_memory_usage:
-            metrics['gpu_memory_current_gb'] = self.gpu_memory_usage[-1]
-            metrics['gpu_memory_max_gb'] = max(self.gpu_memory_usage)
+            metrics['gpu/current_memory(gb)'] = self.gpu_memory_usage[-1]
+            metrics['gpu/max_memory(gb)'] = max(self.gpu_memory_usage)
 
         return metrics
 
@@ -249,7 +249,7 @@ class VehicleSpecificCallback(BaseCallback):
     def _on_step(self) -> bool:
         # 에피소드 종료 시 즉시 로깅
         if self.metrics_store.episode_count > self.last_episode_count:
-            self._log_vehicle_metrics()
+            self._log_vehicle_metrics(10)
             self.last_episode_count = self.metrics_store.episode_count
 
         return True
@@ -284,16 +284,16 @@ class VehicleSpecificCallback(BaseCallback):
 
             if vehicle_rewards:
                 # 차량별 보상 통계
-                self.logger.record(f"vehicle_{vehicle_id}/reward_mean", np.mean(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/reward_std", np.std(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/reward_max", np.max(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/reward_min", np.min(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/mean/{window}", np.mean(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/std/{window}", np.std(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/max/{window}", np.max(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/min/{window}", np.min(vehicle_rewards))
 
                 # 차량별 성능 지표
                 num_episodes = len(recent_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/rate_success", vehicle_goals / num_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/rate_outside", vehicle_outside_roads / num_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/rate_collision", vehicle_collisions / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate/success/{window}", vehicle_goals / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate/outside/{window}", vehicle_outside_roads / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate/collision/{window}", vehicle_collisions / num_episodes)
 
 
 class SystemPerformanceCallback(BaseCallback):
@@ -354,25 +354,27 @@ class TensorBoardLogger(BaseCallback):
 
         if self.metrics_store.episode_count > self.last_episode_count:
             # 최근 10개 에피소드 메트릭
-            mean_reward = self.metrics_store.get_recent_mean_reward(window=10)
-            mean_length = self.metrics_store.get_recent_mean_length(window=10)
+            window = 10
+            mean_reward = self.metrics_store.get_recent_mean_reward(window=window)
+            mean_length = self.metrics_store.get_recent_mean_length(window=window)
 
-            self.logger.record("rollout/episode_reward_mean_10", mean_reward)
-            self.logger.record("rollout/episode_length_mean_10", mean_length)
-            self.logger.record("rollout/episode_best_reward", self.metrics_store.best_reward)
+            self.logger.record("rollout/episode/reward/mean/10", mean_reward)
+            self.logger.record("rollout/episode/length/mean/10", mean_length)
+            self.logger.record("rollout/episode/reward/best", self.metrics_store.best_reward)
 
             # 메트릭
-            success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=20)
+            window = 100
+            success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=window)
 
-            self.logger.record("rollout/rate_success", success_rate)
-            self.logger.record("rollout/rate_termination", termination_rate)
-            self.logger.record("rollout/rate_outside", outside_road_rate)
-            self.logger.record("rollout/rate_collision", collision_rate)
+            self.logger.record("rollout/rate/success", success_rate)
+            self.logger.record("rollout/rate/termination", termination_rate)
+            self.logger.record("rollout/rate/outside", outside_road_rate)
+            self.logger.record("rollout/rate/collision", collision_rate)
 
             # 방금전 에피소드 메트릭
             episode = self.metrics_store.episodes[-1]
-            self.logger.record("rollout/episode_reward", episode.reward)
-            self.logger.record("rollout/episode_length", episode.length)
+            self.logger.record("rollout/episode/reward", episode.reward)
+            self.logger.record("rollout/episode/length", episode.length)
             self.logger.dump(episode.timesteps)
 
             self.last_episode_count = self.metrics_store.episode_count
@@ -413,13 +415,15 @@ class TensorBoardLogger(BaseCallback):
 
         # 메트릭 정의
         metric_dict = {
-            "rollout/episode_reward_mean_10": 0.0,
-            "rollout/episode_length_mean_10": 0.0,
-            "rollout/rate_success": 0.0,
-            "rollout/rate_termination": 0.0,
-            "rollout/rate_outside": 0.0,
-            "rollout/rate_collision": 0.0,
-            "performance/steps_per_second": 0.0,
+            "rollout/episode/reward/mean/10": 0.0,
+            "rollout/episode/length/mean/10": 0.0,
+            "rollout/episode/reward/best": 0.0,
+            "rollout/episode/reward": 0.0,
+            "rollout/episode/length": 0.0,
+            "rollout/rate/success": 0.0,
+            "rollout/rate/termination": 0.0,
+            "rollout/rate/outside": 0.0,
+            "rollout/rate/collision": 0.0,
         }
 
         self.logger.record(
@@ -575,11 +579,12 @@ class SmartCheckpointManager(BaseCallback):
 
     def _save_checkpoint_metadata(self):
         """체크포인트 메타데이터 저장"""
-        success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=20)
+        window = 100
+        success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=window)
         metadata = {
             'timestep': self.num_timesteps,
             'episode': self.metrics_store.episode_count,
-            'mean_reward': self.metrics_store.get_recent_mean_reward(10),
+            'mean_reward': self.metrics_store.get_recent_mean_reward(window=window),
             'best_reward': self.metrics_store.best_reward,
             'rate_success': success_rate,
             'rate_termination': termination_rate,

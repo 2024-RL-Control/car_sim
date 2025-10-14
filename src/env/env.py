@@ -513,18 +513,19 @@ class CarSimulatorEnv(gym.Env):
         speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
 
-        # 정지 페널티
-        is_stop = abs(state.vel_long) < 0.01  # 더 엄격한 정지 판정
+        # 저속 페널티
+        is_stop = abs(state.vel_long) < 0.28    # 0.28m/s, 1.0km/h
         if is_stop:
-            delta = state.get_delta_progress()
-            stop_penalty = -abs(delta) * 10.0
-            reward += stop_penalty
+            reward += -0.05
+            # delta = state.get_delta_progress()
+            # stop_penalty = max(-abs(delta) * 50.0, -0.1)
+            # reward += stop_penalty
 
         # 후진 페널티
-        is_reversing = state.vel_long < -0.1  # 후진 속도 임계값
+        is_reversing = state.vel_long < -0.28  # -0.28m/s, -1.0km/h
         if is_reversing:
             reward += -0.1
 
-        # print(f"Delta: {state.get_delta_progress()}")
+        # print(f"Delta: {state.get_delta_progress()}, {stop_penalty}")
         # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, {speed_reward}")
         return reward
