@@ -415,12 +415,17 @@ class TensorBoardLogger(BaseCallback):
             self.logger.record("rollout/episode/reward/best", self.metrics_store.best_reward)
 
             # 메트릭
-            success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=50)
+            success_rate_30, termination_rate_30, outside_road_rate_30, collision_rate_30 = self.metrics_store.get_rates(window=30)
+            self.logger.record("rollout/rate/success/30", success_rate_30)
+            self.logger.record("rollout/rate/termination/30", termination_rate_30)
+            self.logger.record("rollout/rate/outside/30", outside_road_rate_30)
+            self.logger.record("rollout/rate/collision/30", collision_rate_30)
 
-            self.logger.record("rollout/rate/success/50", success_rate)
-            self.logger.record("rollout/rate/termination/50", termination_rate)
-            self.logger.record("rollout/rate/outside/50", outside_road_rate)
-            self.logger.record("rollout/rate/collision/50", collision_rate)
+            success_rate_50, termination_rate_50, outside_road_rate_50, collision_rate_50 = self.metrics_store.get_rates(window=50)
+            self.logger.record("rollout/rate/success/50", success_rate_50)
+            self.logger.record("rollout/rate/termination/50", termination_rate_50)
+            self.logger.record("rollout/rate/outside/50", outside_road_rate_50)
+            self.logger.record("rollout/rate/collision/50", collision_rate_50)
 
             # 방금전 에피소드 메트릭
             episode = self.metrics_store.episodes[-1]
