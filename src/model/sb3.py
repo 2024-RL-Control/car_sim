@@ -995,6 +995,46 @@ class SACVehicleAlgorithm(SAC):
         callback.on_training_end()
         return self
 
+    def _get_tb_writer(self):
+        """
+        로거에서 TensorBoard writer를 찾아 반환합니다.
+        """
+        output_formats = self.logger.output_formats
+        tb_formatter = next(
+            (formatter for formatter in output_formats
+            if isinstance(formatter, TensorBoardOutputFormat)),
+            None
+        )
+        return tb_formatter.writer if tb_formatter else None
+
+    def train(self, batch_size: int, gradient_steps: int) -> None:
+        """
+        SAC 훈련 스텝을 수행하고 추가 메트릭을 로깅합니다.
+        """
+        # 텐서보드 writer 가져오기
+        tb_writer = self._get_tb_writer()
+
+        # 훈련 전에 리플레이 버퍼에서 데이터 샘플링
+        if tb_writer:
+            replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
+            with torch.no_grad():
+                # Critic을 통해 Q-가치 예측
+                qf1_values, qf2_values = self.critic(replay_data.observations, replay_data.actions)
+                q_values = torch.min(qf1_values, qf2_values).cpu().numpy().flatten()
+                actions = replay_data.actions.cpu().numpy().flatten()
+
+                # 스칼라 값 로깅
+                self.logger.record("sac/q_values/mean", np.mean(q_values))
+                self.logger.record("sac/actions/mean_batch", np.mean(actions))
+                self.logger.record("sac/actions/std_batch", np.std(actions))
+
+                # 히스토그램 로깅
+                tb_writer.add_histogram("sac/q_values", q_values, self.num_timesteps)
+                tb_writer.add_histogram("sac/actions", actions, self.num_timesteps)
+
+        # 원래의 train 메소드 호출
+        super().train(batch_size=batch_size, gradient_steps=gradient_steps)
+
 
 class PPOVehicleAlgorithm(PPO):
     def __init__(self, *args, **kwargs):
@@ -1182,11 +1222,54 @@ class PPOVehicleAlgorithm(PPO):
             if not continue_training:
                 break
 
+            if self.rollout_buffer.full:
+                # 어드밴티지 계산
+                self.rollout_buffer.compute_returns_and_advantage(
+                    last_values=torch.zeros(self.num_vehicles,),  # Dummy last values
+                    dones=np.zeros(self.num_vehicles,) # Dummy dones
+                )
+                self._log_ppo_specific_metrics()
+
             self.train()
             self.rollout_buffer.reset()
 
         callback.on_training_end()
         return self
+
+    def _get_tb_writer(self):
+        """
+        로거에서 TensorBoard writer를 찾아 반환합니다.
+        """
+        output_formats = self.logger.output_formats
+        tb_formatter = next(
+            (formatter for formatter in output_formats
+            if isinstance(formatter, TensorBoardOutputFormat)),
+            None
+        )
+        return tb_formatter.writer if tb_formatter else None
+
+    def _log_ppo_specific_metrics(self):
+        """PPO 롤아웃 데이터를 텐서보드에 로깅합니다."""
+        # 텐서보드 writer 가져오기
+        tb_writer = self._get_tb_writer()
+        if not tb_writer:
+            return
+
+        # 데이터 추출 (Numpy 배열로 변환)
+        actions = self.rollout_buffer.actions.flatten()
+        advantages = self.rollout_buffer.advantages.flatten()
+        values = self.rollout_buffer.values.flatten()
+
+        # 스칼라 값 로깅 (평균, 표준편차)
+        self.logger.record("ppo/actions/mean", np.mean(actions))
+        self.logger.record("ppo/actions/std", np.std(actions))
+        self.logger.record("ppo/advantages/mean", np.mean(advantages))
+        self.logger.record("ppo/values/mean", np.mean(values))
+
+        # 히스토그램 로깅
+        tb_writer.add_histogram("ppo/actions", actions, self.num_timesteps)
+        tb_writer.add_histogram("ppo/advantages", advantages, self.num_timesteps)
+        tb_writer.add_histogram("ppo/values", values, self.num_timesteps)
 
 
 # 커스텀 피처 익스트랙터
