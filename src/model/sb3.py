@@ -357,17 +357,28 @@ class TensorBoardLogger(BaseCallback):
         # 2. 최종 성능 지표 로깅
         mean_reward_10 = self.metrics_store.get_recent_mean_reward(window=10)
         mean_length_10 = self.metrics_store.get_recent_mean_length(window=10)
-        success_rate, term_rate, out_rate, coll_rate = self.metrics_store.get_rates(window=50)
+
+        success_rate_10, termination_rate_10, outside_road_rate_10, collision_rate_10 = self.metrics_store.get_rates(window=10)
+        success_rate_30, termination_rate_30, outside_road_rate_30, collision_rate_30 = self.metrics_store.get_rates(window=30)
+        success_rate_50, term_rate_50, out_rate_50, coll_rate_50 = self.metrics_store.get_rates(window=50)
         perf_metrics = self.metrics_store.get_performance_metrics()
 
         metric_dict = {
             "episode/reward/mean/10": mean_reward_10,
             "episode/length/mean/10": mean_length_10,
             "episode/reward/best": self.metrics_store.best_reward,
-            "rate/success/50": success_rate,
-            "rate/termination/50": term_rate,
-            "rate/outside/50": out_rate,
-            "rate/collision/50": coll_rate,
+            "rate/success/10": success_rate_10,
+            "rate/termination/10": termination_rate_10,
+            "rate/outside/10": outside_road_rate_10,
+            "rate/collision/10": collision_rate_10,
+            "rate/success/30": success_rate_30,
+            "rate/termination/30": termination_rate_30,
+            "rate/outside/30": outside_road_rate_30,
+            "rate/collision/30": collision_rate_30,
+            "rate/success/50": success_rate_50,
+            "rate/termination/50": term_rate_50,
+            "rate/outside/50": out_rate_50,
+            "rate/collision/50": coll_rate_50,
             "time/elapsed(h)": perf_metrics['time/elapsed(h)'],
             "step/per_second(num)": perf_metrics['step/per_second(num)'],
             "step/avg_time(ms)": perf_metrics['step/avg_time(ms)'],
