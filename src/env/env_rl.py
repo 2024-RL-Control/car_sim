@@ -649,25 +649,27 @@ class BasicRLDrivingEnv(gym.Env):
 
         if algorithm == 'sac':
             # SAC 하이퍼파라미터 설정
-            buffer_size             = self.max_step // 5
-            learning_rate           = 3e-4
-            batch_size              = 256
-            learning_starts         = 5000
-            n_envs                  = 1
-            tau                     = 0.005     # 타겟 네트워크 업데이트 속도
-            gamma                   = 0.995     # 할인 인수
-            ent_coef                = "auto"    # 엔트로피 계수
-            train_freq              = 1         # 훈련 빈도
-            gradient_steps          = 1         # 그라디언트 스텝
-            target_update_interval  = 1         # 타겟 업데이트 간격
+            hyperparameters ={
+                "buffer_size": self.max_step // 5,
+                "learning_rate": 3e-4,
+                "batch_size": 256,
+                "learning_starts": 5000,
+                "n_envs": 1,
+                "tau": 0.005,                   # 타겟 네트워크 업데이트 속도
+                "gamma": 0.995,                 # 할인 인수
+                "ent_coef": "auto",             # 엔트로피 계수
+                "train_freq": 1,                # 훈련 빈도
+                "gradient_steps": 1,            # 그라디언트 스텝
+                "target_update_interval": 1     # 타겟 업데이트 간격
+            }
 
             # 공유 리플레이 버퍼 생성
             shared_buffer = ReplayBuffer(
-                buffer_size=buffer_size,
+                buffer_size=hyperparameters['buffer_size'],
                 observation_space=self.env.observation_space,
                 action_space=self.env.action_space,
                 device=self.device,
-                n_envs=n_envs,
+                n_envs=hyperparameters['n_envs'],
                 handle_timeout_termination=False
             )
 
@@ -676,17 +678,17 @@ class BasicRLDrivingEnv(gym.Env):
                 policy="MlpPolicy",
                 env=env,
                 logging_freq=self.rl_callback_config['logging_freq'],
-                learning_rate=learning_rate,
+                learning_rate=hyperparameters['learning_rate'],
                 policy_kwargs=policy_kwargs,
                 buffer_size=0,
-                learning_starts=learning_starts,
-                batch_size=batch_size,
-                tau=tau,
-                gamma=gamma,
-                ent_coef=ent_coef,
-                train_freq=train_freq,
-                gradient_steps=gradient_steps,
-                target_update_interval=target_update_interval,
+                learning_starts=hyperparameters['learning_starts'],
+                batch_size=hyperparameters['batch_size'],
+                tau=hyperparameters['tau'],
+                gamma=hyperparameters['gamma'],
+                ent_coef=hyperparameters['ent_coef'],
+                train_freq=hyperparameters['train_freq'],
+                gradient_steps=hyperparameters['gradient_steps'],
+                target_update_interval=hyperparameters['target_update_interval'],
                 verbose=1,
                 tensorboard_log=log_dir,
                 device=self.device
@@ -696,32 +698,34 @@ class BasicRLDrivingEnv(gym.Env):
             model.replay_buffer = shared_buffer
         elif algorithm == 'ppo':
             # PPO 하이퍼파라미터 설정
-            learning_rate = 3e-4
-            n_steps       = 1024
-            batch_size    = 256
-            n_epochs      = 10
-            gamma         = 0.995
-            gae_lambda    = 0.95
-            clip_range    = 0.2     # 클리핑 범위
-            ent_coef      = 0.01    # 엔트로피 보너스, 정책 탐험 장려
-            vf_coef       = 0.5     # 가치 함수 손실 계수
-            max_grad_norm = 0.5     # 그라디언트 클리핑
+            hyperparameters = {
+                "learning_rate": 3e-4,
+                "n_steps": 1024,
+                "batch_size": 256,
+                "n_epochs": 10,
+                "gamma": 0.995,
+                "gae_lambda": 0.95,
+                "clip_range": 0.2,      # 클리핑 범위
+                "ent_coef": 0.01,       # 엔트로피 보너스, 정책 탐험 장려
+                "vf_coef": 0.5,         # 가치 함수 손실 계수
+                "max_grad_norm": 0.5    # 그라디언트 클리핑
+            }
 
             # 커스텀 PPO 모델 생성
             model = PPOVehicleAlgorithm(
                 policy="MlpPolicy",
                 env=env,
                 logging_freq=self.rl_callback_config['logging_freq'],
-                learning_rate=learning_rate,
-                n_steps=n_steps,
-                batch_size=batch_size,
-                n_epochs=n_epochs,
-                gamma=gamma,
-                gae_lambda=gae_lambda,
-                clip_range=clip_range,
-                ent_coef=ent_coef,
-                vf_coef=vf_coef,
-                max_grad_norm=max_grad_norm,
+                learning_rate=hyperparameters['learning_rate'],
+                n_steps=hyperparameters['n_steps'],
+                batch_size=hyperparameters['batch_size'],
+                n_epochs=hyperparameters['n_epochs'],
+                gamma=hyperparameters['gamma'],
+                gae_lambda=hyperparameters['gae_lambda'],
+                clip_range=hyperparameters['clip_range'],
+                ent_coef=hyperparameters['ent_coef'],
+                vf_coef=hyperparameters['vf_coef'],
+                max_grad_norm=hyperparameters['max_grad_norm'],
                 policy_kwargs=policy_kwargs,
                 verbose=1,
                 tensorboard_log=log_dir,
@@ -737,8 +741,17 @@ class BasicRLDrivingEnv(gym.Env):
         print(model.policy)
 
         # 최적화된 콜백 시스템 설정
+        param_config = {
+            "algorithm": model.__class__.__name__,
+            "dir": run_name,
+            "net_arch": str(policy_kwargs['net_arch']),
+            "activation_fn": policy_kwargs['activation_fn'].__name__,
+        }
+        param_config.update(hyperparameters)
+
         callback_config = {
             'algorithm': algorithm,
+            'hyperparameters': param_config,
             'num_vehicles': self.num_vehicles,
             'num_static_obstacles': self.num_static_obstacles,
             'num_dynamic_obstacles': self.num_dynamic_obstacles,

@@ -28,7 +28,7 @@ simulation:
     state_history: 5       # 상태 이력 저장 주파수 [Hz]
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   rl:
-    train_max_steps: 1000000
+    train_max_steps: 500000
     train_max_episode_steps: 1500   # maximum steps per episode
     action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
@@ -40,11 +40,13 @@ simulation:
       trajectory_dim: 0
     rewards:
       goal_reached_reward: 500.0        # reward for reaching the goal
-      collision_penalty: -250.0         # penalty for collision
-      outside_road_penalty: -200.0      # penalty for going outside the road
-      progress_factor: 0.5              # reward factor for reducing distance to goal
-      lane_keeping_factor: 0.2          # reward factor for staying in the lane
-      speed_factor: 0.3                 # reward factor for maintaining/reaching target speed
+      collision_penalty: -400.0         # penalty for collision
+      outside_road_penalty: -300.0      # penalty for going outside the road
+      progress_factor: 1.5              # reward factor for reducing distance to goal
+      lane_keeping_factor: 0.5          # reward factor for staying in the lane
+      speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
+      slow_penalty: -0.15               # penalty for very low speed
+      reverse_penalty: -0.2             # penalty for driving in reverse
     callbacks:
       max_episodes_history: 1000       # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수

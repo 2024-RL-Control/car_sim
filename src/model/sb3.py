@@ -357,17 +357,17 @@ class TensorBoardLogger(BaseCallback):
         # 2. 최종 성능 지표 로깅
         mean_reward_10 = self.metrics_store.get_recent_mean_reward(window=10)
         mean_length_10 = self.metrics_store.get_recent_mean_length(window=10)
-        success_rate, term_rate, out_rate, coll_rate = self.metrics_store.get_rates(window=100)
+        success_rate, term_rate, out_rate, coll_rate = self.metrics_store.get_rates(window=50)
         perf_metrics = self.metrics_store.get_performance_metrics()
 
         metric_dict = {
             "episode/reward/mean/10": mean_reward_10,
             "episode/length/mean/10": mean_length_10,
             "episode/reward/best": self.metrics_store.best_reward,
-            "rate/success": success_rate,
-            "rate/termination": term_rate,
-            "rate/outside": out_rate,
-            "rate/collision": coll_rate,
+            "rate/success/50": success_rate,
+            "rate/termination/50": term_rate,
+            "rate/outside/50": out_rate,
+            "rate/collision/50": coll_rate,
             "time/elapsed(h)": perf_metrics['time/elapsed(h)'],
             "step/per_second(num)": perf_metrics['step/per_second(num)'],
             "step/avg_time(ms)": perf_metrics['step/avg_time(ms)'],
@@ -415,12 +415,12 @@ class TensorBoardLogger(BaseCallback):
             self.logger.record("rollout/episode/reward/best", self.metrics_store.best_reward)
 
             # 메트릭
-            success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=100)
+            success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=50)
 
-            self.logger.record("rollout/rate/success", success_rate)
-            self.logger.record("rollout/rate/termination", termination_rate)
-            self.logger.record("rollout/rate/outside", outside_road_rate)
-            self.logger.record("rollout/rate/collision", collision_rate)
+            self.logger.record("rollout/rate/success/50", success_rate)
+            self.logger.record("rollout/rate/termination/50", termination_rate)
+            self.logger.record("rollout/rate/outside/50", outside_road_rate)
+            self.logger.record("rollout/rate/collision/50", collision_rate)
 
             # 방금전 에피소드 메트릭
             episode = self.metrics_store.episodes[-1]
@@ -434,24 +434,9 @@ class TensorBoardLogger(BaseCallback):
 
     def _get_hparam_dict(self) -> Dict[str, Any]:
         """하이퍼파라미터 로깅"""
-        hparam_dict = {
-            "algorithm": self.model.__class__.__name__,
-            "learning_rate": float(self.model.learning_rate),
-            "gamma": float(self.model.gamma),
-            "net_arch": str(self.model.policy_kwargs.get("net_arch", "default"))
-        }
+        hparam_dict = {}
 
-        # 알고리즘별 특화 파라미터
-        algo_specific = {
-            "batch_size": getattr(self.model, 'batch_size', None),
-            "buffer_size": getattr(self.model, 'buffer_size', None),
-            "tau": getattr(self.model, 'tau', None),
-            "ent_coef": getattr(self.model, 'ent_coef', None),
-            "n_steps": getattr(self.model, 'n_steps', None),
-            "n_epochs": getattr(self.model, 'n_epochs', None),
-        }
-
-        for key, value in algo_specific.items():
+        for key, value in self.env_config['hyperparameters'].items():
             if value is not None:
                 hparam_dict[key] = float(value) if isinstance(value, (int, float)) else value
 
@@ -462,6 +447,8 @@ class TensorBoardLogger(BaseCallback):
                 "env/max_episode_steps": self.env_config.get('max_episode_steps', 1000),
                 "env/num_static_obstacles": self.env_config.get('num_static_obstacles', 0),
                 "env/num_dynamic_obstacles": self.env_config.get('num_dynamic_obstacles', 0),
+                "env/termination_step_threshold": self.env_config.get('termination_step_threshold', 0),
+                "env/progress_threshold": self.env_config.get('progress_threshold', 0),
             }
             hparam_dict.update(env_params)
 
@@ -472,6 +459,8 @@ class TensorBoardLogger(BaseCallback):
                 "reward/progress": self.env_config['reward_factor'].get('progress_factor', 0.0),
                 "reward/lane_keeping": self.env_config['reward_factor'].get('lane_keeping_factor', 0.0),
                 "reward/speed": self.env_config['reward_factor'].get('speed_factor', 0.0),
+                "reward/slow": self.env_config['reward_factor'].get('slow_penalty', 0.0),
+                "reward/reverse": self.env_config['reward_factor'].get('reverse_penalty', 0.0),
             }
             hparam_dict.update(reward_params)
 
@@ -624,11 +613,11 @@ class SmartCheckpointManager(BaseCallback):
 
     def _save_checkpoint_metadata(self):
         """체크포인트 메타데이터 저장"""
-        success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=100)
+        success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=50)
         metadata = {
             'timestep': self.num_timesteps,
             'episode': self.metrics_store.episode_count,
-            'mean_reward': self.metrics_store.get_recent_mean_reward(window=100),
+            'mean_reward': self.metrics_store.get_recent_mean_reward(window=50),
             'best_reward': self.metrics_store.best_reward,
             'rate_success': success_rate,
             'rate_termination': termination_rate,
