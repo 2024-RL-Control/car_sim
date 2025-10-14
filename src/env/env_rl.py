@@ -246,16 +246,8 @@ class BasicRLDrivingEnv(gym.Env):
         # 초기화 시 장애물 및 목적지 설정
         self.setup_environment()
 
-        # 스텝 카운터
-        self.steps = 0
-        self.max_step = self.env.config['simulation']['train_max_steps']
-        self.max_episode_steps = self.env.config['simulation']['train_max_episode_steps']
-
-        # 에피소드 정보 저장용
-        self.episode_count = -1
-
         # ActionController 초기화
-        self.rl_config = self.env.config['simulation']['reinforcement_learning']
+        self.rl_config = self.env.config['simulation']['rl']
         self.rl_callback_config = self.rl_config['callbacks']
 
         action_hold_behavior = self.rl_config.get('action_hold_behavior', True)
@@ -271,6 +263,14 @@ class BasicRLDrivingEnv(gym.Env):
         else:
             self.action_controller = None
             print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
+
+        # 스텝 카운터
+        self.steps = 0
+        self.max_step = self.rl_config['train_max_steps']
+        self.max_episode_steps = self.rl_config['train_max_episode_steps']
+
+        # 에피소드 정보 저장용
+        self.episode_count = -1
 
     def _calculate_vehicle_areas(self):
         """차량 배치 가능 영역 계산"""
@@ -740,14 +740,14 @@ class BasicRLDrivingEnv(gym.Env):
             'max_episode_steps': self.max_episode_steps,
             'max_episodes_history': self.rl_callback_config['max_episodes_history'],
             'max_steps_history': self.rl_callback_config['max_steps_history'],
+            'termination_step_threshold': self.rl_callback_config['termination_step_threshold'],
+            'progress_threshold': self.rl_callback_config['progress_threshold'],
             'gpu_memory_limit': self.rl_callback_config['gpu_memory_limit'],
             'monitoring_freq': self.rl_callback_config['monitoring_freq'],
             'logging_freq': self.rl_callback_config['logging_freq'],
             'checkpoint_freq': self.rl_callback_config['checkpoint_freq'],
             'max_checkpoints': self.rl_callback_config['max_checkpoints'],
             'save_best_model': self.rl_callback_config['save_best_model'],
-            'termination_step_threshold': self.rl_callback_config['termination_step_threshold'],
-            'progress_threshold': self.rl_callback_config['progress_threshold'],
             'verbose': self.rl_callback_config['verbose']
         }
 
@@ -849,7 +849,7 @@ class BasicRLDrivingEnv(gym.Env):
             print(f"모델 파일이 존재하지 않습니다: {model_path}")
             return
 
-        max_episode = self.env.config['simulation']['eval_episode']
+        max_episode = self.env.config['simulation']['rl']['eval_episode']
 
         dummy_env = DummyEnv(self)
         env = Monitor(dummy_env)

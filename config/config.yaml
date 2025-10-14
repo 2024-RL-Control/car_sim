@@ -4,49 +4,6 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
-  hz: # (시뮬레이션 시간 기준)
-    frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz]
-    lidar_update: 10       # 라이다 스캔 주파수 [Hz]
-    trajectory_update: 2   # 궤적 예측 업데이트 주파수 [Hz]
-    collision_check: 20    # 충돌 검사 주파수 [Hz]
-    goal_check: 10         # 목적지 도달 확인 주파수 [Hz]
-    state_history: 5       # 상태 이력 저장 주파수 [Hz]
-  memory_management:
-    # SubsystemManager 캐시 설정
-    subsystem_cache:
-      max_cache_size: 1000        # 최대 캐시 항목 수
-      cleanup_interval: 60.0      # 캐시 정리 주기 [seconds]
-      memory_threshold_mb: 100    # 메모리 임계값 [MB]
-      max_cache_age: 3600.0       # 최대 캐시 보존 시간 [seconds]
-    # Road 시스템 캐시 설정
-    road_cache:
-      max_cache_size: 1000        # 투영 캐시 최대 크기
-      cleanup_interval: 300.0     # 캐시 정리 주기 [seconds]
-      max_cache_age: 1800.0       # 최대 캐시 보존 시간 [seconds]
-  observation:
-    vehicle_state_dim: 12
-    lidar_dim: 13
-    trajectory_dim: 0
-  # 강화학습 관련 설정 (시뮬레이션 시간 기준)
-  reinforcement_learning:
-    action_selection_hz: 10     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
-    action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
-    debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
-    callbacks:
-      max_episodes_history: 1000       # 최근 에피소드 기록 최대 개수
-      max_steps_history: 3000          # 최근 스텝 기록 최대 개수
-      gpu_memory_limit: 5              # GPU 메모리 제한 [GB]
-      monitoring_freq: 100             # 메모리 등 하드웨어 모니터링 빈도 [steps]
-      logging_freq: 1000               # 매트릭 및 성능 로그 기록 빈도 [steps]
-      checkpoint_freq: 10000           # 체크포인트 저장 주기 [steps]
-      max_checkpoints: 10              # 최대 체크포인트 개수
-      save_best_model: true            # 최고 성능 모델 저장 여부
-      termination_step_threshold: 500  # 조기 종료를 위한 최대 스텝 수
-      progress_threshold: 0.3          # 조기 종료를 위한 진행 상황 임계값
-      verbose: 1                       # 콜백 시스템 상세 출력 레벨 (0: 없음, 1: 기본, 2: 상세)
-  train_max_steps: 1000000
-  train_max_episode_steps: 1500    # maximum steps per episode
-  eval_episode: 10  # number of episodes for evaluation
   num_vehicles: 1  # number of vehicles on the environment
   boundary:         # [m]
     x_min: -50
@@ -62,6 +19,44 @@ simulation:
       x_max: 10
       y_min: -10
       y_max: 10
+  hz: # (시뮬레이션 시간 기준)
+    frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz]
+    lidar_update: 10       # 라이다 스캔 주파수 [Hz]
+    trajectory_update: 2   # 궤적 예측 업데이트 주파수 [Hz]
+    collision_check: 20    # 충돌 검사 주파수 [Hz]
+    goal_check: 10         # 목적지 도달 확인 주파수 [Hz]
+    state_history: 5       # 상태 이력 저장 주파수 [Hz]
+  # 강화학습 관련 설정 (시뮬레이션 시간 기준)
+  rl:
+    train_max_steps: 1000000
+    train_max_episode_steps: 1500   # maximum steps per episode
+    action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
+    debug_action_timing: false      # 행동 선택 타이밍 디버그 출력 여부
+    eval_episode: 10                # number of episodes for evaluation
+    observation:
+      vehicle_state_dim: 12
+      lidar_dim: 13
+      trajectory_dim: 0
+    rewards:
+      goal_reached_reward: 500.0        # reward for reaching the goal
+      collision_penalty: -200.0         # penalty for collision
+      outside_road_penalty: -100.0      # penalty for going outside the road
+      progress_factor: 0.6              # reward factor for reducing distance to goal
+      lane_keeping_factor: 0.2          # reward factor for staying in the lane
+      speed_factor: 0.2                 # reward factor for maintaining/reaching target speed
+    callbacks:
+      max_episodes_history: 1000       # 최근 에피소드 기록 최대 개수
+      max_steps_history: 3000          # 최근 스텝 기록 최대 개수
+      termination_step_threshold: 500  # 조기 종료를 위한 최대 스텝 수
+      progress_threshold: 0.15         # 조기 종료를 위한 진행 상황 임계값
+      gpu_memory_limit: 5              # GPU 메모리 제한 [GB]
+      monitoring_freq: 100             # 메모리 등 하드웨어 모니터링 빈도 [steps]
+      logging_freq: 1000               # 매트릭 및 성능 로그 기록 빈도 [steps]
+      checkpoint_freq: 10000           # 체크포인트 저장 주기 [steps]
+      max_checkpoints: 10              # 최대 체크포인트 개수
+      save_best_model: true            # 최고 성능 모델 저장 여부
+      verbose: 1                       # 콜백 시스템 상세 출력 레벨 (0: 없음, 1: 기본, 2: 상세)
   path_planning:
     max_iterations: 250           # maximum iterations for path planning
     base_step_size: 1.0           # Base for variable RRT step [m]
@@ -80,13 +75,18 @@ simulation:
     max_speed: 13.9               # maximum speed for path planning [m/s] (50 km/h)
     max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
     lookahead_distance: 18.0       # lookahead distance for speed calculation [m]
-  rewards:
-    goal_reached_reward: 500.0       # reward for reaching the goal
-    collision_penalty: -200.0         # penalty for collision
-    outside_road_penalty: -100.0      # penalty for going outside the road
-    progress_factor: 0.5              # reward factor for reducing distance to goal
-    lane_keeping_factor: 0.25          # reward factor for staying in the lane
-    speed_factor: 0.25                 # reward factor for maintaining/reaching target speed
+  memory_management:
+    # SubsystemManager 캐시 설정
+    subsystem_cache:
+      max_cache_size: 1000        # 최대 캐시 항목 수
+      cleanup_interval: 60.0      # 캐시 정리 주기 [seconds]
+      memory_threshold_mb: 100    # 메모리 임계값 [MB]
+      max_cache_age: 3600.0       # 최대 캐시 보존 시간 [seconds]
+    # Road 시스템 캐시 설정
+    road_cache:
+      max_cache_size: 1000        # 투영 캐시 최대 크기
+      cleanup_interval: 300.0     # 캐시 정리 주기 [seconds]
+      max_cache_age: 1800.0       # 최대 캐시 보존 시간 [seconds]
 
 # Visualization parameters
 visualization:

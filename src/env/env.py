@@ -104,9 +104,9 @@ class CarSimulatorEnv(gym.Env):
 
     def _calculate_obs_dim(self):
         """관측 차원 동적 계산"""
-        vehicle_state_dim = self.config['simulation']['observation']['vehicle_state_dim']  # 차량 상태 데이터
-        lidar_dim = self.config['simulation']['observation']['lidar_dim']  # 라이다 데이터
-        trajectory_dim = self.config['simulation']['observation']['trajectory_dim']  # 경로 데이터
+        vehicle_state_dim = self.config['simulation']['rl']['observation']['vehicle_state_dim']  # 차량 상태 데이터
+        lidar_dim = self.config['simulation']['rl']['observation']['lidar_dim']  # 라이다 데이터
+        trajectory_dim = self.config['simulation']['rl']['observation']['trajectory_dim']  # 경로 데이터
         return vehicle_state_dim + lidar_dim + trajectory_dim
 
     def _init_pygame(self):
@@ -464,7 +464,7 @@ class CarSimulatorEnv(gym.Env):
             계산된 보상값
         """
         state = vehicle.get_state()
-        rewards = self.config['simulation']['rewards']
+        rewards = self.config['simulation']['rl']['rewards']
 
         # 1. 종료 조건에 대한 즉각적인 보상/페널티
         if reached_target:
@@ -517,7 +517,7 @@ class CarSimulatorEnv(gym.Env):
         is_stop = abs(state.vel_long) < 0.01  # 더 엄격한 정지 판정
         if is_stop:
             delta = state.get_delta_progress()
-            stop_penalty = -delta * 5.0  # 페널티 강화
+            stop_penalty = -abs(delta) * 10.0
             reward += stop_penalty
 
         # 후진 페널티
