@@ -746,6 +746,8 @@ class BasicRLDrivingEnv(gym.Env):
             'checkpoint_freq': self.rl_callback_config['checkpoint_freq'],
             'max_checkpoints': self.rl_callback_config['max_checkpoints'],
             'save_best_model': self.rl_callback_config['save_best_model'],
+            'termination_step_threshold': self.rl_callback_config['termination_step_threshold'],
+            'progress_threshold': self.rl_callback_config['progress_threshold'],
             'verbose': self.rl_callback_config['verbose']
         }
 

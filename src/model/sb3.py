@@ -14,7 +14,7 @@ from pathlib import Path
 import re
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.callbacks import (
-    CheckpointCallback, BaseCallback, EvalCallback
+    CheckpointCallback, BaseCallback, EvalCallback, CallbackList
 )
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.logger import HParam, TensorBoardOutputFormat
@@ -37,7 +37,13 @@ class EpisodeData:
     outside_roads: Dict[int, bool]
     individual_rewards: List[float]
     elapsed_time: float
+    early_termination: bool
 
+@dataclass
+class StepData:
+    """스텝 데이터 구조"""
+    timestep: int
+    gpu_memory: Optional[float]
 
 class MetricsStore:
     """
@@ -75,7 +81,7 @@ class MetricsStore:
         self.training_start_time = time.time()
         self.last_step_time = time.time()
 
-    def record_step(self, timestep: int, gpu_memory: Optional[float] = None):
+    def record_step(self, step_data: StepData):
         """스텝 기록"""
         current_time = time.time()
 
@@ -83,11 +89,11 @@ class MetricsStore:
             step_time = current_time - self.last_step_time
             self.step_times.append(step_time)
 
-        if gpu_memory is not None:
-            self.gpu_memory_usage.append(gpu_memory)
+        if step_data.gpu_memory is not None:
+            self.gpu_memory_usage.append(step_data.gpu_memory)
 
         self.last_step_time = current_time
-        self.total_timesteps = timestep
+        self.total_timesteps = step_data.timestep
 
     def record_episode(self, episode_data: EpisodeData):
         """에피소드 기록"""
@@ -123,7 +129,7 @@ class MetricsStore:
         )
         return total_collisions / max(1, len(recent_episodes))
 
-    def get_goal_success_rate(self, window: int = 100) -> float:
+    def get_success_rate(self, window: int = 100) -> float:
         """목표 달성률 계산"""
         if not self.episodes:
             return 0.0
@@ -132,6 +138,38 @@ class MetricsStore:
             sum(ep.goals_reached.values()) for ep in recent_episodes
         )
         return total_goals / max(1, len(recent_episodes))
+
+    def get_termination_rate(self, window: int = 100) -> float:
+        """조기 종료 비율 계산"""
+        if not self.episodes:
+            return 0.0
+        recent_episodes = list(self.episodes)[-window:]
+        total_early_terminations = sum(
+            1 for ep in recent_episodes if ep.early_termination
+        )
+        return total_early_terminations / max(1, len(recent_episodes))
+
+    def get_rates(self, window: int = 100) -> tuple[float, float, float]:
+        """충돌률과 목표 달성률, 조기 종료 비율 반환"""
+        if not self.episodes:
+            return 0.0, 0.0, 0.0
+        recent_episodes = list(self.episodes)[-window:]
+        length = len(recent_episodes)
+
+        total_collisions = sum(
+            sum(ep.collisions.values()) for ep in recent_episodes
+        )
+        total_goals = sum(
+            sum(ep.goals_reached.values()) for ep in recent_episodes
+        )
+        total_early_terminations = sum(
+            1 for ep in recent_episodes if ep.early_termination
+        )
+
+        collision_rate = total_collisions / max(1, length)
+        success_rate = total_goals / max(1, length)
+        termination_rate = total_early_terminations / max(1, length)
+        return collision_rate, success_rate, termination_rate
 
     def get_performance_metrics(self) -> Dict[str, float]:
         """성능 메트릭 반환"""
@@ -177,7 +215,8 @@ class MetricsCollectorCallback(BaseCallback):
             if torch.cuda.is_available():
                 gpu_memory = torch.cuda.memory_allocated() / (1024 ** 3)
 
-        self.metrics_store.record_step(self.num_timesteps, gpu_memory)
+        step_data = StepData(timestep=self.num_timesteps, gpu_memory=gpu_memory)
+        self.metrics_store.record_step(step_data)
         return True
 
 
@@ -308,12 +347,12 @@ class TensorBoardLogger(BaseCallback):
             self.logger.record("rollout/episode_length_mean_10", mean_length)
             self.logger.record("rollout/best_reward", self.metrics_store.best_reward)
 
-            # 차량 메트릭
-            collision_rate = self.metrics_store.get_collision_rate(window=50)
-            goal_rate = self.metrics_store.get_goal_success_rate(window=50)
+            # 메트릭
+            collision_rate, success_rate, termination_rate = self.metrics_store.get_rates(window=20)
 
-            self.logger.record("vehicles/collision_rate", collision_rate)
-            self.logger.record("vehicles/goal_success_rate", goal_rate)
+            self.logger.record("rollout/collision_rate", collision_rate)
+            self.logger.record("rollout/success_rate", success_rate)
+            self.logger.record("rollout/termination_rate", termination_rate)
 
             # 방금전 에피소드 메트릭
             episode = self.metrics_store.episodes[-1]
@@ -361,8 +400,9 @@ class TensorBoardLogger(BaseCallback):
         metric_dict = {
             "rollout/episode_reward_mean_10": 0.0,
             "rollout/episode_length_mean_10": 0.0,
-            "vehicles/collision_rate": 0.0,
-            "vehicles/goal_success_rate": 0.0,
+            "rollout/collision_rate": 0.0,
+            "rollout/success_rate": 0.0,
+            "rollout/termination_rate": 0.0,
             "performance/steps_per_second": 0.0,
         }
 
@@ -427,8 +467,8 @@ class CustomCSVLogger(BaseCallback):
     def _init_csv(self):
         """CSV 파일 초기화"""
         headers = [
-            "elapsed_time", "episode", "timesteps", "reward", "length", "collision_rate",
-            "success_rate", "best_reward"
+            "elapsed_time", "episode", "timesteps", "reward", "length", "termination",
+            "collision_rate", "success_rate", "best_reward"
         ]
 
         with open(self.csv_file, 'w', encoding='utf-8') as f:
@@ -446,8 +486,9 @@ class CustomCSVLogger(BaseCallback):
         try:
             episode = self.metrics_store.episodes[-1]
 
+            termination = 1.0 if episode.early_termination else 0.0
             collision_rate = sum(episode.collisions.values()) / max(1, len(episode.collisions))
-            goal_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
+            success_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
 
             row = [
                 f"{episode.elapsed_time:.2f}",
@@ -455,8 +496,9 @@ class CustomCSVLogger(BaseCallback):
                 episode.timesteps,
                 f"{episode.reward:.4f}",
                 episode.length,
+                f"{termination:.4f}",
                 f"{collision_rate:.4f}",
-                f"{goal_rate:.4f}",
+                f"{success_rate:.4f}",
                 f"{self.metrics_store.best_reward:.4f}"
             ]
 
@@ -517,13 +559,15 @@ class SmartCheckpointManager(BaseCallback):
 
     def _save_checkpoint_metadata(self):
         """체크포인트 메타데이터 저장"""
+        collision_rate, success_rate, termination_rate = self.metrics_store.get_rates(window=20)
         metadata = {
             'timestep': self.num_timesteps,
             'episode': self.metrics_store.episode_count,
             'mean_reward': self.metrics_store.get_recent_mean_reward(10),
             'best_reward': self.metrics_store.best_reward,
-            'collision_rate': self.metrics_store.get_collision_rate(50),
-            'goal_success_rate': self.metrics_store.get_goal_success_rate(50),
+            'collision_rate': collision_rate,
+            'success_rate': success_rate,
+            'termination_rate': termination_rate,
             'timestamp': time.time()
         }
 
@@ -557,6 +601,55 @@ class SmartCheckpointManager(BaseCallback):
         if self.name_prefix == 'sac':
             self.model.save_replay_buffer(os.path.join(self.save_path, f"{self.name_prefix}_best_replay_buffer"))
 
+class EarlyTerminationCallback(BaseCallback):
+    """
+    조기 종료 콜백
+    활성화 차량 진행률의 평균이 낮을 경우 에피소드 종료
+    """
+
+    def __init__(self, metrics_store: MetricsStore, termination_step_threshold: int = 500, progress_threshold: int = 0.5, verbose: int = 0):
+        super().__init__(verbose)
+        self.metrics_store = metrics_store
+        self.termination_step_threshold = termination_step_threshold
+        self.progress_threshold = progress_threshold
+        self.last_episode_count = 0
+        self.step = 0
+        self.terminate_episode_flag = False
+
+    def _on_step(self) -> bool:
+        if self.metrics_store.episode_count > self.last_episode_count:
+            self.last_episode_count = self.metrics_store.episode_count
+            self.step = 0
+            self.terminate_episode_flag = False
+
+        self.step += 1
+        if self.step >= self.termination_step_threshold:
+            # 활성화 차량의 진행률 검사
+            monitor_env = self.training_env.envs[0]
+            dummy_env = monitor_env.env
+            rl_env = dummy_env.rl_env
+            active_agents = rl_env.active_agents
+
+            if not any(active_agents):
+                return True
+
+            total_progress = 0
+            active_count = 0
+            for vehicle_id, is_active in enumerate(active_agents):
+                if is_active:
+                    vehicle = rl_env.env.vehicle_manager.get_vehicle_by_id(vehicle_id)
+                    if vehicle:
+                        total_progress += vehicle.state.get_progress()
+                        active_count += 1
+
+            mean_progress = total_progress / active_count if active_count > 0 else 0
+
+            if mean_progress < self.progress_threshold:
+                self.terminate_episode_flag = True
+                if self.verbose > 0:
+                    print(f"에피소드 {self.metrics_store.episode_count + 1} 조기 종료")
+
+        return True
 
 # 콜백 팩토리 함수
 def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir: str) -> List[BaseCallback]:
@@ -625,6 +718,15 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         config.get('verbose', 0)
     )
     callbacks.append(checkpoint_manager)
+
+    # 7. 조기 종료 콜백
+    early_termination = EarlyTerminationCallback(
+        metrics_store,
+        config.get('termination_step_threshold', 500),
+        config.get('progress_threshold', 0.5),
+        config.get('verbose', 0)
+    )
+    callbacks.append(early_termination)
 
     return callbacks, metrics_store
 
@@ -745,12 +847,28 @@ class SACVehicleAlgorithm(SAC):
         if not callback.on_step():
             return False
 
+        early_term_cb = self._find_early_termination_callback(callback)
+        if early_term_cb and early_term_cb.terminate_episode_flag:
+            done = True
+            info['early_termination'] = True
+
         # 8) 에피소드 종료 시 처리
         if done:
             self._handle_episode_end(info)
             self._reset()
 
         return True
+
+    def _find_early_termination_callback(self, callback):
+        """CallbackList를 재귀적으로 탐색하여 EarlyTerminationCallback 인스턴스를 찾습니다."""
+        if isinstance(callback, EarlyTerminationCallback):
+            return callback
+        if isinstance(callback, CallbackList):
+            for cb in callback.callbacks:
+                found = self._find_early_termination_callback(cb)
+                if found:
+                    return found
+        return None
 
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
@@ -768,7 +886,8 @@ class SACVehicleAlgorithm(SAC):
                 goals_reached=info['reached_targets'].copy(),
                 outside_roads=info['outside_roads'].copy(),
                 individual_rewards=self.individual_rewards.tolist(),
-                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
+                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
+                early_termination=info.get('early_termination', False)
             )
 
             self.metrics_store.record_episode(episode_data)
@@ -924,12 +1043,28 @@ class PPOVehicleAlgorithm(PPO):
             if not callback.on_step():
                 return False
 
+            early_term_cb = self._find_early_termination_callback(callback)
+            if early_term_cb and early_term_cb.terminate_episode_flag:
+                done = True
+                info['early_termination'] = True
+
             # 8) 에피소드 종료 시 처리
             if done:
                 self._handle_episode_end(info)
                 self._reset()
 
         return True
+
+    def _find_early_termination_callback(self, callback):
+        """CallbackList를 재귀적으로 탐색하여 EarlyTerminationCallback 인스턴스를 찾습니다."""
+        if isinstance(callback, EarlyTerminationCallback):
+            return callback
+        if isinstance(callback, CallbackList):
+            for cb in callback.callbacks:
+                found = self._find_early_termination_callback(cb)
+                if found:
+                    return found
+        return None
 
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
@@ -947,7 +1082,8 @@ class PPOVehicleAlgorithm(PPO):
                 goals_reached=info['reached_targets'].copy(),
                 outside_roads=info['outside_roads'].copy(),
                 individual_rewards=self.individual_rewards.tolist(),
-                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
+                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
+                early_termination=info.get('early_termination', False)
             )
 
             self.metrics_store.record_episode(episode_data)

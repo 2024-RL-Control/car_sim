@@ -33,15 +33,17 @@ simulation:
     action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
     callbacks:
-      max_episodes_history: 1000  # 최근 에피소드 기록 최대 개수
-      max_steps_history: 3000     # 최근 스텝 기록 최대 개수
-      gpu_memory_limit: 5         # GPU 메모리 제한 [GB]
-      monitoring_freq: 100        # 메모리 등 하드웨어 모니터링 빈도 [steps]
-      logging_freq: 1000          # 매트릭 및 성능 로그 기록 빈도 [steps]
-      checkpoint_freq: 10000      # 체크포인트 저장 주기 [steps]
-      max_checkpoints: 10         # 최대 체크포인트 개수
-      save_best_model: true       # 최고 성능 모델 저장 여부
-      verbose: 1                  # 콜백 시스템 상세 출력 레벨 (0: 없음, 1: 기본, 2: 상세)
+      max_episodes_history: 1000       # 최근 에피소드 기록 최대 개수
+      max_steps_history: 3000          # 최근 스텝 기록 최대 개수
+      gpu_memory_limit: 5              # GPU 메모리 제한 [GB]
+      monitoring_freq: 100             # 메모리 등 하드웨어 모니터링 빈도 [steps]
+      logging_freq: 1000               # 매트릭 및 성능 로그 기록 빈도 [steps]
+      checkpoint_freq: 10000           # 체크포인트 저장 주기 [steps]
+      max_checkpoints: 10              # 최대 체크포인트 개수
+      save_best_model: true            # 최고 성능 모델 저장 여부
+      termination_step_threshold: 500  # 조기 종료를 위한 최대 스텝 수
+      progress_threshold: 0.3          # 조기 종료를 위한 진행 상황 임계값
+      verbose: 1                       # 콜백 시스템 상세 출력 레벨 (0: 없음, 1: 기본, 2: 상세)
   train_max_steps: 1000000
   train_max_episode_steps: 1500    # maximum steps per episode
   eval_episode: 10  # number of episodes for evaluation
