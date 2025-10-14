@@ -673,8 +673,9 @@ class BasicRLDrivingEnv(gym.Env):
 
             # 커스텀 SAC 모델 생성
             model = SACVehicleAlgorithm(
-                "MlpPolicy",
-                env,
+                policy="MlpPolicy",
+                env=env,
+                logging_freq=self.rl_callback_config['logging_freq'],
                 learning_rate=learning_rate,
                 policy_kwargs=policy_kwargs,
                 buffer_size=0,
@@ -710,6 +711,7 @@ class BasicRLDrivingEnv(gym.Env):
             model = PPOVehicleAlgorithm(
                 policy="MlpPolicy",
                 env=env,
+                logging_freq=self.rl_callback_config['logging_freq'],
                 learning_rate=learning_rate,
                 n_steps=n_steps,
                 batch_size=batch_size,

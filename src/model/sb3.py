@@ -812,7 +812,7 @@ class SACVehicleAlgorithm(SAC):
     """
     다중 차량을 위한 커스텀 강화학습 알고리즘 클래스
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, logging_freq: int = 100, **kwargs):
         super().__init__(*args, **kwargs)
         # 추가 속성 설정
         self.rl_env = None
@@ -822,6 +822,7 @@ class SACVehicleAlgorithm(SAC):
         self.total_reward = 0
         self.individual_rewards = None
         self.metrics_store = None  # 메트릭 스토어 참조
+        self.logging_freq = logging_freq
 
     def set_env_info(self, rl_env):
         """
@@ -1011,33 +1012,33 @@ class SACVehicleAlgorithm(SAC):
         """
         SAC 훈련 스텝을 수행하고 추가 메트릭을 로깅합니다.
         """
-        # 텐서보드 writer 가져오기
-        tb_writer = self._get_tb_writer()
-
-        # 훈련 전에 리플레이 버퍼에서 데이터 샘플링
-        if tb_writer:
-            replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
-            with torch.no_grad():
-                # Critic을 통해 Q-가치 예측
-                qf1_values, qf2_values = self.critic(replay_data.observations, replay_data.actions)
-                q_values = torch.min(qf1_values, qf2_values).cpu().numpy().flatten()
-                actions = replay_data.actions.cpu().numpy().flatten()
-
-                # 스칼라 값 로깅
-                self.logger.record("sac/q_values/mean", np.mean(q_values))
-                self.logger.record("sac/actions/mean_batch", np.mean(actions))
-                self.logger.record("sac/actions/std_batch", np.std(actions))
-
-                # 히스토그램 로깅
-                tb_writer.add_histogram("sac/q_values", q_values, self.num_timesteps)
-                tb_writer.add_histogram("sac/actions", actions, self.num_timesteps)
-
-        # 원래의 train 메소드 호출
         super().train(batch_size=batch_size, gradient_steps=gradient_steps)
+
+        if self.num_timesteps % self.logging_freq == 0:
+            # 텐서보드 writer 가져오기
+            tb_writer = self._get_tb_writer()
+
+            # 훈련 전에 리플레이 버퍼에서 데이터 샘플링
+            if tb_writer:
+                replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
+                with torch.no_grad():
+                    # Critic을 통해 Q-가치 예측
+                    qf1_values, qf2_values = self.critic(replay_data.observations, replay_data.actions)
+                    q_values = torch.min(qf1_values, qf2_values).cpu().numpy().flatten()
+                    actions = replay_data.actions.cpu().numpy().flatten()
+
+                    # 스칼라 값 로깅
+                    self.logger.record("sac/q_values/mean", np.mean(q_values))
+                    self.logger.record("sac/actions/mean_batch", np.mean(actions))
+                    self.logger.record("sac/actions/std_batch", np.std(actions))
+
+                    # 히스토그램 로깅
+                    tb_writer.add_histogram("sac/q_values", q_values, self.num_timesteps)
+                    tb_writer.add_histogram("sac/actions", actions, self.num_timesteps)
 
 
 class PPOVehicleAlgorithm(PPO):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, logging_freq: int = 100, **kwargs):
         super().__init__(*args, **kwargs)
         # 추가 속성 설정
         self.rl_env = None
@@ -1048,6 +1049,7 @@ class PPOVehicleAlgorithm(PPO):
         self.individual_rewards = None
         self._is_new_episode = True
         self.metrics_store = None
+        self.logging_freq = logging_freq
 
     def set_env_info(self, rl_env):
         """
@@ -1222,13 +1224,14 @@ class PPOVehicleAlgorithm(PPO):
             if not continue_training:
                 break
 
-            if self.rollout_buffer.full:
-                # 어드밴티지 계산
-                self.rollout_buffer.compute_returns_and_advantage(
-                    last_values=torch.zeros(self.num_vehicles,),  # Dummy last values
-                    dones=np.zeros(self.num_vehicles,) # Dummy dones
-                )
-                self._log_ppo_specific_metrics()
+            if self.num_timesteps % self.logging_freq == 0:
+                if self.rollout_buffer.full:
+                    # 어드밴티지 계산
+                    self.rollout_buffer.compute_returns_and_advantage(
+                        last_values=torch.zeros(self.num_vehicles,),  # Dummy last values
+                        dones=np.zeros(self.num_vehicles,) # Dummy dones
+                    )
+                    self._log_ppo_specific_metrics()
 
             self.train()
             self.rollout_buffer.reset()
