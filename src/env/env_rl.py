@@ -8,6 +8,7 @@ import random
 from math import pi
 import numpy as np
 import gymnasium as gym
+from datetime import datetime
 from src.env.env import CarSimulatorEnv
 from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor
 from ..model.sb3 import create_optimized_callbacks, get_callback_summary
@@ -616,9 +617,11 @@ class BasicRLDrivingEnv(gym.Env):
         """
         자율주행 에이전트 학습 함수 (learn() 메소드 사용)
         """
+        current_time = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        run_name = f"{algorithm}_{current_time}"
         # 로그 및 모델 저장 경로 설정
-        models_dir = "./logs/checkpoints"
-        log_dir = "./logs/log"
+        models_dir = f"./logs/checkpoints/{run_name}"
+        log_dir = f"./logs/log/{run_name}"
 
         os.makedirs(models_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
