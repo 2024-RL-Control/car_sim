@@ -737,6 +737,7 @@ class BasicRLDrivingEnv(gym.Env):
             'num_vehicles': self.num_vehicles,
             'num_static_obstacles': self.num_static_obstacles,
             'num_dynamic_obstacles': self.num_dynamic_obstacles,
+            'reward_factor': self.rl_config['rewards'],
             'max_episode_steps': self.max_episode_steps,
             'max_episodes_history': self.rl_callback_config['max_episodes_history'],
             'max_steps_history': self.rl_callback_config['max_steps_history'],
