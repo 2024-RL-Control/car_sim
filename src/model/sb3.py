@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import pygame
 import numpy as np
+from math import isnan
 import json
 import gzip
 from typing import Dict, Any, Optional, Union, List
@@ -372,13 +373,28 @@ class TensorBoardLogger(BaseCallback):
             "step/avg_time(ms)": perf_metrics['step/avg_time(ms)'],
         }
 
-        self.logger.record(
-            "hparams",
-            HParam(hparam_dict, metric_dict),
-            exclude=("stdout", "log", "json", "csv"),
-        )
+        cleaned_metric_dict = {}
+        for key, value in metric_dict.items():
+            if value is None or (isinstance(value, float) and isnan(value)):
+                cleaned_metric_dict[key] = "N/A"
+            elif isinstance(value, float):
+                cleaned_metric_dict[key] = f"{value:.4f}" # 소수점 4자리까지
+            else:
+                cleaned_metric_dict[key] = value
 
-        self.logger.dump(self.num_timesteps)
+        # 3. 딕셔너리를 Markdown 테이블 형식의 문자열로 변환
+        hparam_md = "### Hyperparameters\n| Parameter | Value |\n|:---|:---|\n"
+        for key, value in hparam_dict.items():
+            hparam_md += f"| {key} | {value} |\n"
+
+        metric_md = "\n### Metrics\n| Metric | Value |\n|:---|:---|\n"
+        for key, value in cleaned_metric_dict.items():
+            metric_md += f"| {key} | {value} |\n"
+
+        # 4. add_text를 사용하여 TensorBoard에 기록
+        final_summary_text = hparam_md + metric_md
+        self.tb_formatter.writer.add_text("Final Summary", final_summary_text, self.num_timesteps)
+        self.tb_formatter.writer.flush()
 
         if self.verbose > 0:
             print("\n" + "="*30)
@@ -422,6 +438,7 @@ class TensorBoardLogger(BaseCallback):
             "algorithm": self.model.__class__.__name__,
             "learning_rate": float(self.model.learning_rate),
             "gamma": float(self.model.gamma),
+            "net_arch": str(self.model.policy_kwargs.get("net_arch", "default"))
         }
 
         # 알고리즘별 특화 파라미터
