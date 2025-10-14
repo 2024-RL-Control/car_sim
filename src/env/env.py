@@ -500,12 +500,12 @@ class CarSimulatorEnv(gym.Env):
         current_vel = state.vel_long  # m/s 단위 유지
         target_vel = state.target_vel_long or self.config['simulation']['path_planning']['default_speed']
 
-        # 적응형 sigma: 목표 속도의 20%를 허용 범위로 설정
-        vel_sigma = max(1.0, target_vel * 0.2)
+        # 적응형 sigma: 목표 속도의 40%를 허용 범위로 설정
+        vel_sigma = max(1.0, target_vel * 0.4)
 
         # 속도 초과에 더 큰 페널티 적용 (안전성)
         if current_vel > target_vel:
-            speed_diff = (current_vel - target_vel) * 1.5
+            speed_diff = (current_vel - target_vel) * 2.0
         else:
             speed_diff = current_vel - target_vel
 

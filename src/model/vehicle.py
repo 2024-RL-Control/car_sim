@@ -152,69 +152,75 @@ class SubsystemManager:
             return
 
         hz_config = simulation_config['hz']
-        adaptive_config = {
-            'velocity_thresholds': [2.0, 10.0],
-            'interval_factors': [2.0, 0.5],
-            'min_distance': 0.05
-        }
+        # adaptive_config = {
+        #     'velocity_thresholds': [2.0, 10.0],
+        #     'interval_factors': [2.0, 0.5],
+        #     'min_distance': 0.05
+        # }
 
         try:
             # Frenet 업데이트 설정 (적응적 업데이트)
             if 'frenet_update' in hz_config:
                 frenet_hz = hz_config['frenet_update']
-                self.configure_subsystem('frenet', frenet_hz, adaptive_config)
+                self.configure_subsystem('frenet', frenet_hz)
+                # self.configure_subsystem('frenet', frenet_hz, adaptive_config)
                 # 안전한 콜백 등록 (weakref 사용)
                 self._register_safe_callback('frenet', '_update_frenet_callback', '_initialize_frenet_callback')
 
             # 라이다 센서 업데이트 설정 (적응적 업데이트)
             if 'lidar_update' in hz_config:
                 lidar_hz = hz_config['lidar_update']
-                self.configure_subsystem('sensor', lidar_hz, adaptive_config)
+                self.configure_subsystem('sensor', lidar_hz)
+                # self.configure_subsystem('sensor', lidar_hz, adaptive_config)
                 # 안전한 콜백 등록
                 self._register_safe_callback('sensor', '_update_sensor_callback', '_initialize_sensor_callback')
 
             # 궤적 예측 업데이트 설정 (적응적 업데이트)
             if 'trajectory_update' in hz_config:
                 trajectory_hz = hz_config['trajectory_update']
-                self.configure_subsystem('trajectory', trajectory_hz, adaptive_config)
+                self.configure_subsystem('trajectory', trajectory_hz)
+                # self.configure_subsystem('trajectory', trajectory_hz, adaptive_config)
                 # 안전한 콜백 등록
                 self._register_safe_callback('trajectory', '_update_trajectory_callback', '_initialize_trajectory_callback')
 
             # 충돌 검사 서브시스템 설정
             if 'collision_check' in hz_config:
                 collision_hz = hz_config['collision_check']
-                collision_adaptive_config = {
-                    'velocity_thresholds': [5.0, 15.0],
-                    'interval_factors': [3.0, 0.5],  # 저속에서 간격 늘리기, 고속에서 빠르게
-                    'min_distance': 0.1,
-                    'priority_mode': 'velocity'
-                }
-                self.configure_subsystem('collision_check', collision_hz, collision_adaptive_config)
+                # collision_adaptive_config = {
+                #     'velocity_thresholds': [5.0, 15.0],
+                #     'interval_factors': [3.0, 0.5],  # 저속에서 간격 늘리기, 고속에서 빠르게
+                #     'min_distance': 0.1,
+                #     'priority_mode': 'velocity'
+                # }
+                self.configure_subsystem('collision_check', collision_hz)
+                # self.configure_subsystem('collision_check', collision_hz, collision_adaptive_config)
                 self._register_safe_callback('collision_check', '_update_collision_check_callback', '_initialize_collision_check_callback')
 
             # 목적지 도달 확인 서브시스템 설정
             if 'goal_check' in hz_config:
                 goal_hz = hz_config['goal_check']
-                goal_adaptive_config = {
-                    'velocity_thresholds': [2.0, 8.0],
-                    'interval_factors': [2.0, 1.0],
-                    'min_distance': 0.05,
-                    'distance_thresholds': [3.0, 15.0],  # 목적지 기반 적응적 업데이트
-                    'priority_mode': 'hybrid'
-                }
-                self.configure_subsystem('goal_check', goal_hz, goal_adaptive_config)
+                # goal_adaptive_config = {
+                #     'velocity_thresholds': [2.0, 8.0],
+                #     'interval_factors': [2.0, 1.0],
+                #     'min_distance': 0.05,
+                #     'distance_thresholds': [3.0, 15.0],  # 목적지 기반 적응적 업데이트
+                #     'priority_mode': 'hybrid'
+                # }
+                self.configure_subsystem('goal_check', goal_hz)
+                # self.configure_subsystem('goal_check', goal_hz, goal_adaptive_config)
                 self._register_safe_callback('goal_check', '_update_goal_check_callback', '_initialize_goal_check_callback')
 
             # 상태 이력 서브시스템 설정
             if 'state_history' in hz_config:
                 history_hz = hz_config['state_history']
-                history_adaptive_config = {
-                    'velocity_thresholds': [1.0, 10.0],
-                    'interval_factors': [5.0, 0.8],  # 정지 시 이력 간격 늘리기
-                    'min_distance': 0.2,
-                    'priority_mode': 'velocity'
-                }
-                self.configure_subsystem('state_history', history_hz, history_adaptive_config)
+                # history_adaptive_config = {
+                #     'velocity_thresholds': [1.0, 10.0],
+                #     'interval_factors': [5.0, 0.8],  # 정지 시 이력 간격 늘리기
+                #     'min_distance': 0.2,
+                #     'priority_mode': 'velocity'
+                # }
+                self.configure_subsystem('state_history', history_hz)
+                # self.configure_subsystem('state_history', history_hz, history_adaptive_config)
                 self._register_safe_callback('state_history', '_update_state_history_callback', '_initialize_state_history_callback')
 
         except Exception as e:

@@ -20,11 +20,11 @@ simulation:
       y_min: -10
       y_max: 10
   hz: # (시뮬레이션 시간 기준)
-    frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz]
-    lidar_update: 10       # 라이다 스캔 주파수 [Hz]
+    frenet_update: 15      # Frenet 좌표 업데이트 주파수 [Hz]
+    lidar_update: 15       # 라이다 스캔 주파수 [Hz]
     trajectory_update: 2   # 궤적 예측 업데이트 주파수 [Hz]
     collision_check: 20    # 충돌 검사 주파수 [Hz]
-    goal_check: 10         # 목적지 도달 확인 주파수 [Hz]
+    goal_check: 15         # 목적지 도달 확인 주파수 [Hz]
     state_history: 5       # 상태 이력 저장 주파수 [Hz]
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   rl:
@@ -42,9 +42,9 @@ simulation:
       goal_reached_reward: 500.0        # reward for reaching the goal
       collision_penalty: -400.0         # penalty for collision
       outside_road_penalty: -300.0      # penalty for going outside the road
-      progress_factor: 1.5              # reward factor for reducing distance to goal
+      progress_factor: 1.0              # reward factor for reducing distance to goal
       lane_keeping_factor: 0.5          # reward factor for staying in the lane
-      speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
+      speed_factor: 0.5                 # reward factor for maintaining/reaching target speed
       slow_penalty: -0.15               # penalty for very low speed
       reverse_penalty: -0.2             # penalty for driving in reverse
     callbacks:
