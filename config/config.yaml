@@ -42,18 +42,18 @@ simulation:
       goal_reached_reward: 1000.0        # reward for reaching the goal
       collision_penalty: -700.0         # penalty for collision
       outside_road_penalty: -500.0      # penalty for going outside the road
-      progress_factor: 1.2              # reward factor for reducing distance to goal
-      lane_keeping_factor: 0.8          # reward factor for staying in the lane
+      progress_factor: 1.0              # reward factor for reducing distance to goal
+      lane_keeping_factor: 0.4         # reward factor for staying in the lane
       lane_zero_reward_threshold: 0.15  # threshold for zero lane keeping reward
-      speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
+      speed_factor: 0.6                 # reward factor for maintaining/reaching target speed
       speed_under_slope: 0.1            # under speed reward slope
       speed_over_slope: 0.5             # over speed reward slope
-      slow_penalty: -0.15               # penalty for very low speed
-      reverse_penalty: -0.20            # penalty for driving in reverse
+      slow_penalty: -0.05               # penalty for very low speed
+      reverse_penalty: -0.10            # penalty for driving in reverse
     callbacks:
       max_episodes_history: 1000       # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
-      termination_step_threshold: 500  # 조기 종료를 위한 최대 스텝 수
+      termination_step_threshold: 500 # 조기 종료를 위한 최대 스텝 수
       progress_threshold: 0.10         # 조기 종료를 위한 진행 상황 임계값
       gpu_memory_limit: 5              # GPU 메모리 제한 [GB]
       monitoring_freq: 100             # 메모리 등 하드웨어 모니터링 빈도 [steps]

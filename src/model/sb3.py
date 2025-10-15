@@ -898,7 +898,17 @@ class SACVehicleAlgorithm(SAC):
         # 4) 렌더링
         self.rl_env.render()
 
-        # 5) 활성화된 에이전트만 경험 저장
+        # 5) 콜백 호출
+        callback.update_locals(locals())
+        if not callback.on_step():
+            return False
+
+        early_term_cb = self._find_early_termination_callback(callback)
+        if early_term_cb and early_term_cb.terminate_episode_flag:
+            done = True
+            info['early_termination'] = True
+
+        # 6) 활성화된 에이전트만 경험 저장
         active_idx = np.where(active_mask)[0]
         for idx in active_idx:
             self.replay_buffer.add(
@@ -910,19 +920,9 @@ class SACVehicleAlgorithm(SAC):
                 infos={"terminal_observation": next_observations[idx] if done else None}
             )
 
-        # 6) 내부 상태 갱신
+        # 7) 내부 상태 갱신
         self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
         self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
-
-        # 7) 콜백 호출
-        callback.update_locals(locals())
-        if not callback.on_step():
-            return False
-
-        early_term_cb = self._find_early_termination_callback(callback)
-        if early_term_cb and early_term_cb.terminate_episode_flag:
-            done = True
-            info['early_termination'] = True
 
         # 8) 에피소드 종료 시 처리
         if done:
@@ -1129,7 +1129,17 @@ class PPOVehicleAlgorithm(PPO):
             # 4) 렌더링
             self.rl_env.render()
 
-            # 5) 활성 에이전트마다 RolloutBuffer에 transition 추가
+            # 5) 콜백 호출
+            callback.update_locals(locals())
+            if not callback.on_step():
+                return False
+
+            early_term_cb = self._find_early_termination_callback(callback)
+            if early_term_cb and early_term_cb.terminate_episode_flag:
+                done = True
+                info['early_termination'] = True
+
+            # 6) 활성 에이전트마다 RolloutBuffer에 transition 추가
             active_indices = np.where(active_mask)[0]
             for idx in active_indices:
                 # 개별 차량을 rollout buffer에 저장
@@ -1145,21 +1155,11 @@ class PPOVehicleAlgorithm(PPO):
                 if step_count >= n_steps:
                     return True
 
-            # 6) 내부 상태 갱신
+            # 7) 내부 상태 갱신
             if self._is_new_episode:
                 self._is_new_episode = False
             self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
             self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
-
-            # 7) 콜백 호출
-            callback.update_locals(locals())
-            if not callback.on_step():
-                return False
-
-            early_term_cb = self._find_early_termination_callback(callback)
-            if early_term_cb and early_term_cb.terminate_episode_flag:
-                done = True
-                info['early_termination'] = True
 
             # 8) 에피소드 종료 시 처리
             if done:
