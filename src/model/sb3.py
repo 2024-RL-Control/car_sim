@@ -9,7 +9,7 @@ from math import isnan
 import json
 import gzip
 from typing import Dict, Any, Optional, Union, List
-from collections import deque
+from collections import deque, defaultdict
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import re
@@ -463,8 +463,8 @@ class TensorBoardLogger(BaseCallback):
                 "env/max_episode_steps": self.env_config.get('max_episode_steps', 1000),
                 "env/num_static_obstacles": self.env_config.get('num_static_obstacles', 0),
                 "env/num_dynamic_obstacles": self.env_config.get('num_dynamic_obstacles', 0),
-                "env/termination_step_threshold": self.env_config.get('termination_step_threshold', 0),
-                "env/progress_threshold": self.env_config.get('progress_threshold', 0),
+                "env/termination_check_step": self.env_config.get('termination_check_step', 0),
+                "env/progress_change_threshold": self.env_config.get('progress_change_threshold', 0),
             }
             hparam_dict.update(env_params)
 
@@ -675,50 +675,67 @@ class SmartCheckpointManager(BaseCallback):
 class EarlyTerminationCallback(BaseCallback):
     """
     조기 종료 콜백
-    활성화 차량 진행률의 평균이 낮을 경우 에피소드 종료
+    활성화 차량 진행률 변화의 평균이 낮을 경우 에피소드 종료
     """
 
-    def __init__(self, metrics_store: MetricsStore, termination_step_threshold: int = 500, progress_threshold: int = 0.5, verbose: int = 0):
+    def __init__(self, metrics_store: MetricsStore, termination_check_step: int = 500, progress_change_threshold: float = 0.05, verbose: int = 0):
+        """
+        Args:
+            metrics_store: 중앙 메트릭 스토어
+            termination_check_step: 정체를 판단하고 반복할 스텝 간격
+            progress_change_threshold: 조기 종료를 결정할 활성화 차량의 총 진행률 변화의 평균 임계값 (e.g., 0.05는 5% 의미)
+            verbose: 로그 출력 레벨
+        """
         super().__init__(verbose)
         self.metrics_store = metrics_store
-        self.termination_step_threshold = termination_step_threshold
-        self.progress_threshold = progress_threshold
+        self.termination_check_step = termination_check_step
+        self.progress_change_threshold = progress_change_threshold
         self.last_episode_count = 0
+
+        self.rl_env = None
+        self.vehicle_manager = None
+
         self.step = 0
+        self.next_check = 0
+        self.accumulated_delta_progress = defaultdict(float)
         self.terminate_episode_flag = False
+
+    def _on_training_start(self):
+        self.rl_env = self.training_env.envs[0].env.rl_env
+        self.vehicle_manager = self.rl_env.env.vehicle_manager
 
     def _on_step(self) -> bool:
         if self.metrics_store.episode_count > self.last_episode_count:
-            self.last_episode_count = self.metrics_store.episode_count
             self.step = 0
+            self.next_check = self.termination_check_step
+            self.accumulated_delta_progress.clear()
             self.terminate_episode_flag = False
+            self.last_episode_count = self.metrics_store.episode_count
 
         self.step += 1
-        if self.step >= self.termination_step_threshold:
-            # 활성화 차량의 진행률 검사
-            monitor_env = self.training_env.envs[0]
-            dummy_env = monitor_env.env
-            rl_env = dummy_env.rl_env
-            active_agents = rl_env.active_agents
 
-            if not any(active_agents):
-                return True
+        # 1. 매 스텝마다 활성 차량의 delta_progress 누적
+        active_agents = self.rl_env.active_agents
+        for vehicle_id, is_active in enumerate(active_agents):
+            if is_active:
+                vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
+                if vehicle:
+                    delta = vehicle.state.get_delta_progress()
+                    self.accumulated_delta_progress[vehicle_id] -= delta
 
-            total_progress = 0
-            active_count = 0
-            for vehicle_id, is_active in enumerate(active_agents):
-                if is_active:
-                    vehicle = rl_env.env.vehicle_manager.get_vehicle_by_id(vehicle_id)
-                    if vehicle:
-                        total_progress += vehicle.state.get_progress()
-                        active_count += 1
+        # 2. 주기적으로 누적된 변화량 판단
+        if self.step == self.next_check:
+            active_accumulators = [self.accumulated_delta_progress[vehicle_id] for vehicle_id, is_active in enumerate(active_agents) if is_active]
+            if active_accumulators:
+                mean_progress = np.mean(active_accumulators)
+                if mean_progress < self.progress_change_threshold:
+                    self.terminate_episode_flag = True
+                    if self.verbose > 0:
+                        print(f"에피소드 {self.metrics_store.episode_count + 1} 조기 종료")
 
-            mean_progress = total_progress / active_count if active_count > 0 else 0
-
-            if mean_progress < self.progress_threshold:
-                self.terminate_episode_flag = True
-                if self.verbose > 0:
-                    print(f"에피소드 {self.metrics_store.episode_count + 1} 조기 종료")
+            # 3. 다음 주기를 위해 변수 초기화 및 갱신
+            self.next_check += self.termination_check_step
+            self.accumulated_delta_progress.clear()
 
         return True
 
@@ -793,8 +810,8 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
     # 7. 조기 종료 콜백
     early_termination = EarlyTerminationCallback(
         metrics_store,
-        config.get('termination_step_threshold', 500),
-        config.get('progress_threshold', 0.5),
+        config.get('termination_check_step', 500),
+        config.get('progress_change_threshold', 0.5),
         config.get('verbose', 0)
     )
     callbacks.append(early_termination)

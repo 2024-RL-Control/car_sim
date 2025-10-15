@@ -53,8 +53,8 @@ simulation:
     callbacks:
       max_episodes_history: 1000       # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
-      termination_step_threshold: 500 # 조기 종료를 위한 최대 스텝 수
-      progress_threshold: 0.10         # 조기 종료를 위한 진행 상황 임계값
+      termination_check_step: 500      # 조기 종료를 위한 스텝 간격
+      progress_change_threshold: 0.10  # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
       gpu_memory_limit: 5              # GPU 메모리 제한 [GB]
       monitoring_freq: 100             # 메모리 등 하드웨어 모니터링 빈도 [steps]
       logging_freq: 1000               # 매트릭 및 성능 로그 기록 빈도 [steps]
