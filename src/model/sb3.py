@@ -597,6 +597,7 @@ class SmartCheckpointManager(BaseCallback):
         self.max_checkpoints = max_checkpoints
         self.checkpoint_metadata = []
         self.save_best_model = save_best_model
+        self.best_success_rate = -np.inf
         self.last_episode_count = 0  # 마지막 로깅한 에피소드 수
 
         # 저장 디렉토리 생성
@@ -612,10 +613,15 @@ class SmartCheckpointManager(BaseCallback):
         # 에피소드 종료 시 최고 성능 모델 저장
         if self.save_best_model:
             if self.metrics_store.episode_count > self.last_episode_count:
-                episode = self.metrics_store.episodes[-1]
-                if episode.reward >= self.metrics_store.best_reward:
+                success_rate = self.metrics_store.get_success_rate(window=30)
+                if success_rate > self.best_success_rate:
+                    self.best_success_rate = success_rate
                     self._save_best_model()
                 self.last_episode_count = self.metrics_store.episode_count
+                # episode = self.metrics_store.episodes[-1]
+                # if episode.reward >= self.metrics_store.best_reward:
+                #     self._save_best_model()
+                # self.last_episode_count = self.metrics_store.episode_count
 
         return True
 
