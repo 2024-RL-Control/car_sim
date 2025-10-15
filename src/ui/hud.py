@@ -62,22 +62,23 @@ class HUD:
         goal = vehicle.get_current_goal()
         if goal:
             distance = state.curr_distance_to_target
-            yaw_diff = np.degrees(state.error_to_target)
+            frenet_d = state.frenet_d if state.frenet_d is not None else -float('inf')
+            target_vel_long = state.target_vel_long if state.target_vel_long is not None else -float('inf')
             hud.extend([
                 f"Target: ({state.target_x:.1f}, {state.target_y:.1f})",
                 f"Progress: {state.get_progress():.2f}%",
                 f"Distance to target: {distance:.2f}m",
-                f"Heading diff: {yaw_diff:.1f}°"
+                f"Target Velocity: {target_vel_long:.2f}",
+                f"Goal Heading Error: {np.degrees(state.error_to_target):.1f}°",
+                f"Goal Heading Angle: {np.degrees(state.angle_to_target):.1f}°",
+                f"Frenet D: {frenet_d:.2f}",
+                f"Frenet Heading Error: {np.degrees(state.error_to_ref):.2f}°",
+                f"Frenet Heading Angle: {np.degrees(state.angle_to_ref):.2f}°",
             ])
 
         # 디버그 정보 추가
         if self.config['visualization']['debug_mode']:
-            frenet_d = state.frenet_d if state.frenet_d is not None else -float('inf')
-            target_vel_long = state.target_vel_long if state.target_vel_long is not None else -float('inf')
             hud.extend([
-                f"Frenet D: {frenet_d:.2f}",
-                f"Heading Error: {np.degrees(state.heading_error):.2f}°",
-                f"Target Vel Long: {target_vel_long:.2f}",
                 f"Throttling Engine: {state.throttle_engine:.2f}",
                 f"Throttling Brake: {state.throttle_brake:.2f}",
                 f"Steering: {np.degrees(state.steer):.1f}°",

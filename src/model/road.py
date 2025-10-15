@@ -1825,7 +1825,7 @@ class RoadSystemAPI:
         ref_x, ref_y = frenet_state.x_ref, frenet_state.y_ref
         dx_to_ref = ref_x - vehicle_pos[0]
         dy_to_ref = ref_y - vehicle_pos[1]
-        angle_to_ref = normalize_angle(math.atan2(dy_to_ref, dx_to_ref))
+        angle_to_ref = normalize_angle(math.atan2(dy_to_ref, dx_to_ref) - vehicle_yaw)
 
         # 세그먼트 전체 길이
         segment_length = closest_segment.get_length() if closest_segment else 0.0

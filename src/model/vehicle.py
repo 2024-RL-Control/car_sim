@@ -1541,7 +1541,7 @@ class Vehicle:
         dy = self.state.target_y - self.state.y
         self.state.curr_distance_to_target = (dx**2 + dy**2) ** 0.5
         self.state.error_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
-        self.state.angle_to_target = self.state.normalize_angle(atan2(dy, dx))
+        self.state.angle_to_target = self.state.normalize_angle(atan2(dy, dx) - self.state.yaw)
         self._update_progress()
 
     def _update_progress(self):
