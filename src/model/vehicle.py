@@ -322,6 +322,16 @@ class SubsystemManager:
             position: 현재 위치 (x, y)
             context: 추가 컨텍스트 정보 (목적지 거리, 장애물 거리 등)
         """
+        # 첫 업데이트인지 확인: 업데이트 카운트가 0이면 무조건 실행
+        if self._update_counts.get(subsystem_name, 0) == 0:
+            self._last_update_times[subsystem_name] = current_time
+            if position:
+                self._last_positions[subsystem_name] = position
+            if context:
+                self._context_data[subsystem_name].update(context)
+            self._update_counts[subsystem_name] = 1 # 카운트 증가
+            return True
+
         # 설정되지 않은 서브시스템은 항상 업데이트
         if subsystem_name not in self._update_intervals:
             return True

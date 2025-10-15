@@ -391,12 +391,13 @@ class CarSimulatorEnv(gym.Env):
         progress = state.get_progress()
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
+        scale_target_vel_long, _ = state.scale_long(state.target_vel_long, 0.0, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
         cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width'])
         cos_heading_error, sin_heading_error = state.encoding_angle(state.heading_error)
 
-        # 기본 차량 상태 (12, )
+        # 기본 차량 상태 (13, )
         obs = np.array([
             progress,               # -1 ~ 1
             # state.steer,            # -1 ~ 1
@@ -408,6 +409,7 @@ class CarSimulatorEnv(gym.Env):
             scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
             scale_acc_lat,          # -1 ~ 1
+            scale_target_vel_long,  # -1 ~ 1
             cos_goal_yaw_diff,      # -1 ~ 1
             sin_goal_yaw_diff,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
@@ -489,29 +491,53 @@ class CarSimulatorEnv(gym.Env):
         # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
         frenet_d_norm = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width']) # [-1 ~ 1]
         frenet_d_norm = min(abs(frenet_d_norm), 1.0)  # 절대값으로 변환하여 1.0을 기준으로 정규화
-        # 도로 폭의 30%를 sigma로 설정하여 중앙에 가까울수록 높은 보상
-        lane_sigma = 0.15
-        lane_keeping_norm = exp(-((frenet_d_norm**2) / (2 * lane_sigma**2)))
+
+        lane_threshold = rewards['lane_zero_reward_threshold']
+        if frenet_d_norm > lane_threshold:
+            lane_keeping_norm = 0.0
+        else:
+            lane_keeping_norm = 1.0 - (frenet_d_norm / lane_threshold)
+
         lane_keeping_reward = lane_keeping_norm * rewards['lane_keeping_factor']
-        # lane_keeping_reward = (1 - frenet_d_norm) * rewards['lane_keeping_factor']
         reward += lane_keeping_reward
+
+        # # 도로 폭의 30%를 sigma로 설정하여 중앙에 가까울수록 높은 보상
+        # lane_sigma = 0.15
+        # lane_keeping_norm = exp(-((frenet_d_norm**2) / (2 * lane_sigma**2)))
+        # lane_keeping_reward = lane_keeping_norm * rewards['lane_keeping_factor']
+        # # lane_keeping_reward = (1 - frenet_d_norm) * rewards['lane_keeping_factor']
+        # reward += lane_keeping_reward
 
         # 목표 속도 유지 보상 (도로가 제안하는 속도와 가까울수록 높은 보상)
         current_vel = state.vel_long  # m/s 단위 유지
         target_vel = state.target_vel_long or self.config['simulation']['path_planning']['default_speed']
 
-        # 적응형 sigma: 목표 속도의 40%를 허용 범위로 설정
-        vel_sigma = max(1.0, target_vel * 0.4)
+        speed_diff = abs(current_vel - target_vel)
 
-        # 속도 초과에 더 큰 페널티 적용 (안전성)
-        if current_vel > target_vel:
-            speed_diff = (current_vel - target_vel) * 2.0
+        # 속도 미달 또는 초과 여부에 따라 다른 기울기(slope)를 적용하여 페널티 계산
+        if current_vel < target_vel:
+            # 목표 속도보다 느릴 경우: 완만한 기울기 적용
+            penalty = speed_diff * rewards['speed_under_slope']
         else:
-            speed_diff = current_vel - target_vel
+            # 목표 속도보다 빠를 경우(과속): 가파른 기울기 적용
+            penalty = speed_diff * rewards['speed_over_slope']
 
-        speed_norm = exp(-((speed_diff**2) / (2 * vel_sigma**2)))  # 가우시안 커널
+        speed_norm = max(0, 1.0 - penalty)
         speed_reward = speed_norm * rewards['speed_factor']
         reward += speed_reward
+
+        # # 적응형 sigma: 목표 속도의 40%를 허용 범위로 설정
+        # vel_sigma = max(1.0, target_vel * 0.4)
+
+        # # 속도 초과에 더 큰 페널티 적용 (안전성)
+        # if current_vel > target_vel:
+        #     speed_diff = (current_vel - target_vel) * 2.0
+        # else:
+        #     speed_diff = current_vel - target_vel
+
+        # speed_norm = exp(-((speed_diff**2) / (2 * vel_sigma**2)))  # 가우시안 커널
+        # speed_reward = speed_norm * rewards['speed_factor']
+        # reward += speed_reward
 
         # 저속 페널티
         is_stop = abs(state.vel_long) < 0.56    # 0.56m/s, 2.0km/h
