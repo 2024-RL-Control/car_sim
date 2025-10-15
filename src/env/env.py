@@ -209,7 +209,7 @@ class CarSimulatorEnv(gym.Env):
             actions: 차량별 [엔진, 브레이크, 조향] 명령 (액션 리스트, 2차원 배열)
 
         Returns:
-            observations: 차량별 관측 (num_vehicles, obs_dim) [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
+            observations: 차량별 관측 (num_vehicles, obs_dim)
             rewards: 차량별 보상 (num_vehicles,)
             done: 종료 여부
             info: 추가 정보
@@ -393,11 +393,13 @@ class CarSimulatorEnv(gym.Env):
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_target_vel_long, _ = state.scale_long(state.target_vel_long, 0.0, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
-        cos_goal_yaw_diff, sin_goal_yaw_diff = state.encoding_angle(state.yaw_diff_to_target)
+        cos_error_to_goal, sin_error_to_goal = state.encoding_angle(state.error_to_target)
+        cos_angle_to_goal, sin_angle_to_goal = state.encoding_angle(state.angle_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width'])
-        cos_heading_error, sin_heading_error = state.encoding_angle(state.heading_error)
+        cos_error_to_ref, sin_error_to_ref = state.encoding_angle(state.error_to_ref)
+        cos_angle_to_ref, sin_angle_to_ref = state.encoding_angle(state.angle_to_ref)
 
-        # 기본 차량 상태 (13, )
+        # 기본 차량 상태 (17, )
         obs = np.array([
             progress,               # -1 ~ 1
             # state.steer,            # -1 ~ 1
@@ -410,11 +412,15 @@ class CarSimulatorEnv(gym.Env):
             scale_vel_lat,          # -1 ~ 1
             scale_acc_lat,          # -1 ~ 1
             scale_target_vel_long,  # -1 ~ 1
-            cos_goal_yaw_diff,      # -1 ~ 1
-            sin_goal_yaw_diff,      # -1 ~ 1
+            cos_error_to_goal,      # -1 ~ 1
+            sin_error_to_goal,      # -1 ~ 1
+            cos_angle_to_goal,      # -1 ~ 1
+            sin_angle_to_goal,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
-            cos_heading_error,      # -1 ~ 1
-            sin_heading_error       # -1 ~ 1
+            cos_error_to_ref,       # -1 ~ 1
+            sin_error_to_ref,       # -1 ~ 1
+            cos_angle_to_ref,       # -1 ~ 1
+            sin_angle_to_ref        # -1 ~ 1
         ], dtype=np.float32)
 
         # (13, ), 0 ~ 1, 정규화된 데이터

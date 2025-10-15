@@ -62,7 +62,7 @@ class HUD:
         goal = vehicle.get_current_goal()
         if goal:
             distance = state.curr_distance_to_target
-            yaw_diff = np.degrees(state.yaw_diff_to_target)
+            yaw_diff = np.degrees(state.error_to_target)
             hud.extend([
                 f"Target: ({state.target_x:.1f}, {state.target_y:.1f})",
                 f"Progress: {state.get_progress():.2f}%",

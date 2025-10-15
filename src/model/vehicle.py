@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from collections import deque, OrderedDict
-from math import degrees, pi, cos, sin, log, e, exp, sqrt
+from math import degrees, pi, cos, sin, log, e, exp, sqrt, atan2
 import pygame
 import numpy as np
 import time
@@ -809,17 +809,19 @@ class VehicleState:
     initial_distance_to_target: float = 0.0  # 초기 목표까지의 거리
     prev_distance_to_target: float = 0.0  # 이전 목표까지의 거리
     curr_distance_to_target: float = 0.0  # 남은 목표까지의 거리
-    yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
+    error_to_target: float = 0.0  # 목표와의 방향 차이
+    angle_to_target: float = 0.0  # 목표로의 각도 차이
 
     # frenet 좌표
     prev_progress: float = 0.0     # 이전 목표까지의 진행률 [0 ~ 1.0]
     curr_progress: float = 0.0     # 현재 목표까지의 진행률 [0 ~ 1.0]
-    frenet_d: float = 0.0
+    segment_length: float = 0.0    # 현재 세그먼트 전체 길이 [m]
     frenet_s: float = 0.0          # 현재 호장 길이 [m]
+    frenet_d: float = 0.0
     frenet_point: tuple = None
     target_vel_long: float = 0.0
-    heading_error: float = 0.0
-    segment_length: float = 0.0    # 현재 세그먼트 전체 길이 [m]
+    error_to_ref: float = 0.0
+    angle_to_ref: float = 0.0
 
     # 도로 경계선 캐시 (라이다 센서 최적화용)
     cached_road_boundaries: Optional[np.ndarray] = None  # Shape: (N, 4) - [x1, y1, x2, y2]
@@ -865,16 +867,18 @@ class VehicleState:
         self.initial_distance_to_target = 0.0
         self.prev_distance_to_target = 0.0
         self.curr_distance_to_target = 0.0
-        self.yaw_diff_to_target = 0.0
+        self.error_to_target = 0.0
+        self.angle_to_target = 0.0
 
         self.prev_progress = 0.0
         self.curr_progress = 0.0
-        self.frenet_d = 0.0
+        self.segment_length = 0.0
         self.frenet_s = 0.0
+        self.frenet_d = 0.0
         self.frenet_point = None
         self.target_vel_long = 0.0
-        self.heading_error = 0.0
-        self.segment_length = 0.0
+        self.error_to_ref = 0.0
+        self.angle_to_ref = 0.0
 
         self.cached_road_boundaries = None
         self.cached_segment_id = ""
@@ -1318,15 +1322,16 @@ class Vehicle:
             current_time = 0.0  # 시뮬레이션 시간 기본값
 
         # road_manager를 통해 Frenet 좌표 계산 (frenet_s, segment_length 포함)
-        closest_segment, frenet_point, frenet_d, target_vel_long, outside_road, heading_error, frenet_s, segment_length = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
+        closest_segment, segment_length, frenet_point, frenet_s, frenet_d, outside_road, target_vel_long, error_to_ref, angle_to_ref = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
 
         # 상태 업데이트
         self.state.frenet_point = frenet_point
-        self.state.frenet_d = frenet_d
         self.state.frenet_s = frenet_s if frenet_s is not None else 0.0
+        self.state.frenet_d = frenet_d
         self.state.segment_length = segment_length if segment_length is not None else 0.0
         self.state.target_vel_long = target_vel_long
-        self.state.heading_error = heading_error
+        self.state.error_to_ref = error_to_ref
+        self.state.angle_to_ref = angle_to_ref
 
         # 도로 경계선 캐싱 (segment가 변경되었을 때만)
         if closest_segment is not None:
@@ -1522,8 +1527,8 @@ class Vehicle:
         position_reached = distance <= position_tolerance
 
         # 방향 차이 계산, 목표 방향과 현재 방향의 차이 (절대값 -π ~ π 범위로)
-        yaw_diff = abs(self.state.yaw_diff_to_target)
-        direction_reached = yaw_diff <= yaw_tolerance
+        yaw_error = abs(self.state.error_to_target)
+        direction_reached = yaw_error <= yaw_tolerance
 
         reached = position_reached and direction_reached
 
@@ -1532,10 +1537,11 @@ class Vehicle:
     def _update_target_info(self):
         """목표 위치까지의 거리, 각도도 계산 및 업데이트"""
         self.state.prev_distance_to_target = self.state.curr_distance_to_target
-        dx = self.state.x - self.state.target_x
-        dy = self.state.y - self.state.target_y
+        dx = self.state.target_x - self.state.x
+        dy = self.state.target_y - self.state.y
         self.state.curr_distance_to_target = (dx**2 + dy**2) ** 0.5
-        self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
+        self.state.error_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
+        self.state.angle_to_target = self.state.normalize_angle(atan2(dy, dx))
         self._update_progress()
 
     def _update_progress(self):

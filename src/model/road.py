@@ -1816,29 +1816,35 @@ class RoadSystemAPI:
         else:
             recommended_speed = self.config.get('default_speed', 15.0)
 
-        # Heading error 계산 (차량 기준 상대 각도)
+        # 차량의 진행 방향과 도로의 방향의 일치 정도 계산
         vehicle_yaw = vehicle_pos[2]
         road_yaw = frenet_state.yaw_ref
-        heading_error = normalize_angle(road_yaw - vehicle_yaw)
+        error_to_ref = normalize_angle(road_yaw - vehicle_yaw)
+
+        # 차량 위치에서 참조점까지의 각도 계산
+        ref_x, ref_y = frenet_state.x_ref, frenet_state.y_ref
+        dx_to_ref = ref_x - vehicle_pos[0]
+        dy_to_ref = ref_y - vehicle_pos[1]
+        angle_to_ref = normalize_angle(math.atan2(dy_to_ref, dx_to_ref))
 
         # 세그먼트 전체 길이
         segment_length = closest_segment.get_length() if closest_segment else 0.0
 
         return {
             'closest_segment': closest_segment,
-            'frenet_state': frenet_state,
             'segment_id': frenet_state.segment_id,
-            'distance_to_center': abs(frenet_state.d),
-            'is_on_road': self.network.is_point_on_road(vehicle_pos[:2]),
+            'frenet_state': frenet_state,
+            'segment_length': segment_length,
+            'road_center_point': (frenet_state.x_ref, frenet_state.y_ref),
             's': frenet_state.s,
             'd': frenet_state.d,
             's_dot': frenet_state.s_dot,
             'd_dot': frenet_state.d_dot,
-            'road_center_point': (frenet_state.x_ref, frenet_state.y_ref),
             'road_yaw': frenet_state.yaw_ref,
+            'is_on_road': self.network.is_point_on_road(vehicle_pos[:2]),
             'recommended_speed': recommended_speed,
-            'heading_error': heading_error,
-            'segment_length': segment_length
+            'error_to_ref': error_to_ref,
+            'angle_to_ref': angle_to_ref
         }
 
     def _calculate_speed_from_curvature(self, curvature: float) -> float:
@@ -1868,35 +1874,37 @@ class RoadSystemAPI:
         """차량 업데이트 데이터 계산 (곡률 기반 동적 권장 속도)
 
         Returns:
-            Tuple[closest_segment, road_center_point, d, recommended_speed, is_outside_road, heading_error, frenet_s, segment_length]
+            Tuple[closest_segment, segment_length, road_center_point, frenet_s, d, is_outside_road, recommended_speed, error_to_ref, angle_to_ref]
             - closest_segment: 가장 가까운 도로 세그먼트 객체 (없으면 None)
+            - segment_length: 현재 세그먼트 전체 길이 [m]
             - road_center_point: 도로 중심점 (x, y)
+            - frenet_s: Frenet 호장 길이 [m]
             - d: 횡방향 거리 [m] (왼쪽 양수)
-            - recommended_speed: 곡률 기반 권장 종방향 속도 [m/s]
             - is_outside_road: 도로 이탈 여부
-            - heading_error: 차량 기준 heading error [rad] (road_yaw - vehicle_yaw, -π~π)
+            - recommended_speed: 곡률 기반 권장 종방향 속도 [m/s]
+            - error_to_ref: 차량과 도로 참조점 접선의 일치도 [rad] (road_yaw - vehicle_yaw, -π~π)
                             > 0: 도로가 왼쪽 → 좌회전 필요
                             < 0: 도로가 오른쪽 → 우회전 필요
-            - frenet_s: Frenet 호장 길이 [m]
-            - segment_length: 현재 세그먼트 전체 길이 [m]
+            - angle_to_ref: 차량 위치에서 도로 참조점까지의 각도 [rad] (-π~π)
         """
         info = self.get_vehicle_road_info(vehicle_position)
 
         if not info:
-            return None, None, None, None, True, None, None, None
+            return None, None, None, None, None, True, None, None, None
 
         return (
             info['closest_segment'],
+            info['segment_length'],
             info['road_center_point'],
-            info['d'],
-            info['recommended_speed'],
-            not info['is_on_road'],
-            info['heading_error'],
             info['s'],
-            info['segment_length']
+            info['d'],
+            not info['is_on_road'],
+            info['recommended_speed'],
+            info['error_to_ref'],
+            info['angle_to_ref']
         )
 
-    def get_road_wdith(self, segment_id: str) -> Optional[float]:
+    def get_road_width(self, segment_id: str) -> Optional[float]:
         """도로 폭 반환"""
         segment = self.network.get_segment(segment_id)
         if segment:

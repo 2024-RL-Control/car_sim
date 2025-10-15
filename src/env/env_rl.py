@@ -440,7 +440,7 @@ class BasicRLDrivingEnv(gym.Env):
             options: 추가 옵션 딕셔너리
 
         Returns:
-            observations: 차량별 초기 관측 값 (num_vehicles, obs_dim) [x, y, cos(yaw), sin(yaw), vel_long, vel_lat, distance_to_target, yaw_diff_to_target]
+            observations: 차량별 초기 관측 값 (num_vehicles, obs_dim)
         """
         success = False
 

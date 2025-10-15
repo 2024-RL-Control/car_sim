@@ -35,21 +35,21 @@ simulation:
     debug_action_timing: false      # 행동 선택 타이밍 디버그 출력 여부
     eval_episode: 10                # number of episodes for evaluation
     observation:
-      vehicle_state_dim: 13
+      vehicle_state_dim: 17
       lidar_dim: 13
       trajectory_dim: 0
     rewards:
       goal_reached_reward: 1000.0        # reward for reaching the goal
-      collision_penalty: -500.0         # penalty for collision
-      outside_road_penalty: -400.0      # penalty for going outside the road
-      progress_factor: 2.0              # reward factor for reducing distance to goal
-      lane_keeping_factor: 0.5          # reward factor for staying in the lane
+      collision_penalty: -700.0         # penalty for collision
+      outside_road_penalty: -500.0      # penalty for going outside the road
+      progress_factor: 1.2              # reward factor for reducing distance to goal
+      lane_keeping_factor: 0.8          # reward factor for staying in the lane
       lane_zero_reward_threshold: 0.15  # threshold for zero lane keeping reward
       speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
-      speed_under_slope: 0.2            # under speed reward slope
-      speed_over_slope: 0.8             # over speed reward slope
-      slow_penalty: -0.10               # penalty for very low speed
-      reverse_penalty: -0.15            # penalty for driving in reverse
+      speed_under_slope: 0.1            # under speed reward slope
+      speed_over_slope: 0.5             # over speed reward slope
+      slow_penalty: -0.15               # penalty for very low speed
+      reverse_penalty: -0.20            # penalty for driving in reverse
     callbacks:
       max_episodes_history: 1000       # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
@@ -72,7 +72,7 @@ simulation:
     goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
     nearest_neighbor_count: 20    # RRT nearest neighbor search count for KD-Tree optimization
     kdtree_rebuild_interval: 15   # KD-Tree 재구성 주기 [iterations]
-    road_width: 8.0               # Default road width [m]
+    road_width: 7.5               # Default road width [m]
     min_radius: 6.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 4.17           # default speed for path planning [m/s] (15 km/h)
