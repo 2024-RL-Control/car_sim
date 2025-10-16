@@ -11,7 +11,8 @@ from typing import List, Tuple, Optional, Dict, Any, Union
 from dataclasses import dataclass
 from pathlib import Path
 from scipy.spatial import KDTree
-
+from shapely.geometry import LineString
+from shapely.ops import unary_union
 
 # =============================================================================
 # 1. 기본 유틸리티 함수
@@ -365,66 +366,41 @@ class LinearRoadSegment:
             return value
         return None
 
-    def get_boundary_lines(self) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
-        """도로 경계선 계산"""
-        if self._cached_boundary_lines:
+    def get_boundary_lines(self) -> np.ndarray:
+        """
+        Shapely를 사용하여 도로 경계선을 계산
+        자가 교차 및 침범 영역이 자동으로 처리된 후, 레이캐스팅을 위한 NumPy 선분 배열을 반환
+        """
+        if self._cached_boundary_lines is not None:
             return self._cached_boundary_lines
 
         if len(self.waypoints) < 2:
-            return [], []
+            return np.empty((0, 4))
 
-        half_width = self.width / 2
-        left_boundary = []
-        right_boundary = []
+        centerline = LineString([wp[:2] for wp in self.waypoints])
+        road_polygon = centerline.buffer(self.width / 2, cap_style='round', join_style='round')
 
-        for i in range(len(self.waypoints) - 1):
-            p1 = self.waypoints[i]
-            p2 = self.waypoints[i + 1]
+        boundary_segments = []
+        geoms = list(road_polygon.geoms) if hasattr(road_polygon, 'geoms') else [road_polygon]
 
-            # 방향 벡터
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            length = math.sqrt(dx*dx + dy*dy)
+        for poly in geoms:
+            # 1. 외부 경계선(exterior)을 선분으로 추가
+            exterior_coords = list(poly.exterior.coords)
+            for i in range(len(exterior_coords) - 1):
+                p1 = exterior_coords[i]
+                p2 = exterior_coords[i+1]
+                boundary_segments.append([p1[0], p1[1], p2[0], p2[1]])
 
-            if length < 1e-6:
-                continue
+            # 2. 모든 내부 경계선(interiors)을 선분으로 추가
+            for interior in poly.interiors:
+                interior_coords = list(interior.coords)
+                for i in range(len(interior_coords) - 1):
+                    p1 = interior_coords[i]
+                    p2 = interior_coords[i+1]
+                    boundary_segments.append([p1[0], p1[1], p2[0], p2[1]])
 
-            # 정규화된 수직 벡터
-            perp_x = -dy / length
-            perp_y = dx / length
-
-            # 경계점 계산
-            left_x = p1[0] + perp_x * half_width
-            left_y = p1[1] + perp_y * half_width
-            right_x = p1[0] - perp_x * half_width
-            right_y = p1[1] - perp_y * half_width
-
-            left_boundary.append((left_x, left_y))
-            right_boundary.append((right_x, right_y))
-
-        # 마지막 점 추가
-        if len(self.waypoints) >= 2:
-            p1 = self.waypoints[-2]
-            p2 = self.waypoints[-1]
-
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            length = math.sqrt(dx*dx + dy*dy)
-
-            if length > 1e-6:
-                perp_x = -dy / length
-                perp_y = dx / length
-
-                left_x = p2[0] + perp_x * half_width
-                left_y = p2[1] + perp_y * half_width
-                right_x = p2[0] - perp_x * half_width
-                right_y = p2[1] - perp_y * half_width
-
-                left_boundary.append((left_x, left_y))
-                right_boundary.append((right_x, right_y))
-
-        self._cached_boundary_lines = (left_boundary, right_boundary)
-        return left_boundary, right_boundary
+        self._cached_boundary_lines = np.array(boundary_segments)
+        return self._cached_boundary_lines
 
     def is_point_on_road(self, point: Tuple[float, float]) -> bool:
         """점이 도로 위에 있는지 확인"""
@@ -522,20 +498,26 @@ class LinearRoadSegment:
         road_color = (100, 100, 100)
         line_color = (255, 255, 0)
 
-        # 경계선 그리기
-        left_boundary, right_boundary = self.get_boundary_lines()
-
-        if left_boundary and right_boundary:
-            left_screen = [world_to_screen_func(pt) for pt in left_boundary]
-            right_screen = [world_to_screen_func(pt) for pt in right_boundary]
-
-            # 중심선
-            center_points = [(wp[0], wp[1]) for wp in self.waypoints]
-            center_screen = [world_to_screen_func(pt) for pt in center_points]
-
+        center_points = [(wp[0], wp[1]) for wp in self.waypoints]
+        center_screen = [world_to_screen_func(pt) for pt in center_points]
+        if len(center_screen) > 1:
             pygame.draw.lines(screen, road_color, False, center_screen, 2)
-            pygame.draw.lines(screen, line_color, False, left_screen, 2)
-            pygame.draw.lines(screen, line_color, False, right_screen, 2)
+
+        # 경계선 그리기
+        boundary_segments = self.get_boundary_lines()
+
+        # 모든 선분을 하나씩 순회하며 개별적으로 그립니다.
+        for segment in boundary_segments:
+            # 각 선분의 시작점(p1)과 끝점(p2)을 추출합니다.
+            p1 = (segment[0], segment[1])
+            p2 = (segment[2], segment[3])
+
+            # 두 점을 모두 화면 좌표로 변환합니다.
+            p1_screen = world_to_screen_func(p1)
+            p2_screen = world_to_screen_func(p2)
+
+            # pygame.draw.line으로 선분 하나를 그립니다.
+            pygame.draw.line(screen, line_color, p1_screen, p2_screen, 2)
 
         if debug:
             font = pygame.font.SysFont(None, 12)

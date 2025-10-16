@@ -1288,34 +1288,6 @@ class Vehicle:
 
         return outside_road
 
-    def _convert_boundaries_to_segments(self, left_boundary: List[Tuple[float, float]],
-                                        right_boundary: List[Tuple[float, float]]) -> np.ndarray:
-        """도로 경계선을 line segment 배열로 변환
-
-        Args:
-            left_boundary: 왼쪽 경계선 좌표 리스트 [(x, y), ...]
-            right_boundary: 오른쪽 경계선 좌표 리스트 [(x, y), ...]
-
-        Returns:
-            np.ndarray: Shape (N, 4) - 각 row는 [x1, y1, x2, y2] 형태의 line segment
-        """
-        segments = []
-
-        # 왼쪽 경계선을 line segments로 변환
-        for i in range(len(left_boundary) - 1):
-            x1, y1 = left_boundary[i]
-            x2, y2 = left_boundary[i + 1]
-            segments.append([x1, y1, x2, y2])
-
-        # 오른쪽 경계선을 line segments로 변환
-        for i in range(len(right_boundary) - 1):
-            x1, y1 = right_boundary[i]
-            x2, y2 = right_boundary[i + 1]
-            segments.append([x1, y1, x2, y2])
-
-        # NumPy 배열로 변환
-        return np.array(segments, dtype=np.float64) if segments else np.empty((0, 4), dtype=np.float64)
-
     def _update_road_data_internal(self, road_manager, current_time: float = None):
         """내부용 road data 업데이트 - 서브 시스템 관리자에서 호출"""
         if current_time is None:
@@ -1339,12 +1311,10 @@ class Vehicle:
 
             if segment_id != self.state.cached_segment_id:
                 # 경계선 데이터 가져오기
-                left_boundary, right_boundary = closest_segment.get_boundary_lines()
+                boundary_segments = closest_segment.get_boundary_lines()
 
                 # line segment 배열로 변환 및 캐싱
-                self.state.cached_road_boundaries = self._convert_boundaries_to_segments(
-                    left_boundary, right_boundary
-                )
+                self.state.cached_road_boundaries = boundary_segments
                 self.state.cached_segment_id = segment_id
 
         return outside_road
