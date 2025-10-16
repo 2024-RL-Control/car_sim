@@ -382,7 +382,9 @@ class LidarSensor(BaseSensor):
 
         # 유효성 검증: t >= min_range, 0 <= s <= 1
         valid_mask &= (t >= self.min_range) & (t <= self.max_range)
-        valid_mask &= (s >= 0.0) & (s <= 1.0)
+        # valid_mask &= (s >= 0.0) & (s <= 1.0)
+        s_epsilon = 0.5
+        valid_mask &= (s >= -s_epsilon) & (s <= 1.0 + s_epsilon)
 
         # 각 레이별로 최소 t 찾기
         t_masked = np.where(valid_mask, t, self.max_range)
