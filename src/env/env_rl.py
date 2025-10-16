@@ -657,7 +657,7 @@ class BasicRLDrivingEnv(gym.Env):
             hyperparameters ={
                 "buffer_size": self.max_step // 5,
                 "learning_rate": 3e-4,
-                "batch_size": 256,
+                "batch_size": 512,
                 "learning_starts": 5000,
                 "n_envs": 1,
                 "tau": 0.005,                   # 타겟 네트워크 업데이트 속도

@@ -397,9 +397,9 @@ class CarSimulatorEnv(gym.Env):
         cos_angle_to_goal, sin_angle_to_goal = state.encoding_angle(state.angle_to_target)
         frenet_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width'])
         cos_error_to_ref, sin_error_to_ref = state.encoding_angle(state.error_to_ref)
-        cos_angle_to_ref, sin_angle_to_ref = state.encoding_angle(state.angle_to_ref)
+        # cos_angle_to_ref, sin_angle_to_ref = state.encoding_angle(state.angle_to_ref)
 
-        # 기본 차량 상태 (17, )
+        # 기본 차량 상태 (15, )
         obs = np.array([
             progress,               # -1 ~ 1
             # state.steer,            # -1 ~ 1
@@ -418,12 +418,12 @@ class CarSimulatorEnv(gym.Env):
             sin_angle_to_goal,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
             cos_error_to_ref,       # -1 ~ 1
-            sin_error_to_ref,       # -1 ~ 1
-            cos_angle_to_ref,       # -1 ~ 1
-            sin_angle_to_ref        # -1 ~ 1
+            sin_error_to_ref       # -1 ~ 1
+            # cos_angle_to_ref,       # -1 ~ 1
+            # sin_angle_to_ref        # -1 ~ 1
         ], dtype=np.float32)
 
-        # (13, ), 0 ~ 1, 정규화된 데이터
+        # (11, ), 0 ~ 1, 정규화된 데이터
         lidar_data = state.get_lidar_data()
         obs = np.concatenate((obs, lidar_data))
 
