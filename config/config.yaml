@@ -155,15 +155,15 @@ vehicle:
       relative_angle: 0.0       # 차량 방향 기준 상대 각도 [degrees] - 저장 시 도 단위 사용
       num_samples: 11           # 샘플(레이) 수
       angle_start: -170.0       # 시작 각도 [degrees] - 저장 시 도 단위 사용
-      angle_end: 170.0         # 종료 각도 [degrees] - 저장 시 도 단위 사용
+      angle_end: 170.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       concentration: 1.5        # 각도 집중도 (0~1: 가장자리 집중, 1: 균등, >1: 중앙 집중)
       max_range: 30.0           # 최대 감지 거리 [m]
       min_range: 0.1            # 최소 감지 거리 [m]
       scan_history: 0           # 스캔 히스토리 개수
 
       # 노이즈 파라미터
-      noise_gaussian_sigma: 0.05  # 가우시안 노이즈 표준편차 [m]
-      noise_distance_factor: 0.01 # 거리에 따른 노이즈 증가 계수 [m/m]
+      noise_gaussian_sigma: 0.0  # 가우시안 노이즈 표준편차 [m]
+      noise_distance_factor: 0.0 # 거리에 따른 노이즈 증가 계수 [m/m]
 
 # Physics parameters
 physics:
