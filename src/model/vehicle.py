@@ -824,7 +824,7 @@ class VehicleState:
     angle_to_ref: float = 0.0
 
     # 도로 경계선 캐시 (라이다 센서 최적화용)
-    cached_road_boundaries: Optional[np.ndarray] = None  # Shape: (N, 4) - [x1, y1, x2, y2]
+    cached_road_colliders: Optional[np.ndarray] = None  # Shape: (N, 3) - [x1, y1, radius]
     cached_segment_id: str = ""    # 캐시 무효화 감지용
 
     # 라이다 센서 데이터, 거리 배열
@@ -880,7 +880,7 @@ class VehicleState:
         self.error_to_ref = 0.0
         self.angle_to_ref = 0.0
 
-        self.cached_road_boundaries = None
+        self.cached_road_colliders = None
         self.cached_segment_id = ""
 
         self.lidar_data.clear()
@@ -1310,18 +1310,18 @@ class Vehicle:
             segment_id = closest_segment.id if hasattr(closest_segment, 'id') else str(id(closest_segment))
 
             if segment_id != self.state.cached_segment_id:
-                # 경계선 데이터 가져오기
-                boundary_segments = closest_segment.get_boundary_lines()
+                # 경계 충돌체 데이터 가져오기
+                boundary_colliders = closest_segment.get_boundary()
 
                 # line segment 배열로 변환 및 캐싱
-                self.state.cached_road_boundaries = boundary_segments
+                self.state.cached_road_colliders = boundary_colliders
                 self.state.cached_segment_id = segment_id
 
         return outside_road
 
     def _update_sensor_callback(self, dt, time_elapsed, objects):
         """센서 업데이트 콜백"""
-        self.sensor_manager.update(dt, time_elapsed, objects, road_boundaries=self.state.cached_road_boundaries)
+        self.sensor_manager.update(dt, time_elapsed, objects, self.state.cached_road_colliders)
         self._update_sensor_data()
         return self.state.get_lidar_data()
 

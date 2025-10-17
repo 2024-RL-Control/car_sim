@@ -89,8 +89,10 @@ class LinearRoadSegment:
         self._cached_total_length = None
         self._cached_segment_lengths = None
         self._cached_cumulative_lengths = None
-        self._cached_boundary_lines = None
         self._cached_curvatures = None  # 각 waypoint에서의 곡률
+        self._cached_boundary_polygons = None
+        self._cached_boundary_colliders = None
+        self.boundary_radius = 0.1  # 원형 충돌체 반지름
 
         # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
         self._cache_config = {
@@ -366,41 +368,78 @@ class LinearRoadSegment:
             return value
         return None
 
-    def get_boundary_lines(self) -> np.ndarray:
+    def get_boundary(self) -> np.ndarray:
         """
-        Shapely를 사용하여 도로 경계선을 계산
+        Shapely를 사용하여 도로 경계선과 원형 충돌체를 계산
         자가 교차 및 침범 영역이 자동으로 처리된 후, 레이캐스팅을 위한 NumPy 선분 배열을 반환
         """
-        if self._cached_boundary_lines is not None:
-            return self._cached_boundary_lines
+        if self._cached_boundary_colliders is not None:
+            return self._cached_boundary_colliders
 
         if len(self.waypoints) < 2:
-            return np.empty((0, 4))
+            return np.empty((0, 3))
 
-        centerline = LineString([wp[:2] for wp in self.waypoints])
-        road_polygon = centerline.buffer(self.width / 2, cap_style='round', join_style='round')
+        waypoints_2d = [wp[:2] for wp in self.waypoints]
+        centerline = LineString(waypoints_2d)
+        road_polygon = centerline.buffer(self.width / 2, cap_style='round', join_style='bevel')
 
-        boundary_segments = []
+        sampling_distance = self.boundary_radius
+        if sampling_distance < 0.01:
+            sampling_distance = 0.01
+
+        def sample_line_string(coords: List[Tuple[float, float]], sampling_dist: float) -> List[Tuple[float, float]]:
+            """Shapely 좌표 리스트(coords)를 받아, 선분 위를 촘촘히 샘플링"""
+            sampled_points = []
+            if not coords:
+                return []
+
+            for i in range(len(coords) - 1):
+                p1 = np.array(coords[i])
+                p2 = np.array(coords[i+1])
+                segment_vec = p2 - p1
+                segment_len = np.linalg.norm(segment_vec)
+
+                # 항상 시작점은 추가
+                sampled_points.append(tuple(p1))
+
+                # 선분 길이가 샘플링 간격보다 길 때만 보간
+                if segment_len > sampling_dist:
+                    # 보간할 점의 개수
+                    num_steps = int(segment_len // sampling_dist)
+                    if num_steps > 0:
+                        # 단위 벡터가 아닌, 정확한 스텝 벡터 계산
+                        step_vec = segment_vec * (sampling_dist / segment_len)
+
+                        for j in range(1, num_steps + 1):
+                            interp_point = p1 + step_vec * j
+                            sampled_points.append(tuple(interp_point))
+
+            # Shapely coords는 닫혀있으므로(첫점==끝점) 마지막 점 별도 추가 불필요
+            return sampled_points
+
+        exterior_points = []
+        interior_points = []
+        boundary_points = []
         geoms = list(road_polygon.geoms) if hasattr(road_polygon, 'geoms') else [road_polygon]
 
         for poly in geoms:
-            # 1. 외부 경계선(exterior)을 선분으로 추가
+            # 1. 외부 경계선(exterior)을 선분 및 좌표로 추가
             exterior_coords = list(poly.exterior.coords)
-            for i in range(len(exterior_coords) - 1):
-                p1 = exterior_coords[i]
-                p2 = exterior_coords[i+1]
-                boundary_segments.append([p1[0], p1[1], p2[0], p2[1]])
+            exterior_points.append(exterior_coords)
+            sampled_exterior = sample_line_string(exterior_coords, sampling_distance)
+            boundary_points.extend(sampled_exterior)
 
-            # 2. 모든 내부 경계선(interiors)을 선분으로 추가
+            # 2. 모든 내부 경계선(interiors)을 선분 및 좌표로 추가
             for interior in poly.interiors:
                 interior_coords = list(interior.coords)
-                for i in range(len(interior_coords) - 1):
-                    p1 = interior_coords[i]
-                    p2 = interior_coords[i+1]
-                    boundary_segments.append([p1[0], p1[1], p2[0], p2[1]])
+                interior_points.append(interior_coords)
+                sampled_interior = sample_line_string(interior_coords, sampling_distance)
+                boundary_points.extend(sampled_interior)
 
-        self._cached_boundary_lines = np.array(boundary_segments)
-        return self._cached_boundary_lines
+        self._cached_boundary_polygons = (exterior_points, interior_points)
+        points_array = np.unique(np.array(boundary_points), axis=0)
+        self._cached_boundary_colliders = np.hstack([points_array, np.full((points_array.shape[0], 1), self.boundary_radius)])
+        return self._cached_boundary_colliders
 
     def is_point_on_road(self, point: Tuple[float, float]) -> bool:
         """점이 도로 위에 있는지 확인"""
@@ -504,20 +543,18 @@ class LinearRoadSegment:
             pygame.draw.lines(screen, road_color, False, center_screen, 2)
 
         # 경계선 그리기
-        boundary_segments = self.get_boundary_lines()
+        _ = self.get_boundary()
+        (all_exteriors, all_interiors) = self._cached_boundary_polygons
 
-        # 모든 선분을 하나씩 순회하며 개별적으로 그립니다.
-        for segment in boundary_segments:
-            # 각 선분의 시작점(p1)과 끝점(p2)을 추출합니다.
-            p1 = (segment[0], segment[1])
-            p2 = (segment[2], segment[3])
+        for exterior_points in all_exteriors:
+            if len(exterior_points) > 1:
+                exterior_screen = [world_to_screen_func(pt) for pt in exterior_points]
+                pygame.draw.lines(screen, line_color, False, exterior_screen, 2)
 
-            # 두 점을 모두 화면 좌표로 변환합니다.
-            p1_screen = world_to_screen_func(p1)
-            p2_screen = world_to_screen_func(p2)
-
-            # pygame.draw.line으로 선분 하나를 그립니다.
-            pygame.draw.line(screen, line_color, p1_screen, p2_screen, 2)
+        for interior_points in all_interiors:
+            if len(interior_points) > 1:
+                interior_screen = [world_to_screen_func(pt) for pt in interior_points]
+                pygame.draw.lines(screen, line_color, False, interior_screen, 2)
 
         if debug:
             font = pygame.font.SysFont(None, 12)
