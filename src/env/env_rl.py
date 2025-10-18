@@ -519,7 +519,6 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 환경에서 스텝 진행 (실제 사용할 행동으로)
         observations, rewards, done, _, info = self.env.step(actual_actions)
-        average_reward = np.mean(rewards)
 
         # 스텝 카운터 증가
         self.steps += 1
@@ -561,6 +560,7 @@ class BasicRLDrivingEnv(gym.Env):
         done = done or is_early_termination
         info['early_termination'] = is_early_termination
         info['active_agents'] = self.active_agents.copy()
+        average_reward = np.mean(rewards)
 
         # ActionController 통계 정보 추가
         if self.action_controller is not None:
