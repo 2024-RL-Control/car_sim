@@ -33,28 +33,29 @@ simulation:
     action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false      # 행동 선택 타이밍 디버그 출력 여부
+    termination_check_step: 500      # 조기 종료를 위한 스텝 간격
+    progress_change_threshold: 0.10  # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
     eval_episode: 10                # number of episodes for evaluation
     observation:
       vehicle_state_dim: 15
       lidar_dim: 11
       trajectory_dim: 0
     rewards:
-      goal_reached_reward: 1000.0        # reward for reaching the goal
+      goal_reached_reward: 1000.0       # reward for reaching the goal
       collision_penalty: -700.0         # penalty for collision
-      outside_road_penalty: -500.0      # penalty for going outside the road
-      progress_factor: 2.0              # reward factor for reducing distance to goal
+      outside_road_penalty: -600.0      # penalty for going outside the road
+      early_termination_penalty: -300.0 # penalty for early termination
+      progress_factor: 1.5              # reward factor for reducing distance to goal
       lane_keeping_factor: 0.5          # reward factor for staying in the lane
-      lane_zero_reward_threshold: 0.15  # threshold for zero lane keeping reward
-      speed_factor: 0.5                 # reward factor for maintaining/reaching target speed
-      speed_under_slope: 0.1            # under speed reward slope
+      lane_zero_threshold: 0.5          # threshold for zero lane keeping reward
+      speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
+      speed_under_slope: 0.2            # under speed reward slope
       speed_over_slope: 0.5             # over speed reward slope
-      slow_penalty: -0.10               # penalty for very low speed
-      reverse_penalty: -0.15            # penalty for driving in reverse
+      slow_penalty: -0.25               # penalty for very low speed
+      reverse_penalty: -0.25            # penalty for driving in reverse
     callbacks:
       max_episodes_history: 500        # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
-      termination_check_step: 500      # 조기 종료를 위한 스텝 간격
-      progress_change_threshold: 0.10  # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
       gpu_memory_limit: 5              # GPU 메모리 제한 [GB]
       monitoring_freq: 100             # 메모리 등 하드웨어 모니터링 빈도 [steps]
       logging_freq: 1000               # 매트릭 및 성능 로그 기록 빈도 [steps]
@@ -72,7 +73,7 @@ simulation:
     goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
     nearest_neighbor_count: 20    # RRT nearest neighbor search count for KD-Tree optimization
     kdtree_rebuild_interval: 15   # KD-Tree 재구성 주기 [iterations]
-    road_width: 8.0               # Default road width [m]
+    road_width: 8.0              # Default road width [m]
     min_radius: 6.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 4.17           # default speed for path planning [m/s] (15 km/h)

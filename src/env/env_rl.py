@@ -9,6 +9,7 @@ from math import pi
 import numpy as np
 import gymnasium as gym
 from datetime import datetime
+from collections import deque, defaultdict
 from src.env.env import CarSimulatorEnv
 from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor
 from ..model.sb3 import create_optimized_callbacks, get_callback_summary
@@ -198,6 +199,7 @@ class BasicRLDrivingEnv(gym.Env):
         """
         # 기본 CarSimulator 환경 초기화
         self.env = CarSimulatorEnv(config_path, setup=False)
+        self.vehicle_manager = self.env.get_vehicle_manager()
 
         self.num_vehicles = self.env.num_vehicles
         self.active_agents = [True] * self.num_vehicles
@@ -269,6 +271,13 @@ class BasicRLDrivingEnv(gym.Env):
         self.steps = 0
         self.max_step = self.rl_config['train_max_steps']
         self.max_episode_steps = self.rl_config['train_max_episode_steps']
+
+        # 조기 종료 설정
+        self.termination_check_step = self.rl_config['termination_check_step']
+        self.progress_change_threshold = self.rl_config['progress_change_threshold']
+        self.early_termination_penalty = self.rl_config['rewards'].get('early_termination_penalty', 0.0)
+        self.accumulated_delta_progress = defaultdict(float)
+        self.next_progress_check_step = self.termination_check_step
 
         # 에피소드 정보 저장용
         self.episode_count = -1
@@ -373,7 +382,7 @@ class BasicRLDrivingEnv(gym.Env):
         차량 배치: 외곽 영역에 차량 배치
         """
         # 기존 차량 모두 제거
-        self.env.vehicle_manager.clear_all_vehicles()
+        self.vehicle_manager.clear_all_vehicles()
 
         # 차량 배치 가능 공간은 외곽 영역
         # 상하좌우 네 영역 중 랜덤 선택
@@ -395,7 +404,7 @@ class BasicRLDrivingEnv(gym.Env):
                 yaw = pi + yaw_volatility  # 왼쪽 방향
 
             # 새 차량 생성
-            self.env.vehicle_manager.create_vehicle(x=x, y=y, yaw=yaw, vehicle_id=i)
+            self.vehicle_manager.create_vehicle(x=x, y=y, yaw=yaw, vehicle_id=i)
 
             # 차량 시작 위치 저장 (목적지 설정에 사용)
             self.vehicle_start_position.append({
@@ -456,9 +465,6 @@ class BasicRLDrivingEnv(gym.Env):
                 dummy_actions = np.zeros((self.num_vehicles, self.env.action_space.shape[-1]), dtype=np.float64)
                 self.env.step(dummy_actions)
 
-                # 에이전트 활성화 상태 초기화
-                self.active_agents = [True] * self.num_vehicles
-
                 success = True
             except Exception as e:
                 print(f"Reset failed: {e}")
@@ -466,6 +472,13 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 스텝 카운터 초기화
         self.steps = 0
+
+        # 조기 종료 관련 변수 초기화
+        self.accumulated_delta_progress = defaultdict(float)
+        self.next_progress_check_step = self.termination_check_step
+
+        # 에이전트 활성화 상태 초기화
+        self.active_agents = [True] * self.num_vehicles
 
         # ActionController 리셋
         if self.action_controller is not None:
@@ -520,8 +533,34 @@ class BasicRLDrivingEnv(gym.Env):
             if vehicle_done and self.active_agents[vehicle_id]:
                 self.active_agents[vehicle_id] = False
 
+            if self.active_agents[vehicle_id]:
+                vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
+                if vehicle:
+                    delta = vehicle.state.get_delta_progress()
+                    self.accumulated_delta_progress[vehicle_id] -= delta
+
         if self.steps >= self.max_episode_steps:
             done = True
+
+        # 조기 종료 체크
+        is_early_termination = False
+        if not done and self.steps == self.next_progress_check_step:
+            active_accumulators = [self.accumulated_delta_progress[vehicle_id] for vehicle_id, is_active in enumerate(self.active_agents) if is_active]
+            if active_accumulators:
+                mean_progress = np.mean(active_accumulators)
+                if mean_progress < self.progress_change_threshold:
+                    is_early_termination = True
+                    for vehicle_id, is_active in enumerate(self.active_agents):
+                        if is_active:
+                            rewards[vehicle_id] += self.early_termination_penalty
+
+            self.next_progress_check_step += self.termination_check_step
+            self.accumulated_delta_progress.clear()
+
+        # 최종 done 플래그 및 info 설정
+        done = done or is_early_termination
+        info['early_termination'] = is_early_termination
+        info['active_agents'] = self.active_agents.copy()
 
         # ActionController 통계 정보 추가
         if self.action_controller is not None:
@@ -658,7 +697,7 @@ class BasicRLDrivingEnv(gym.Env):
                 "buffer_size": self.max_step // 5,
                 "learning_rate": 3e-4,
                 "batch_size": 512,
-                "learning_starts": 5000,
+                "learning_starts": 2000,
                 "n_envs": 1,
                 "tau": 0.005,                   # 타겟 네트워크 업데이트 속도
                 "gamma": 0.995,                 # 할인 인수
@@ -767,8 +806,6 @@ class BasicRLDrivingEnv(gym.Env):
             'max_episode_steps': self.max_episode_steps,
             'max_episodes_history': self.rl_callback_config['max_episodes_history'],
             'max_steps_history': self.rl_callback_config['max_steps_history'],
-            'termination_check_step': self.rl_callback_config['termination_check_step'],
-            'progress_change_threshold': self.rl_callback_config['progress_change_threshold'],
             'gpu_memory_limit': self.rl_callback_config['gpu_memory_limit'],
             'monitoring_freq': self.rl_callback_config['monitoring_freq'],
             'logging_freq': self.rl_callback_config['logging_freq'],

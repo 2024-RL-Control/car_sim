@@ -470,10 +470,12 @@ class TensorBoardLogger(BaseCallback):
 
             reward_params = {
                 "reward/success": self.env_config['reward_factor'].get('goal_reached_reward', 0.0),
-                "reward/collision": self.env_config['reward_factor'].get('collision_penalty', 0.0),
-                "reward/outside": self.env_config['reward_factor'].get('outside_road_penalty', 0.0),
                 "reward/progress": self.env_config['reward_factor'].get('progress_factor', 0.0),
+                "reward/outside": self.env_config['reward_factor'].get('outside_road_penalty', 0.0),
+                "reward/termination": self.env_config['reward_factor'].get('early_termination_penalty', 0.0),
+                "reward/collision": self.env_config['reward_factor'].get('collision_penalty', 0.0),
                 "reward/lane_keeping": self.env_config['reward_factor'].get('lane_keeping_factor', 0.0),
+                "reward/lane_zero_threshold": self.env_config['reward_factor'].get('lane_zero_threshold', 0.0),
                 "reward/speed": self.env_config['reward_factor'].get('speed_factor', 0.0),
                 "reward/slow": self.env_config['reward_factor'].get('slow_penalty', 0.0),
                 "reward/reverse": self.env_config['reward_factor'].get('reverse_penalty', 0.0),
@@ -678,73 +680,6 @@ class SmartCheckpointManager(BaseCallback):
         if self.name_prefix == 'sac':
             self.model.save_replay_buffer(os.path.join(self.save_path, f"{self.name_prefix}_best_replay_buffer"))
 
-class EarlyTerminationCallback(BaseCallback):
-    """
-    조기 종료 콜백
-    활성화 차량 진행률 변화의 평균이 낮을 경우 에피소드 종료
-    """
-
-    def __init__(self, metrics_store: MetricsStore, termination_check_step: int = 500, progress_change_threshold: float = 0.05, verbose: int = 0):
-        """
-        Args:
-            metrics_store: 중앙 메트릭 스토어
-            termination_check_step: 정체를 판단하고 반복할 스텝 간격
-            progress_change_threshold: 조기 종료를 결정할 활성화 차량의 총 진행률 변화의 평균 임계값 (e.g., 0.05는 5% 의미)
-            verbose: 로그 출력 레벨
-        """
-        super().__init__(verbose)
-        self.metrics_store = metrics_store
-        self.termination_check_step = termination_check_step
-        self.progress_change_threshold = progress_change_threshold
-        self.last_episode_count = 0
-
-        self.rl_env = None
-        self.vehicle_manager = None
-
-        self.step = 0
-        self.next_check = 0
-        self.accumulated_delta_progress = defaultdict(float)
-        self.terminate_episode_flag = False
-
-    def _on_training_start(self):
-        self.rl_env = self.training_env.envs[0].env.rl_env
-        self.vehicle_manager = self.rl_env.env.vehicle_manager
-
-    def _on_step(self) -> bool:
-        if self.metrics_store.episode_count > self.last_episode_count:
-            self.step = 0
-            self.next_check = self.termination_check_step
-            self.accumulated_delta_progress.clear()
-            self.terminate_episode_flag = False
-            self.last_episode_count = self.metrics_store.episode_count
-
-        self.step += 1
-
-        # 1. 매 스텝마다 활성 차량의 delta_progress 누적
-        active_agents = self.rl_env.active_agents
-        for vehicle_id, is_active in enumerate(active_agents):
-            if is_active:
-                vehicle = self.vehicle_manager.get_vehicle_by_id(vehicle_id)
-                if vehicle:
-                    delta = vehicle.state.get_delta_progress()
-                    self.accumulated_delta_progress[vehicle_id] -= delta
-
-        # 2. 주기적으로 누적된 변화량 판단
-        if self.step == self.next_check:
-            active_accumulators = [self.accumulated_delta_progress[vehicle_id] for vehicle_id, is_active in enumerate(active_agents) if is_active]
-            if active_accumulators:
-                mean_progress = np.mean(active_accumulators)
-                if mean_progress < self.progress_change_threshold:
-                    self.terminate_episode_flag = True
-                    if self.verbose > 0:
-                        print(f"에피소드 {self.metrics_store.episode_count + 1} 조기 종료")
-
-            # 3. 다음 주기를 위해 변수 초기화 및 갱신
-            self.next_check += self.termination_check_step
-            self.accumulated_delta_progress.clear()
-
-        return True
-
 # 콜백 팩토리 함수
 def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir: str) -> List[BaseCallback]:
     """
@@ -812,15 +747,6 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         config.get('verbose', 0)
     )
     callbacks.append(checkpoint_manager)
-
-    # 7. 조기 종료 콜백
-    early_termination = EarlyTerminationCallback(
-        metrics_store,
-        config.get('termination_check_step', 500),
-        config.get('progress_change_threshold', 0.5),
-        config.get('verbose', 0)
-    )
-    callbacks.append(early_termination)
 
     return callbacks, metrics_store
 
@@ -926,11 +852,6 @@ class SACVehicleAlgorithm(SAC):
         if not callback.on_step():
             return False
 
-        early_term_cb = self._find_early_termination_callback(callback)
-        if early_term_cb and early_term_cb.terminate_episode_flag:
-            done = True
-            info['early_termination'] = True
-
         # 6) 활성화된 에이전트만 경험 저장
         active_idx = np.where(active_mask)[0]
         for idx in active_idx:
@@ -945,7 +866,7 @@ class SACVehicleAlgorithm(SAC):
 
         # 7) 내부 상태 갱신
         self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
-        self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
+        self.prev_active_mask = np.array(info['active_agents'], dtype=bool)
 
         # 8) 에피소드 종료 시 처리
         if done:
@@ -954,21 +875,10 @@ class SACVehicleAlgorithm(SAC):
 
         return True
 
-    def _find_early_termination_callback(self, callback):
-        """CallbackList를 재귀적으로 탐색하여 EarlyTerminationCallback 인스턴스를 찾습니다."""
-        if isinstance(callback, EarlyTerminationCallback):
-            return callback
-        if isinstance(callback, CallbackList):
-            for cb in callback.callbacks:
-                found = self._find_early_termination_callback(cb)
-                if found:
-                    return found
-        return None
-
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
-        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}")
+        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}, "f"Early Termination: {info['early_termination']}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
         if self.metrics_store:
@@ -980,9 +890,9 @@ class SACVehicleAlgorithm(SAC):
                 collisions=info['collisions'].copy(),
                 goals_reached=info['reached_targets'].copy(),
                 outside_roads=info['outside_roads'].copy(),
+                early_termination=info['early_termination'],
                 individual_rewards=self.individual_rewards.tolist(),
                 elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
-                early_termination=info.get('early_termination', False)
             )
 
             self.metrics_store.record_episode(episode_data)
@@ -1157,11 +1067,6 @@ class PPOVehicleAlgorithm(PPO):
             if not callback.on_step():
                 return False
 
-            early_term_cb = self._find_early_termination_callback(callback)
-            if early_term_cb and early_term_cb.terminate_episode_flag:
-                done = True
-                info['early_termination'] = True
-
             # 6) 활성 에이전트마다 RolloutBuffer에 transition 추가
             active_indices = np.where(active_mask)[0]
             for idx in active_indices:
@@ -1182,7 +1087,7 @@ class PPOVehicleAlgorithm(PPO):
             if self._is_new_episode:
                 self._is_new_episode = False
             self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
-            self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
+            self.prev_active_mask = np.array(info['active_agents'], dtype=bool)
 
             # 8) 에피소드 종료 시 처리
             if done:
@@ -1191,21 +1096,10 @@ class PPOVehicleAlgorithm(PPO):
 
         return True
 
-    def _find_early_termination_callback(self, callback):
-        """CallbackList를 재귀적으로 탐색하여 EarlyTerminationCallback 인스턴스를 찾습니다."""
-        if isinstance(callback, EarlyTerminationCallback):
-            return callback
-        if isinstance(callback, CallbackList):
-            for cb in callback.callbacks:
-                found = self._find_early_termination_callback(cb)
-                if found:
-                    return found
-        return None
-
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
-        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}")
+        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}, "f"Early Termination: {info['early_termination']}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
         if self.metrics_store:
@@ -1217,9 +1111,9 @@ class PPOVehicleAlgorithm(PPO):
                 collisions=info['collisions'].copy(),
                 goals_reached=info['reached_targets'].copy(),
                 outside_roads=info['outside_roads'].copy(),
+                early_termination=info['early_termination'],
                 individual_rewards=self.individual_rewards.tolist(),
-                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
-                early_termination=info.get('early_termination', False)
+                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
             )
 
             self.metrics_store.record_episode(episode_data)
