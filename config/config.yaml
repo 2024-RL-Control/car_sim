@@ -22,13 +22,13 @@ simulation:
   hz: # (시뮬레이션 시간 기준)
     frenet_update: 15      # Frenet 좌표 업데이트 주파수 [Hz]
     lidar_update: 15       # 라이다 스캔 주파수 [Hz]
-    trajectory_update: 2   # 궤적 예측 업데이트 주파수 [Hz]
+    trajectory_update: 0   # 궤적 예측 업데이트 주파수 [Hz]
     collision_check: 20    # 충돌 검사 주파수 [Hz]
     goal_check: 15         # 목적지 도달 확인 주파수 [Hz]
     state_history: 5       # 상태 이력 저장 주파수 [Hz]
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   rl:
-    train_max_steps: 5000000
+    train_max_steps: 10000000
     train_max_episode_steps: 3000   # maximum steps per episode
     action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
@@ -51,7 +51,7 @@ simulation:
       speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
       speed_under_slope: 0.2            # under speed reward slope
       speed_over_slope: 0.5             # over speed reward slope
-      slow_penalty: -0.3                # penalty for very low speed
+      slow_penalty: -0.4                # penalty for very low speed
       slow_threshold: 0.56              # speed threshold for slow penalty [m/s], # 2.0 km/h
       reverse_penalty: -0.2             # penalty for driving in reverse
       reverse_threshold: -0.28          # speed threshold for reverse penalty [m/s], # -1.0 km/h
@@ -161,7 +161,7 @@ vehicle:
       angle_end: 170.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       concentration: 1.5        # 각도 집중도 (0~1: 가장자리 집중, 1: 균등, >1: 중앙 집중)
       max_range: 30.0           # 최대 감지 거리 [m]
-      min_range: 0.1            # 최소 감지 거리 [m]
+      min_range: 0.01           # 최소 감지 거리 [m]
       scan_history: 0           # 스캔 히스토리 개수
 
       # 노이즈 파라미터

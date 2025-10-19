@@ -508,8 +508,8 @@ class SubsystemManager:
                     # 보간된 값으로 업데이트
                     state.frenet_d = interpolated_d
 
-                road_width = 8.0  # 기본 도로 폭
-                outside_road = abs(state.frenet_d) > (road_width / 2)
+                road_width = self._simulation_config['path_planning']['road_width']
+                outside_road = abs(state.frenet_d) > (road_width / 2) - 0.3  # 30cm 여유
                 return outside_road
 
         except Exception as e:

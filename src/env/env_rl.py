@@ -908,7 +908,37 @@ class BasicRLDrivingEnv(gym.Env):
         학습된 모델을 테스트하는 함수
         """
         # 모델 경로 설정
-        model_path = f"./logs/checkpoints/{algorithm}_final.zip"
+        checkpoints_dir = "./logs/checkpoints/"
+        model_path = ""
+
+        if not os.path.exists(checkpoints_dir):
+            print(f"체크포인트 디렉토리가 존재하지 않습니다: {checkpoints_dir}")
+            return
+
+        try:
+            # algorithm 이름으로 시작하는 모든 디렉토리 찾기
+            algo_dirs = [d for d in os.listdir(checkpoints_dir)
+                         if d.startswith(f"{algorithm}_") and
+                         os.path.isdir(os.path.join(checkpoints_dir, d))]
+
+            if not algo_dirs:
+                raise FileNotFoundError(
+                    f"'{checkpoints_dir}'에서 '{algorithm}' 알고리즘으로 학습된 기록을 찾을 수 없습니다.")
+
+            # 이름순(시간순)으로 정렬하여 가장 최근 디렉토리 선택
+            latest_run_dir_name = max(algo_dirs)
+            latest_run_dir_path = os.path.join(
+                checkpoints_dir, latest_run_dir_name)
+
+            # 최종 모델 경로 설정
+            model_path = os.path.join(
+                latest_run_dir_path, f"{algorithm}_final.zip")
+            print(f"가장 최근 모델을 로드합니다: {model_path}")
+
+        except Exception as e:
+            print(f"최근 모델을 찾는 중 오류 발생: {e}")
+            return
+
         if not os.path.exists(model_path):
             print(f"모델 파일이 존재하지 않습니다: {model_path}")
             return

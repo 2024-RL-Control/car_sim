@@ -92,7 +92,7 @@ class LinearRoadSegment:
         self._cached_curvatures = None  # 각 waypoint에서의 곡률
         self._cached_boundary_polygons = None
         self._cached_boundary_colliders = None
-        self.boundary_radius = 0.1  # 원형 충돌체 반지름
+        self.boundary_radius = 0.3  # 원형 충돌체 반지름
 
         # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
         self._cache_config = {
@@ -1849,6 +1849,9 @@ class RoadSystemAPI:
         # 세그먼트 전체 길이
         segment_length = closest_segment.get_length() if closest_segment else 0.0
 
+        # 도로 위에 있는지 여부
+        is_on_road = closest_segment.is_point_on_road(vehicle_pos[:2])
+
         return {
             'closest_segment': closest_segment,
             'segment_id': frenet_state.segment_id,
@@ -1860,7 +1863,7 @@ class RoadSystemAPI:
             's_dot': frenet_state.s_dot,
             'd_dot': frenet_state.d_dot,
             'road_yaw': frenet_state.yaw_ref,
-            'is_on_road': self.network.is_point_on_road(vehicle_pos[:2]),
+            'is_on_road': is_on_road,
             'recommended_speed': recommended_speed,
             'error_to_ref': error_to_ref,
             'angle_to_ref': angle_to_ref
