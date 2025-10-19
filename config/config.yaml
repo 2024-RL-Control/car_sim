@@ -47,12 +47,14 @@ simulation:
       early_termination_penalty: -300.0 # penalty for early termination
       progress_factor: 1.5              # reward factor for reducing distance to goal
       lane_keeping_factor: 0.5          # reward factor for staying in the lane
-      lane_zero_threshold: 0.5          # threshold for zero lane keeping reward
+      lane_zero_threshold: 0.2          # threshold for zero lane keeping reward
       speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
       speed_under_slope: 0.2            # under speed reward slope
       speed_over_slope: 0.5             # over speed reward slope
-      slow_penalty: -0.25               # penalty for very low speed
-      reverse_penalty: -0.25            # penalty for driving in reverse
+      slow_penalty: -0.3                # penalty for very low speed
+      slow_threshold: 0.56              # speed threshold for slow penalty [m/s], # 2.0 km/h
+      reverse_penalty: -0.2             # penalty for driving in reverse
+      reverse_threshold: -0.28          # speed threshold for reverse penalty [m/s], # -1.0 km/h
     callbacks:
       max_episodes_history: 500        # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
@@ -73,7 +75,7 @@ simulation:
     goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
     nearest_neighbor_count: 20    # RRT nearest neighbor search count for KD-Tree optimization
     kdtree_rebuild_interval: 15   # KD-Tree 재구성 주기 [iterations]
-    road_width: 8.0              # Default road width [m]
+    road_width: 10.0              # Default road width [m]
     min_radius: 6.0               # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 4.17           # default speed for path planning [m/s] (15 km/h)

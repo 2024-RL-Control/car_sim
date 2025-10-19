@@ -697,7 +697,7 @@ class BasicRLDrivingEnv(gym.Env):
                 "buffer_size": self.max_step // 5,
                 "learning_rate": 3e-4,
                 "batch_size": 512,
-                "learning_starts": 2000,
+                "learning_starts": 5000,
                 "n_envs": 1,
                 "tau": 0.005,                   # 타겟 네트워크 업데이트 속도
                 "gamma": 0.995,                 # 할인 인수

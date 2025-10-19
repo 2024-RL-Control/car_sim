@@ -530,15 +530,17 @@ class CarSimulatorEnv(gym.Env):
         speed_reward = speed_norm * self.rewards['speed_factor']
         reward += speed_reward
 
-        # 저속 페널티
-        is_stop = abs(state.vel_long) < 0.56    # 0.56m/s, 2.0km/h
-        if is_stop:
+        # 저속 페널티 [0.0 ~ slow_threshold] 구간에서 선형 감소, 0.0 이하에서는 최대 페널티
+        if 0.0 <= current_vel < self.rewards['slow_threshold']:
+            slow_ratio = 1.0 - (current_vel / self.rewards['slow_threshold'])
+            reward += slow_ratio * self.rewards['slow_penalty']
+        elif current_vel < 0.0:
             reward += self.rewards['slow_penalty']
 
-        # 후진 페널티
-        is_reversing = state.vel_long < -0.28  # -0.28m/s, -1.0km/h
-        if is_reversing:
-            reward += self.rewards['reverse_penalty']
+        # 후진 페널티 [reverse_threshold ~ 0.0] 구간에서 선형 증가, -0.28 이하에서 최대 페널티, 저속 페널티에 "중첩"됨
+        if current_vel < 0.0:
+            reverse_ratio = min(abs(current_vel) / abs(self.rewards['reverse_threshold']), 1.0)
+            reward += reverse_ratio * self.rewards['reverse_penalty']
 
         # print(f"Delta: {state.get_delta_progress()}, {stop_penalty}")
         # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, {speed_reward}")
