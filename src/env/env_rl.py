@@ -702,7 +702,7 @@ class BasicRLDrivingEnv(gym.Env):
                 "tau": 0.005,                   # 타겟 네트워크 업데이트 속도
                 "gamma": 0.995,                 # 할인 인수
                 "ent_coef": "auto",             # 엔트로피 계수
-                "train_freq": 1,                # 훈련 빈도
+                "train_freq": 8,                # 훈련 빈도
                 "gradient_steps": 1,            # 그라디언트 스텝
                 "target_update_interval": 1     # 타겟 업데이트 간격
             }
