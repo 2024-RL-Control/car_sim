@@ -963,17 +963,25 @@ class SACVehicleAlgorithm(SAC):
                     # Critic을 통해 Q-가치 예측
                     qf1_values, qf2_values = self.critic(replay_data.observations, replay_data.actions)
                     q_values = torch.min(qf1_values, qf2_values).cpu().numpy().flatten()
-                    actions = replay_data.actions.cpu().numpy().flatten()
+                    actions = replay_data.actions.cpu().numpy()
+                    throttle_actions = actions[:, 0]
+                    steering_actions = actions[:, 1]
 
-                    # 스칼라 값 로깅
+                    # 스칼라 값 로깅 (Q-Value)
                     self.logger.record("sac/q_values/mean", np.mean(q_values))
-                    self.logger.record("sac/actions/mean_batch", np.mean(actions))
-                    self.logger.record("sac/actions/std_batch", np.std(actions))
+
+                    # 스칼라 값 로깅 (가속/제동)
+                    self.logger.record("sac/actions/throttle/mean", np.mean(throttle_actions))
+                    self.logger.record("sac/actions/throttle/std", np.std(throttle_actions))
+
+                    # 스칼라 값 로깅 (조향)
+                    self.logger.record("sac/actions/steering/mean", np.mean(steering_actions))
+                    self.logger.record("sac/actions/steering/std", np.std(steering_actions))
 
                     # 히스토그램 로깅
                     tb_writer.add_histogram("sac/q_values", q_values, self.num_timesteps)
-                    tb_writer.add_histogram("sac/actions", actions, self.num_timesteps)
-
+                    tb_writer.add_histogram("sac/actions/throttle", throttle_actions, self.num_timesteps)
+                    tb_writer.add_histogram("sac/actions/steering", steering_actions, self.num_timesteps)
 
 class PPOVehicleAlgorithm(PPO):
     def __init__(self, *args, logging_freq: int = 100, **kwargs):
@@ -1181,18 +1189,27 @@ class PPOVehicleAlgorithm(PPO):
             return
 
         # 데이터 추출 (Numpy 배열로 변환)
-        actions = self.rollout_buffer.actions.flatten()
+        actions = self.rollout_buffer.actions
+        throttle_actions = actions[:, 0]
+        steering_actions = actions[:, 1]
         advantages = self.rollout_buffer.advantages.flatten()
         values = self.rollout_buffer.values.flatten()
 
-        # 스칼라 값 로깅 (평균, 표준편차)
-        self.logger.record("ppo/actions/mean", np.mean(actions))
-        self.logger.record("ppo/actions/std", np.std(actions))
+        # 스칼라 값 로깅 (가속/제동)
+        self.logger.record("ppo/actions/throttle/mean", np.mean(throttle_actions))
+        self.logger.record("ppo/actions/throttle/std", np.std(throttle_actions))
+
+        # 스칼라 값 로깅 (조향)
+        self.logger.record("ppo/actions/steering/mean", np.mean(steering_actions))
+        self.logger.record("ppo/actions/steering/std", np.std(steering_actions))
+
+        # 스칼라 값 로깅 (Advantages & Values)
         self.logger.record("ppo/advantages/mean", np.mean(advantages))
         self.logger.record("ppo/values/mean", np.mean(values))
 
         # 히스토그램 로깅
-        tb_writer.add_histogram("ppo/actions", actions, self.num_timesteps)
+        tb_writer.add_histogram("ppo/actions/throttle", throttle_actions, self.num_timesteps)
+        tb_writer.add_histogram("ppo/actions/steering", steering_actions, self.num_timesteps)
         tb_writer.add_histogram("ppo/advantages", advantages, self.num_timesteps)
         tb_writer.add_histogram("ppo/values", values, self.num_timesteps)
 

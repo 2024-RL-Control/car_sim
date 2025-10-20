@@ -10,6 +10,8 @@ import numpy as np
 import gymnasium as gym
 from datetime import datetime
 from collections import deque, defaultdict
+from typing import Tuple
+import re
 from src.env.env import CarSimulatorEnv
 from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor
 from ..model.sb3 import create_optimized_callbacks, get_callback_summary
@@ -657,12 +659,69 @@ class BasicRLDrivingEnv(gym.Env):
         print("  Tab: Switch between vehicles")
         print("  ESC: Quit")
 
+    def _find_latest_model(self, models_dir: str, algorithm: str) -> Tuple[str, str]:
+        """
+        지정된 디렉토리에서 로드할 최신/최고의 모델 반환
+        우선순위: final > highest_step > best
+
+        Returns:
+            (model_path, replay_buffer_path)
+        """
+        if not os.path.exists(models_dir):
+            return None, None
+
+        files = os.listdir(models_dir)
+
+        # 1. 우선순위 1: final
+        final_model = os.path.join(models_dir, f"{algorithm}_final.zip")
+        if final_model in [os.path.join(models_dir, f) for f in files]:
+            buffer = os.path.join(models_dir, f"{algorithm}_final_replay_buffer.pkl")
+            return final_model, buffer if os.path.exists(buffer) else None
+
+        # 2. 우선순위 2: 가장 높은 step
+        step_models = []
+        for f in files:
+            # 정규식: {algorithm이름}_(숫자)_steps.zip
+            match = re.match(rf"^{re.escape(algorithm)}_(\d+)_steps\.zip$", f)
+            if match:
+                steps = int(match.group(1))
+                step_models.append((steps, os.path.join(models_dir, f)))
+
+        if step_models:
+            # 스텝 수가 가장 많은 모델 (내림차순 정렬 후 첫 번째)
+            step_models.sort(key=lambda x: x[0], reverse=True)
+            latest_step_model_path = step_models[0][1]
+            # 스텝 체크포인트는 .zip 내부에 리플레이 버퍼를 저장하므로
+            # 별도의 버퍼 경로는 None을 반환 (SAC.load가 알아서 처리)
+            return latest_step_model_path, None
+
+        # 3. 우선순위 3: best
+        best_model = os.path.join(models_dir, f"{algorithm}_best.zip")
+        if best_model in [os.path.join(models_dir, f) for f in files]:
+            buffer = os.path.join(models_dir, f"{algorithm}_best_replay_buffer.pkl")
+            return best_model, buffer if os.path.exists(buffer) else None
+
+        # 4. 모델을 찾을 수 없음
+        return None, None
+
     def learn(self, algorithm='sac'):
         """
         자율주행 에이전트 학습 함수 (learn() 메소드 사용)
         """
+        # 모델 불러오기 설정
+        resume_config = self.rl_config['resume_training']
+        resume = resume_config['enabled']
+        resume_dir = f"./logs/checkpoints/{resume_config['model_path']}"
+        if resume:
+            model_path, replay_buffer_path = self._find_latest_model(resume_dir, algorithm)
+            if model_path is None:
+                print(f"경고: '{resume_dir}'에서 '{algorithm}' 알고리즘 모델을 찾을 수 없습니다. 새 학습을 시작합니다.")
+                resume = False
+
+        # 실행 이름 생성 (날짜-시간 포함)
         current_time = datetime.now().strftime("%Y-%m-%d-%H%M%S")
         run_name = f"{algorithm}_{current_time}"
+
         # 로그 및 모델 저장 경로 설정
         models_dir = f"./logs/checkpoints/{run_name}"
         log_dir = f"./logs/log/{run_name}"
@@ -707,39 +766,68 @@ class BasicRLDrivingEnv(gym.Env):
                 "target_update_interval": 1     # 타겟 업데이트 간격
             }
 
-            # 공유 리플레이 버퍼 생성
-            shared_buffer = ReplayBuffer(
-                buffer_size=hyperparameters['buffer_size'],
-                observation_space=self.env.observation_space,
-                action_space=self.env.action_space,
-                device=self.device,
-                n_envs=hyperparameters['n_envs'],
-                handle_timeout_termination=False
-            )
+            if resume:
+                model = SACVehicleAlgorithm.load(
+                    model_path,
+                    env=env,
+                    device=self.device
+                )
+                print(f"SAC 모델 로드 완료: {os.path.basename(model_path)}")
 
-            # 커스텀 SAC 모델 생성
-            model = SACVehicleAlgorithm(
-                policy="MlpPolicy",
-                env=env,
-                logging_freq=self.rl_callback_config['logging_freq'],
-                learning_rate=hyperparameters['learning_rate'],
-                policy_kwargs=policy_kwargs,
-                buffer_size=0,
-                learning_starts=hyperparameters['learning_starts'],
-                batch_size=hyperparameters['batch_size'],
-                tau=hyperparameters['tau'],
-                gamma=hyperparameters['gamma'],
-                ent_coef=hyperparameters['ent_coef'],
-                train_freq=hyperparameters['train_freq'],
-                gradient_steps=hyperparameters['gradient_steps'],
-                target_update_interval=hyperparameters['target_update_interval'],
-                verbose=1,
-                tensorboard_log=log_dir,
-                device=self.device
-            )
+                # 리플레이 버퍼 로드
+                if replay_buffer_path and os.path.exists(replay_buffer_path):
+                    # 별도 저장된 버퍼 로드 (final, best)
+                    model.load_replay_buffer(replay_buffer_path)
+                    print(f"별도 리플레이 버퍼 로드 완료: {os.path.basename(replay_buffer_path)}")
+                elif model.replay_buffer is not None:
+                    # .zip 파일 내부에 저장된 버퍼 사용 (step 체크포인트)
+                    print("모델(.zip)에 포함된 리플레이 버퍼를 사용합니다.")
+                else:
+                    # 버퍼를 찾을 수 없는 경우
+                    print("경고: 리플레이 버퍼를 찾을 수 없습니다. 새 버퍼를 생성합니다.")
+                    shared_buffer = ReplayBuffer(
+                        buffer_size=hyperparameters['buffer_size'],
+                        observation_space=self.env.observation_space,
+                        action_space=self.env.action_space,
+                        device=self.device,
+                        n_envs=hyperparameters['n_envs'],
+                        handle_timeout_termination=False
+                    )
+                    model.replay_buffer = shared_buffer
+            else:
+                # 공유 리플레이 버퍼 생성
+                shared_buffer = ReplayBuffer(
+                    buffer_size=hyperparameters['buffer_size'],
+                    observation_space=self.env.observation_space,
+                    action_space=self.env.action_space,
+                    device=self.device,
+                    n_envs=hyperparameters['n_envs'],
+                    handle_timeout_termination=False
+                )
 
-            # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
-            model.replay_buffer = shared_buffer
+                # 커스텀 SAC 모델 생성
+                model = SACVehicleAlgorithm(
+                    policy="MlpPolicy",
+                    env=env,
+                    logging_freq=self.rl_callback_config['logging_freq'],
+                    learning_rate=hyperparameters['learning_rate'],
+                    policy_kwargs=policy_kwargs,
+                    buffer_size=0,
+                    learning_starts=hyperparameters['learning_starts'],
+                    batch_size=hyperparameters['batch_size'],
+                    tau=hyperparameters['tau'],
+                    gamma=hyperparameters['gamma'],
+                    ent_coef=hyperparameters['ent_coef'],
+                    train_freq=hyperparameters['train_freq'],
+                    gradient_steps=hyperparameters['gradient_steps'],
+                    target_update_interval=hyperparameters['target_update_interval'],
+                    verbose=1,
+                    tensorboard_log=log_dir,
+                    device=self.device
+                )
+
+                # 커스텀 리플레이 버퍼를 사용하도록 모델 설정
+                model.replay_buffer = shared_buffer
         elif algorithm == 'ppo':
             # PPO 하이퍼파라미터 설정
             hyperparameters = {
@@ -755,28 +843,35 @@ class BasicRLDrivingEnv(gym.Env):
                 "max_grad_norm": 0.5    # 그라디언트 클리핑
             }
 
-            # 커스텀 PPO 모델 생성
-            model = PPOVehicleAlgorithm(
-                policy="MlpPolicy",
-                env=env,
-                logging_freq=self.rl_callback_config['logging_freq'],
-                learning_rate=hyperparameters['learning_rate'],
-                n_steps=hyperparameters['n_steps'],
-                batch_size=hyperparameters['batch_size'],
-                n_epochs=hyperparameters['n_epochs'],
-                gamma=hyperparameters['gamma'],
-                gae_lambda=hyperparameters['gae_lambda'],
-                clip_range=hyperparameters['clip_range'],
-                ent_coef=hyperparameters['ent_coef'],
-                vf_coef=hyperparameters['vf_coef'],
-                max_grad_norm=hyperparameters['max_grad_norm'],
-                policy_kwargs=policy_kwargs,
-                verbose=1,
-                tensorboard_log=log_dir,
-                device=self.device,
-            )
-
-        # 환경 정보는 learn() 내부에서 설정됨
+            if resume:
+                # 학습 이어하기: 모델 로드 (PPO는 리플레이 버퍼 없음)
+                model = PPOVehicleAlgorithm.load(
+                    model_path,
+                    env=env,
+                    device=self.device
+                )
+                print(f"PPO 모델 로드 완료: {os.path.basename(model_path)}")
+            else:
+                # 커스텀 PPO 모델 생성
+                model = PPOVehicleAlgorithm(
+                    policy="MlpPolicy",
+                    env=env,
+                    logging_freq=self.rl_callback_config['logging_freq'],
+                    learning_rate=hyperparameters['learning_rate'],
+                    n_steps=hyperparameters['n_steps'],
+                    batch_size=hyperparameters['batch_size'],
+                    n_epochs=hyperparameters['n_epochs'],
+                    gamma=hyperparameters['gamma'],
+                    gae_lambda=hyperparameters['gae_lambda'],
+                    clip_range=hyperparameters['clip_range'],
+                    ent_coef=hyperparameters['ent_coef'],
+                    vf_coef=hyperparameters['vf_coef'],
+                    max_grad_norm=hyperparameters['max_grad_norm'],
+                    policy_kwargs=policy_kwargs,
+                    verbose=1,
+                    tensorboard_log=log_dir,
+                    device=self.device,
+                )
 
         # 로거 설정
         model.set_logger(configure(log_dir, ["stdout", "tensorboard"]))
@@ -793,6 +888,8 @@ class BasicRLDrivingEnv(gym.Env):
             "observation_space": str(self.observation_space),
             "observation_detail": str(self.rl_config['observation']),
             "action_space": str(self.action_space),
+            "resume_training": resume,
+            "resume_model_path": resume_config['model_path'] if resume else "N/A"
         }
         param_config.update(hyperparameters)
 
@@ -842,7 +939,8 @@ class BasicRLDrivingEnv(gym.Env):
             model.learn(
                 total_timesteps=self.max_step,
                 callback=callback,
-                progress_bar=True
+                progress_bar=True,
+                reset_num_timesteps=not resume
             )
 
             # 학습된 모델 저장
@@ -854,13 +952,6 @@ class BasicRLDrivingEnv(gym.Env):
 
             # 학습 완료 후 추가 로그 저장
             print("\n===== 학습 완료 =====")
-
-            # 성능 콜백에서 학습 시간 정보 가져오기
-            performance_callback = None
-            for cb in callbacks:
-                if hasattr(cb, 'training_start_time'):
-                    performance_callback = cb
-                    break
 
             if metrics_store:
                 total_time = abs((metrics_store.training_start_time - metrics_store.last_step_time) / 3600)

@@ -55,6 +55,9 @@ simulation:
       slow_threshold: 0.56              # speed threshold for slow penalty [m/s], # 2.0 km/h
       reverse_penalty: -0.2             # penalty for driving in reverse
       reverse_threshold: -0.28          # speed threshold for reverse penalty [m/s], # -1.0 km/h
+    resume_training:
+      enabled: True                     # True로 설정 시 학습 이어하기 활성화
+      model_path: "sac_2025-10-20-032611"
     callbacks:
       max_episodes_history: 500        # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
