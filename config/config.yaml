@@ -11,8 +11,8 @@ simulation:
     y_min: -50
     y_max: 50
   obstacle:
-    num_static_obstacles: 0
-    num_dynamic_obstacles: 10
+    num_static_obstacles: 3
+    num_dynamic_obstacles: 0
     buffer_distance: 10  # [m]
     boundary:            # [m]
       x_min: -30
@@ -84,8 +84,8 @@ simulation:
     default_speed: 4.17           # default speed for path planning [m/s] (15 km/h)
     min_speed: 1.4                # minimum speed for path planning [m/s] (5 km/h)
     max_speed: 13.9               # maximum speed for path planning [m/s] (50 km/h)
-    max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
-    lookahead_distance: 18.0       # lookahead distance for speed calculation [m]
+    max_lateral_acceleration: 4.0 # maximum lateral acceleration for speed recommendation [m/s²]
+    lookahead_distance: 20.0      # lookahead distance for speed calculation [m]
   memory_management:
     # SubsystemManager 캐시 설정
     subsystem_cache:
