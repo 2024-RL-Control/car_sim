@@ -12,13 +12,13 @@ simulation:
     y_max: 50
   obstacle:
     num_static_obstacles: 0
-    num_dynamic_obstacles: 0
+    num_dynamic_obstacles: 10
     buffer_distance: 10  # [m]
     boundary:            # [m]
-      x_min: -10
-      x_max: 10
-      y_min: -10
-      y_max: 10
+      x_min: -30
+      x_max: 30
+      y_min: -30
+      y_max: 30
   hz: # (시뮬레이션 시간 기준)
     frenet_update: 15      # Frenet 좌표 업데이트 주파수 [Hz]
     lidar_update: 15       # 라이다 스캔 주파수 [Hz]
@@ -29,7 +29,7 @@ simulation:
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   rl:
     train_max_steps: 10000000
-    train_max_episode_steps: 3000   # maximum steps per episode
+    train_max_episode_steps: 5000   # maximum steps per episode
     action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false      # 행동 선택 타이밍 디버그 출력 여부

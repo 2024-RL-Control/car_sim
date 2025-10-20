@@ -326,15 +326,24 @@ class BasicRLDrivingEnv(gym.Env):
         """
         환경 구성: 장애물 배치, 차량 배치, 목적지 설정
         """
-        # 장애물 배치
-        self._setup_obstacles()
+        success = False
 
-        # 차량 배치
-        self.vehicle_start_position = []
-        self._setup_vehicle()
+        while not success:
+            try:
+                # 장애물 배치
+                self._setup_obstacles()
 
-        # 목적지 설정
-        self._setup_goal()
+                # 차량 배치
+                self.vehicle_start_position = []
+                self._setup_vehicle()
+
+                # 목적지 설정
+                self._setup_goal()
+
+                success = True
+            except Exception as e:
+                print(f"Setup failed: {e}")
+                continue
 
     def _setup_obstacles(self):
         """
@@ -453,24 +462,15 @@ class BasicRLDrivingEnv(gym.Env):
         Returns:
             observations: 차량별 초기 관측 값 (num_vehicles, obs_dim)
         """
-        success = False
+        # 환경 초기화
+        _ = self.env.reset(seed=seed, options=options)
 
-        while not success:
-            try:
-                # 환경 초기화
-                _ = self.env.reset(seed=seed, options=options)
+        # 장애물, 차량, 목적지 다시 설정
+        self.setup_environment()
 
-                # 장애물, 차량, 목적지 다시 설정
-                self.setup_environment()
-
-                # 초기 스텝으로 환경 안정화
-                dummy_actions = np.zeros((self.num_vehicles, self.env.action_space.shape[-1]), dtype=np.float64)
-                self.env.step(dummy_actions)
-
-                success = True
-            except Exception as e:
-                print(f"Reset failed: {e}")
-                continue
+        # 초기 스텝으로 환경 안정화
+        dummy_actions = np.zeros((self.num_vehicles, self.env.action_space.shape[-1]), dtype=np.float64)
+        self.env.step(dummy_actions)
 
         # 스텝 카운터 초기화
         self.steps = 0
