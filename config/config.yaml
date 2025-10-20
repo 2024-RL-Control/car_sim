@@ -41,14 +41,14 @@ simulation:
       lidar_dim: 11
       trajectory_dim: 0
     rewards:
-      goal_reached_reward: 1000.0       # reward for reaching the goal
-      collision_penalty: -700.0         # penalty for collision
-      outside_road_penalty: -600.0      # penalty for going outside the road
-      early_termination_penalty: -300.0 # penalty for early termination
-      progress_factor: 1.5              # reward factor for reducing distance to goal
+      goal_reached_reward: 600          # reward for reaching the goal
+      collision_penalty: -900           # penalty for collision
+      outside_road_penalty: -600        # penalty for going outside the road
+      early_termination_penalty: -300   # penalty for early termination
+      progress_factor: 1.0              # reward factor for reducing distance to goal
       lane_keeping_factor: 0.5          # reward factor for staying in the lane
       lane_zero_threshold: 0.2          # threshold for zero lane keeping reward
-      speed_factor: 1.0                 # reward factor for maintaining/reaching target speed
+      speed_factor: 1.5                 # reward factor for maintaining/reaching target speed
       speed_under_slope: 0.2            # under speed reward slope
       speed_over_slope: 0.5             # over speed reward slope
       slow_penalty: -0.4                # penalty for very low speed
