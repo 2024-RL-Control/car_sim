@@ -509,7 +509,7 @@ class SubsystemManager:
                     state.frenet_d = interpolated_d
 
                 road_width = self._simulation_config['path_planning']['road_width']
-                outside_road = abs(state.frenet_d) > (road_width / 2) - 0.3  # 30cm 여유
+                outside_road = abs(state.frenet_d) > (road_width / 2) - 0.15  # 15cm 여유
                 return outside_road
 
         except Exception as e:

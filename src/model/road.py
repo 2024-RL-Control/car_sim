@@ -92,7 +92,7 @@ class LinearRoadSegment:
         self._cached_curvatures = None  # 각 waypoint에서의 곡률
         self._cached_boundary_polygons = None
         self._cached_boundary_colliders = None
-        self.boundary_radius = 0.3  # 원형 충돌체 반지름
+        self.boundary_radius = 0.15  # 원형 충돌체 반지름
 
         # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
         self._cache_config = {

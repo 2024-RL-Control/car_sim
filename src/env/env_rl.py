@@ -148,7 +148,13 @@ class ActionController:
 class DummyEnv(gym.Env):
     def __init__(self, rl_env):
         self.rl_env = rl_env
-        self.observation_space = self.rl_env.env.observation_space
+        single_stacked_shape = (self.rl_env.observation_space.shape[1],)
+        self.observation_space = gym.spaces.Box(
+            low=np.tile(self.rl_env.env.observation_space.low, self.rl_env.obs_stack_size),
+            high=np.tile(self.rl_env.env.observation_space.high, self.rl_env.obs_stack_size),
+            shape=single_stacked_shape,
+            dtype=np.float64
+        )
         self.action_space = self.rl_env.env.action_space
 
     def reset(self, *, seed=None, options=None):
@@ -158,30 +164,6 @@ class DummyEnv(gym.Env):
     def step(self, actions):
         multi_actions = np.tile(actions, (self.rl_env.num_vehicles, 1))
         observations, reward, done, truncated, info = self.rl_env.step(multi_actions)
-
-        # Monitor를 위한 info 딕셔너리 수정 - episode 종료 시 올바른 정보 전달
-        if done:
-            # Monitor가 기대하는 형태로 info 구성
-            episode_info = {
-                'r': reward,  # 에피소드 총 보상
-                'l': info.get('episode_length', 1),  # 에피소드 길이 (최소 1)
-                't': info.get('elapsed_time', 0.0)  # 경과 시간
-            }
-            info['episode'] = episode_info
-
-            # 디버깅용 출력 (verbose 모드에서만)
-            if hasattr(self.rl_env, 'episode_count'):
-                episode_msg = f"Monitor 기록: Episode {self.rl_env.episode_count}, Reward: {reward:.2f}, Length: {episode_info['l']}"
-
-                # ActionController 통계 추가
-                if hasattr(self.rl_env, 'action_controller') and self.rl_env.action_controller is not None:
-                    action_stats = info.get('action_controller_stats', {})
-                    selection_rate = action_stats.get('actual_selection_rate', 0)
-                    selection_count = action_stats.get('action_selection_count', 0)
-                    episode_msg += f", 행동선택: {selection_count}회 ({selection_rate:.2%})"
-
-                print(episode_msg)
-
         return observations[0], reward, done, truncated, info
 
 class BasicRLDrivingEnv(gym.Env):
@@ -199,6 +181,10 @@ class BasicRLDrivingEnv(gym.Env):
         Args:
             config_path: 설정 파일 경로 (기본값: None)
         """
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        print(f"사용 중인 디바이스: {self.device}")
+
         # 기본 CarSimulator 환경 초기화
         self.env = CarSimulatorEnv(config_path, setup=False)
         self.vehicle_manager = self.env.get_vehicle_manager()
@@ -206,55 +192,25 @@ class BasicRLDrivingEnv(gym.Env):
         self.num_vehicles = self.env.num_vehicles
         self.active_agents = [True] * self.num_vehicles
 
-        self.observation_space = gym.spaces.Box(
-            low=np.tile(self.env.observation_space.low, (self.num_vehicles, 1)),
-            high=np.tile(self.env.observation_space.high, (self.num_vehicles, 1)),
-            shape=(self.num_vehicles, self.env.observation_space.shape[0]),
-            dtype=np.float64
-        )
-        self.action_space = gym.spaces.Box(
-            low=np.tile(self.env.action_space.low, (self.num_vehicles, 1)),
-            high=np.tile(self.env.action_space.high, (self.num_vehicles, 1)),
-            shape=(self.num_vehicles, self.env.action_space.shape[0]),
-            dtype=np.float64
-        )
-
-        self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
-        self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
-        print(f"사용 중인 디바이스: {self.device}")
-
-        # 환경 바운더리 설정
-        self.boundary = {
-            'x_min': self.env.config['simulation']['boundary']['x_min'],
-            'x_max': self.env.config['simulation']['boundary']['x_max'],
-            'y_min': self.env.config['simulation']['boundary']['y_min'],
-            'y_max': self.env.config['simulation']['boundary']['y_max']
-        }
-
-        # 장애물 배치 가능 공간
-        self.obstacle_area = {
-            'x_min': self.env.config['simulation']['obstacle']['boundary']['x_min'],
-            'x_max': self.env.config['simulation']['obstacle']['boundary']['x_max'],
-            'y_min': self.env.config['simulation']['obstacle']['boundary']['y_min'],
-            'y_max': self.env.config['simulation']['obstacle']['boundary']['y_max']
-        }
-
-        # 버퍼 거리 (차량과 장애물 공간 사이 여유)
-        self.buffer_distance = self.env.config['simulation']['obstacle']['buffer_distance']
-
-        # 차량 배치 가능 공간 계산
-        self.vehicle_area = self._calculate_vehicle_areas()
-
-        # 초기화 시 장애물 및 목적지 설정
-        self.setup_environment()
-
-        # ActionController 초기화
         self.rl_config = self.env.config['simulation']['rl']
         self.rl_callback_config = self.rl_config['callbacks']
 
+        # 관측 설정
+        self.obs_stack_size = self.rl_config['frame_stack_size']
+        print(f"Frame Stacking 활성화: {self.obs_stack_size} 프레임")
+        self.observation_buffers = [
+            deque(maxlen=self.obs_stack_size) for _ in range(self.num_vehicles)
+        ]
+        self.single_obs_dim = self.env.observation_space.shape[0]
+        self.stacked_obs_dim = self.single_obs_dim * self.obs_stack_size
+        self.observation_space = gym.spaces.Box(
+            low=np.tile(self.env.observation_space.low, (self.num_vehicles, self.obs_stack_size)),
+            high=np.tile(self.env.observation_space.high, (self.num_vehicles, self.obs_stack_size)),
+            shape=(self.num_vehicles, self.stacked_obs_dim),
+            dtype=np.float64
+        )
+
+        # 행동 설정 및 ActionController 초기화
         action_hold_behavior = self.rl_config.get('action_hold_behavior', True)
         if action_hold_behavior:
             action_hz = self.rl_config.get('action_selection_hz', 10)
@@ -268,6 +224,37 @@ class BasicRLDrivingEnv(gym.Env):
         else:
             self.action_controller = None
             print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
+        self.action_space = gym.spaces.Box(
+            low=np.tile(self.env.action_space.low, (self.num_vehicles, 1)),
+            high=np.tile(self.env.action_space.high, (self.num_vehicles, 1)),
+            shape=(self.num_vehicles, self.env.action_space.shape[0]),
+            dtype=np.float64
+        )
+
+        # 장애물 및 환경 설정
+        self.num_static_obstacles = self.env.config['simulation']['obstacle']['num_static_obstacles']
+        self.num_dynamic_obstacles = self.env.config['simulation']['obstacle']['num_dynamic_obstacles']
+        # 환경 바운더리 설정
+        self.boundary = {
+            'x_min': self.env.config['simulation']['boundary']['x_min'],
+            'x_max': self.env.config['simulation']['boundary']['x_max'],
+            'y_min': self.env.config['simulation']['boundary']['y_min'],
+            'y_max': self.env.config['simulation']['boundary']['y_max']
+        }
+        # 장애물 배치 가능 공간
+        self.obstacle_area = {
+            'x_min': self.env.config['simulation']['obstacle']['boundary']['x_min'],
+            'x_max': self.env.config['simulation']['obstacle']['boundary']['x_max'],
+            'y_min': self.env.config['simulation']['obstacle']['boundary']['y_min'],
+            'y_max': self.env.config['simulation']['obstacle']['boundary']['y_max']
+        }
+        # 버퍼 거리 (차량과 장애물 공간 사이 여유)
+        self.buffer_distance = self.env.config['simulation']['obstacle']['buffer_distance']
+        # 차량 배치 가능 공간 계산
+        self.vehicle_area = self._calculate_vehicle_areas()
+
+        # 초기화 시 장애물 및 목적지 설정
+        self.setup_environment()
 
         # 스텝 카운터
         self.steps = 0
@@ -451,6 +438,37 @@ class BasicRLDrivingEnv(gym.Env):
             # 차량에 목적지 추가
             self.env.add_goal_for_vehicle(i, x, y, yaw, radius=4.0)
 
+    def _stack_observation(self, new_observations, pad_with_current=False):
+        """
+        새로운 관측값을 버퍼에 추가하고 스택된 관측값을 반환합니다.
+
+        Args:
+            new_observations: (num_vehicles, single_obs_dim)
+            pad_with_current: True이면 reset 시 현재 obs로 버퍼를 채웁니다.
+
+        Returns:
+            stacked_observations: (num_vehicles, stacked_obs_dim)
+        """
+        stacked_obs_list = []
+
+        for i in range(self.num_vehicles):
+            buffer = self.observation_buffers[i]
+            current_obs = new_observations[i]
+
+            if pad_with_current:
+                # reset() 호출 시: 현재 관측값으로 버퍼를 채움
+                buffer.clear()
+                for _ in range(self.obs_stack_size):
+                    buffer.append(current_obs.copy())
+            else:
+                # step() 호출 시: 새 관측값 추가
+                buffer.append(current_obs.copy())
+
+            # 버퍼의 모든 프레임을 하나의 벡터로 결합 (axis=None으로 1D로 flatten)
+            stacked_obs_list.append(np.concatenate(list(buffer), axis=None))
+
+        return np.array(stacked_obs_list, dtype=np.float64)
+
     def reset(self, *, seed=None, options=None):
         """
         환경 초기화 및 초기 관측값 반환
@@ -465,19 +483,11 @@ class BasicRLDrivingEnv(gym.Env):
         # 환경 초기화
         _ = self.env.reset(seed=seed, options=options)
 
-        # 장애물, 차량, 목적지 다시 설정
-        self.setup_environment()
-
-        # 초기 스텝으로 환경 안정화
-        dummy_actions = np.zeros((self.num_vehicles, self.env.action_space.shape[-1]), dtype=np.float64)
-        self.env.step(dummy_actions)
-
         # 스텝 카운터 초기화
         self.steps = 0
 
-        # 조기 종료 관련 변수 초기화
-        self.accumulated_delta_progress = defaultdict(float)
-        self.next_progress_check_step = self.termination_check_step
+        # 에피소드 카운터 증가
+        self.episode_count += 1
 
         # 에이전트 활성화 상태 초기화
         self.active_agents = [True] * self.num_vehicles
@@ -486,12 +496,23 @@ class BasicRLDrivingEnv(gym.Env):
         if self.action_controller is not None:
             self.action_controller.reset()
 
-        # 에피소드 카운터 증가
-        self.episode_count += 1
+        # 조기 종료 관련 변수 초기화
+        self.accumulated_delta_progress = defaultdict(float)
+        self.next_progress_check_step = self.termination_check_step
+
+        # 장애물, 차량, 목적지 다시 설정
+        self.setup_environment()
+
+        # 초기 스텝으로 환경 안정화
+        dummy_actions = np.zeros((self.num_vehicles, self.env.action_space.shape[-1]), dtype=np.float64)
+        self.env.step(dummy_actions)
 
         # 초기 관측값 반환
-        observations = self.env._get_obs()
-        return observations, self.active_agents
+        single_observations = self.env._get_obs()
+
+        # Frame Stacking: 버퍼를 초기 관측값으로 채우고 스택된 obs 반환
+        stacked_observations = self._stack_observation(single_observations, pad_with_current=True)
+        return stacked_observations, self.active_agents
 
     def step(self, actions):
         """
@@ -520,7 +541,7 @@ class BasicRLDrivingEnv(gym.Env):
             actual_actions = actions
 
         # 환경에서 스텝 진행 (실제 사용할 행동으로)
-        observations, rewards, done, _, info = self.env.step(actual_actions)
+        single_observations, rewards, done, _, info = self.env.step(actual_actions)
 
         # 스텝 카운터 증가
         self.steps += 1
@@ -583,7 +604,9 @@ class BasicRLDrivingEnv(gym.Env):
                 'elapsed_time': 0,  # 필요시 실제 시간 계산 가능
             })
 
-        return observations, average_reward, done, False, info
+        # Frame Stacking: 새 관측값을 버퍼에 추가하고 스택된 obs 반환
+        stacked_observations = self._stack_observation(single_observations, pad_with_current=False)
+        return stacked_observations, average_reward, done, False, info
 
     def _draw_boundary(self):
         # 경계(boundary)와 장애물 영역(obstacle_area) 시각화
@@ -737,7 +760,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정 (강화학습 개선)
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [256, 256],
+            "net_arch": [256, 256, 64, 32],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
@@ -787,8 +810,8 @@ class BasicRLDrivingEnv(gym.Env):
                     print("경고: 리플레이 버퍼를 찾을 수 없습니다. 새 버퍼를 생성합니다.")
                     shared_buffer = ReplayBuffer(
                         buffer_size=hyperparameters['buffer_size'],
-                        observation_space=self.env.observation_space,
-                        action_space=self.env.action_space,
+                        observation_space=env.observation_space,
+                        action_space=env.action_space,
                         device=self.device,
                         n_envs=hyperparameters['n_envs'],
                         handle_timeout_termination=False
@@ -798,8 +821,8 @@ class BasicRLDrivingEnv(gym.Env):
                 # 공유 리플레이 버퍼 생성
                 shared_buffer = ReplayBuffer(
                     buffer_size=hyperparameters['buffer_size'],
-                    observation_space=self.env.observation_space,
-                    action_space=self.env.action_space,
+                    observation_space=env.observation_space,
+                    action_space=env.action_space,
                     device=self.device,
                     n_envs=hyperparameters['n_envs'],
                     handle_timeout_termination=False
@@ -1036,7 +1059,7 @@ class BasicRLDrivingEnv(gym.Env):
             print(f"모델 파일이 존재하지 않습니다: {model_path}")
             return
 
-        max_episode = self.env.config['simulation']['rl']['eval_episode']
+        max_episode = self.rl_config['eval_episode']
 
         dummy_env = DummyEnv(self)
         env = Monitor(dummy_env)

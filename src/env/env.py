@@ -398,6 +398,7 @@ class CarSimulatorEnv(gym.Env):
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_target_vel_long, _ = state.scale_long(state.target_vel_long, 0.0, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
+        vel_error_long = scale_target_vel_long - scale_vel_long
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
         cos_error_to_goal, sin_error_to_goal = state.encoding_angle(state.error_to_target)
         cos_angle_to_goal, sin_angle_to_goal = state.encoding_angle(state.angle_to_target)
@@ -405,7 +406,7 @@ class CarSimulatorEnv(gym.Env):
         cos_error_to_ref, sin_error_to_ref = state.encoding_angle(state.error_to_ref)
         # cos_angle_to_ref, sin_angle_to_ref = state.encoding_angle(state.angle_to_ref)
 
-        # 기본 차량 상태 (15, )
+        # 기본 차량 상태 (16, )
         obs = np.array([
             progress,               # -1 ~ 1
             # state.steer,            # -1 ~ 1
@@ -418,13 +419,14 @@ class CarSimulatorEnv(gym.Env):
             scale_vel_lat,          # -1 ~ 1
             scale_acc_lat,          # -1 ~ 1
             scale_target_vel_long,  # -1 ~ 1
+            vel_error_long,         # -1 ~ 1
             cos_error_to_goal,      # -1 ~ 1
             sin_error_to_goal,      # -1 ~ 1
             cos_angle_to_goal,      # -1 ~ 1
             sin_angle_to_goal,      # -1 ~ 1
             frenet_d,               # -1 ~ 1
             cos_error_to_ref,       # -1 ~ 1
-            sin_error_to_ref       # -1 ~ 1
+            sin_error_to_ref        # -1 ~ 1
             # cos_angle_to_ref,       # -1 ~ 1
             # sin_angle_to_ref        # -1 ~ 1
         ], dtype=np.float32)
@@ -516,17 +518,18 @@ class CarSimulatorEnv(gym.Env):
         current_vel = state.vel_long  # m/s 단위 유지
         target_vel = state.target_vel_long or self.config['simulation']['path_planning']['default_speed']
 
-        speed_diff = abs(current_vel - target_vel)
+        speed_diff = abs(target_vel - current_vel)
 
         # 속도 미달 또는 초과 여부에 따라 다른 기울기(slope)를 적용하여 페널티 계산
         if current_vel < target_vel:
             # 목표 속도보다 느릴 경우: 완만한 기울기 적용
             penalty = speed_diff * self.rewards['speed_under_slope']
         else:
-            # 목표 속도보다 빠를 경우(과속): 가파른 기울기 적용
+            # 목표 속도보다 빠를 경우(과속): 가파른 기울기 적용, 속도 초과에 대한 페널티 강화
             penalty = speed_diff * self.rewards['speed_over_slope']
 
-        speed_norm = max(0, 1.0 - penalty)
+        # speed_norm = max(-2.0, min(1.0, 1.0 - penalty))
+        speed_norm = 1.0 - penalty
         speed_reward = speed_norm * self.rewards['speed_factor']
         reward += speed_reward
 
