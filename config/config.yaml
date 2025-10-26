@@ -1,0 +1,187 @@
+﻿# Vehicle Simulator Configuration
+
+# Simulation parameters
+simulation:
+  fps: 60
+  dt: 0.016         # seconds, time step for simulation (1/fps)
+  hz:
+    frenet_update: 10      # Frenet 좌표 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
+    lidar_update: 10       # 라이다 스캔 주파수 [Hz] (시뮬레이션 시간 기준)
+    trajectory_update: 10  # 궤적 예측 업데이트 주파수 [Hz] (시뮬레이션 시간 기준)
+    collision_check: 20    # 충돌 검사 주파수 [Hz] (시뮬레이션 시간 기준)
+    goal_check: 10         # 목적지 도달 확인 주파수 [Hz] (시뮬레이션 시간 기준)
+    state_history: 2       # 상태 이력 저장 주파수 [Hz] (시뮬레이션 시간 기준) - 메모리 효율성
+  memory_management:
+    # SubsystemManager 캐시 설정
+    subsystem_cache:
+      max_cache_size: 1000        # 최대 캐시 항목 수
+      cleanup_interval: 60.0      # 캐시 정리 주기 [seconds]
+      memory_threshold_mb: 100    # 메모리 임계값 [MB]
+      max_cache_age: 3600.0       # 최대 캐시 보존 시간 [seconds]
+    # Road 시스템 캐시 설정
+    road_cache:
+      max_cache_size: 1000        # 투영 캐시 최대 크기
+      cleanup_interval: 300.0     # 캐시 정리 주기 [seconds]
+      max_cache_age: 1800.0       # 최대 캐시 보존 시간 [seconds]
+  observation:
+    vehicle_state_dim: 10
+    lidar_dim: 13
+    trajectory_dim: 0
+  # 강화학습 관련 설정 (시뮬레이션 시간 기준)
+  reinforcement_learning:
+    action_selection_hz: 10     # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_hold_behavior: true  # 새로운 행동 선택 전까지 이전 행동 유지 여부
+    debug_action_timing: false  # 행동 선택 타이밍 디버그 출력 여부
+  train_max_steps: 1000000
+  train_max_episode_steps: 1500    # maximum steps per episode
+  eval_episode: 10  # number of episodes for evaluation
+  num_vehicles: 1  # number of vehicles on the environment
+  boundary:         # [m]
+    x_min: -50
+    x_max: 50
+    y_min: -50
+    y_max: 50
+  obstacle:
+    num_static_obstacles: 0
+    num_dynamic_obstacles: 0
+    buffer_distance: 10  # [m]
+    boundary:            # [m]
+      x_min: -10
+      x_max: 10
+      y_min: -10
+      y_max: 10
+  path_planning:
+    max_iterations: 250           # maximum iterations for path planning
+    base_step_size: 1.0           # Base for variable RRT step [m]
+    min_step_factor: 0.2          # Min multiplier for base_step_size
+    max_step_factor: 10.0         # Max multiplier for base_step_size
+    max_distance: 50.0            # 기준 거리 [m] for step size calculation
+    goal_distance_threshold: 3.0  # RRT node proximity to goal for final connection [m]
+    goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
+    nearest_neighbor_count: 20    # RRT nearest neighbor search count for KD-Tree optimization
+    kdtree_rebuild_interval: 15   # KD-Tree 재구성 주기 [iterations]
+    road_width: 8.0               # Default road width [m]
+    min_radius: 6.0               # minimum turning radius for path planning [m]
+    point_separation: 0.5         # minimum distance between points in the path [m]
+    default_speed: 15
+    min_speed: 5
+    max_speed: 30
+    max_lateral_acceleration: 4.0  # maximum lateral acceleration for speed recommendation [m/s²]
+    lookahead_distance: 18.0       # lookahead distance for speed calculation [m]
+  rewards:
+    goal_reached_reward: 1500.0       # reward for reaching the goal
+    collision_penalty: -300.0         # penalty for collision
+    outside_road_penalty: -250.0      # penalty for going outside the road
+    progress_factor: 4.0              # reward factor for reducing distance to goal
+    lane_keeping_factor: 1.0          # reward factor for staying in the lane
+    speed_factor: 0.8                 # reward factor for maintaining/reaching target speed
+
+# Visualization parameters
+visualization:
+  window_width: 1300
+  window_height: 800
+  window_size: [1300, 800]
+  scale_factor: 5                   # pixels per meter
+  camera_zoom: 0.25
+  training_mode: true              # training mode, if true: fixed dt and no fps limit
+  debug_mode: false
+  visualize: false
+  visualize_hud: false
+  camera_follow: false               # 카메라가 차량 추적
+  background_color: [0, 0, 0]       # RGB
+  grid_color: [100, 100, 100]       # RGB color for grid lines
+  hud_bg_color: [50, 50, 50, 180]   # RGBA
+  hud_fg_color: [255, 255, 0]       # RGB
+  bounding_circle_color:
+    - [255, 50, 50]                 # RGB
+    - [50, 255, 50]                 # RGB
+    - [50, 50, 255]                 # RGB
+
+  vehicle_colors: [255, 255, 255]   # RGB
+  tire_color: [255, 255, 255]       # RGB
+
+  lidar_sensor_color: [0, 200, 255]                   # RGB
+  lidar_ray_success_color: [255, 50, 50]              # RGB
+  lidar_ray_failure_color: [150, 150, 150]            # RGB
+  lidar_sensor_data_color: [255, 0, 0]                # RGB
+  lidar_sensor_history_data_color: [0, 100, 200, 100] # RGBA
+
+vehicle:
+  # 기본 차량 설정 (2024 Model 3 Long Range AWD)
+  length: 4.72           # 차량 길이 [m]
+  width: 1.935           # 차량 너비 [m]
+  height: 1.44           # 차량 높이 [m]
+  wheelbase: 2.875       # 축간거리 [m]
+  track: 1.585           # 트레드 [m]
+  mass: 1830.0           # 질량 [kg]
+  inertia: 2500.0        # 관성 모멘트 [kg·m²]
+  max_steer: 35.0        # 최대 조향각 [degrees] - 저장 시 도 단위 사용
+  cg_height: 0.55        # 무게중심 높이 [m]
+  tire_width: 0.235      # 타이어 너비 [m]
+  tire_height: 0.669     # 타이어 높이 [m]
+  tire_radius: 0.334     # 타이어 반경 [m]
+
+  collision_range: 30.0    # 충돌 검출 범위 [m]
+
+  # Powertrain Parameters
+  max_accel: 4.0         # 최대 가속도 [m/s²]
+  max_brake: 6.0         # 최대 제동 [m/s²]
+  max_speed: 65.0        # 최대 속도 [m/s] (약 234 km/h)
+  min_speed: -20.0       # 최소 속도 [m/s] (약 -72 km/h)
+  max_vel_lat: 23.0      # 최대 횡방향 속도 [m/s], 종방향 속도에 대한 휴리스틱 값
+  max_acc_lat: 705.0     # 최대 횡방향 가속도 [m/s²], 종방향 가속도에 대한 휴리스틱 값
+
+  sensors:
+    "0":  # 첫 번째 센서 (라이다)
+      sensor_type: "LIDAR"
+      relative_pos: [0.0, 0.0]  # 차량 중심 기준 상대 위치 [m]
+      relative_angle: 0.0       # 차량 방향 기준 상대 각도 [degrees] - 저장 시 도 단위 사용
+      num_samples: 13           # 샘플(레이) 수
+      angle_start: -170.0       # 시작 각도 [degrees] - 저장 시 도 단위 사용
+      angle_end: 170.0         # 종료 각도 [degrees] - 저장 시 도 단위 사용
+      concentration: 1.5        # 각도 집중도 (0~1: 가장자리 집중, 1: 균등, >1: 중앙 집중)
+      max_range: 30.0           # 최대 감지 거리 [m]
+      min_range: 0.1            # 최소 감지 거리 [m]
+      scan_history: 0           # 스캔 히스토리 개수
+
+      # 노이즈 파라미터
+      noise_gaussian_sigma: 0.05  # 가우시안 노이즈 표준편차 [m]
+      noise_distance_factor: 0.01 # 거리에 따른 노이즈 증가 계수 [m/m]
+
+# Physics parameters
+physics:
+  substeps: 1            # 학습 단순화를 위해 4->2로 감소
+  gravity: 9.81          # 중력가속도 [m/s²]
+  air_density: 1.225     # 공기 밀도 [kg/m³]
+  drag_coeff: 0.30       # 공기저항 계수
+  roll_resist: 0.015     # 구름저항 계수
+  terrain_friction:
+    asphalt: 1.0    # 아스팔트 (기준)
+    gravel: 0.8     # 자갈
+    grass: 0.7      # 잔디
+    dirt: 0.6       # 흙
+    snow: 0.3       # 눈
+    ice: 0.1        # 얼음
+  min_speed_threshold: 0.1      # m/s, minimum speed threshold for physics calculations
+  min_turning_radius: 3.5       # meters, minimum turning radius for vehicle dynamics
+  throttle_response_rate: 25.0   # 1/s
+  steering_response_rate: 20.0   # 1/s
+  min_steer_speed_factor: 0.9   # minimum steering speed factor
+  max_steer_speed_factor: 0.7   # maximum steering speed factor
+  steer_speed_threshold: 20.0   # m/s, threshold for steering speed factor
+
+  # RL 친화적 물리 모델 개선 파라미터
+  brake_priority_threshold: 0.1      # brake input threshold for engine reduction
+  engine_brake_interference: 0.3     # engine reduction factor when brake is active
+  static_friction_threshold: 0.05    # minimum input to overcome static friction
+  min_steering_speed: 0.5            # m/s, minimum speed for effective steering
+  max_steering_efficiency_speed: 15.0 # m/s, speed for maximum steering efficiency
+  # Pacejka Magic Formula coefficients
+  pacejka:
+    B: 10.0   # stiffness factor
+    C: 1.9    # shape factor
+    D: 1.0    # peak value
+    E: 0.97   # curvature factor
+  trajectory:
+    time_horizon: 1.0
+    dt: 0.05
