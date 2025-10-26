@@ -8,6 +8,7 @@ import numpy as np
 from math import isnan
 import json
 import gzip
+import gymnasium as gym
 from typing import Dict, Any, Optional, Union, List
 from collections import deque, defaultdict
 from dataclasses import dataclass, asdict
@@ -1279,3 +1280,45 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, obs):
         x = self.flatten(obs)
         return self.mlp(x)
+
+class CustomFeatureExtractor2(BaseFeaturesExtractor):
+    """
+    RNN(GRU)을 사용하여 (k, features) 시퀀스를 처리하는 커스텀 피처 추출기
+    입력: (Batch, k, obs_dim)
+    출력: (Batch, features_dim)
+    """
+    def __init__(self, observation_space: gym.Space, net_arch: list[int]):
+        # features_dim은 RNN의 은닉 크기(출력 크기)가 됩니다.
+        super().__init__(observation_space, features_dim=net_arch[-1])
+
+        # observation_space.shape는 (k, obs_dim)
+        # (gym.Space는 배치 차원을 포함하지 않습니다)
+        if len(observation_space.shape) != 2:
+            raise ValueError(
+                f"예상된 관측 공간 형태는 (k, obs_dim)이지만, "
+                f"실제 형태는 {observation_space.shape}입니다."
+            )
+
+        k_frames = observation_space.shape[0] # 프레임 수 (k)
+        obs_dim = observation_space.shape[1]  # 관측 차원 (obs_dim)
+
+        self.rnn = nn.GRU(
+            input_size=obs_dim,       # 27
+            hidden_size=net_arch[-1], # 128 (지정된 features_dim)
+            num_layers=1,             # RNN 레이어 수
+            batch_first=True          # 입력 텐서 형태: (Batch, Seq, Feat)
+        )
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        """
+        observations 텐서의 형태: (Batch, k, obs_dim)
+        (Batch는 여기서 num_vehicles 또는 활성화된 에이전트 수)
+        """
+        # rnn_output 형태: (Batch, k, 128)
+        # hidden_state 형태: (1, Batch, 128)
+        # rnn(observations)는 (시퀀스 전체의 출력, 마지막 은닉 상태)를 반환합니다.
+        rnn_output, hidden_state = self.rnn(observations)
+
+        # 우리는 시퀀스의 마지막 타임스텝의 출력만 정책망에 전달합니다.
+        # rnn_output[:, -1, :]는 (Batch, 128) 형태가 됩니다.
+        return rnn_output[:, -1, :]

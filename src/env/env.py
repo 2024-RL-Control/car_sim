@@ -44,6 +44,7 @@ class CarSimulatorEnv(gym.Env):
         self.min_acc_long = self.config['vehicle']['max_brake']
         self.max_vel_lat = self.config['vehicle']['max_vel_lat']
         self.max_acc_lat = self.config['vehicle']['max_acc_lat']
+        self.max_steer_rad = np.radians(self.config['vehicle']['max_steer'])
 
         # 다중 차량 모드 설정
         self.num_vehicles = self.config['simulation']['num_vehicles']
@@ -395,6 +396,7 @@ class CarSimulatorEnv(gym.Env):
         """
         state = vehicle.get_state()
         progress = state.get_progress()
+        scale_steer = max(-1.0, min(1.0, state.steer / self.max_steer_rad))
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         scale_target_vel_long, _ = state.scale_long(state.target_vel_long, 0.0, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
@@ -406,10 +408,10 @@ class CarSimulatorEnv(gym.Env):
         cos_error_to_ref, sin_error_to_ref = state.encoding_angle(state.error_to_ref)
         # cos_angle_to_ref, sin_angle_to_ref = state.encoding_angle(state.angle_to_ref)
 
-        # 기본 차량 상태 (16, )
+        # 기본 차량 상태 (17, )
         obs = np.array([
             progress,               # -1 ~ 1
-            # state.steer,            # -1 ~ 1
+            scale_steer,            # -1 ~ 1
             # state.throttle_engine,  # 0 ~ 1
             # state.throttle_brake,   # 0 ~ 1
             cos_yaw,                # -1 ~ 1

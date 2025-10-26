@@ -13,7 +13,7 @@ from collections import deque, defaultdict
 from typing import Tuple
 import re
 from src.env.env import CarSimulatorEnv
-from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor
+from ..model.sb3 import SACVehicleAlgorithm, PPOVehicleAlgorithm, CustomFeatureExtractor, CustomFeatureExtractor2
 from ..model.sb3 import create_optimized_callbacks, get_callback_summary
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.logger import configure
@@ -148,10 +148,13 @@ class ActionController:
 class DummyEnv(gym.Env):
     def __init__(self, rl_env):
         self.rl_env = rl_env
-        single_stacked_shape = (self.rl_env.observation_space.shape[1],)
+        # single_stacked_shape = (self.rl_env.observation_space.shape[1],)
+        single_stacked_shape = self.rl_env.stacked_obs_dim # (frame_stack_size, single_obs_dim)
         self.observation_space = gym.spaces.Box(
-            low=np.tile(self.rl_env.env.observation_space.low, self.rl_env.obs_stack_size),
-            high=np.tile(self.rl_env.env.observation_space.high, self.rl_env.obs_stack_size),
+            # low=np.tile(self.rl_env.env.observation_space.low, self.rl_env.obs_stack_size),
+            # high=np.tile(self.rl_env.env.observation_space.high, self.rl_env.obs_stack_size),
+            low=-1.0,  # 정규화된 최소값
+            high=1.0,  # 정규화된 최대값
             shape=single_stacked_shape,
             dtype=np.float64
         )
@@ -202,11 +205,12 @@ class BasicRLDrivingEnv(gym.Env):
             deque(maxlen=self.obs_stack_size) for _ in range(self.num_vehicles)
         ]
         self.single_obs_dim = self.env.observation_space.shape[0]
-        self.stacked_obs_dim = self.single_obs_dim * self.obs_stack_size
+        # self.stacked_obs_dim = self.single_obs_dim * self.obs_stack_size
+        self.stacked_obs_dim = (self.obs_stack_size, self.single_obs_dim)
         self.observation_space = gym.spaces.Box(
-            low=np.tile(self.env.observation_space.low, (self.num_vehicles, self.obs_stack_size)),
-            high=np.tile(self.env.observation_space.high, (self.num_vehicles, self.obs_stack_size)),
-            shape=(self.num_vehicles, self.stacked_obs_dim),
+            low=-1.0,  # 정규화된 최소값
+            high=1.0,  # 정규화된 최대값
+            shape=(self.num_vehicles, *self.stacked_obs_dim), # (num_vehicles, frame_stack_size, obs_dim)
             dtype=np.float64
         )
 
@@ -464,8 +468,9 @@ class BasicRLDrivingEnv(gym.Env):
                 # step() 호출 시: 새 관측값 추가
                 buffer.append(current_obs.copy())
 
-            # 버퍼의 모든 프레임을 하나의 벡터로 결합 (axis=None으로 1D로 flatten)
-            stacked_obs_list.append(np.concatenate(list(buffer), axis=None))
+            # # 버퍼의 모든 프레임을 하나의 벡터로 결합 (axis=None으로 1D로 flatten)
+            # stacked_obs_list.append(np.concatenate(list(buffer), axis=None))
+            stacked_obs_list.append(np.array(list(buffer), dtype=np.float64)) # (frame_stack_size, obs_dim)
 
         return np.array(stacked_obs_list, dtype=np.float64)
 
@@ -760,17 +765,17 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정 (강화학습 개선)
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [256, 256, 64, 32],
+            "net_arch": [256, 256],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
-            # # 커스텀 추출기
-            # "features_extractor_class": CustomFeatureExtractor,
-            # # 추출기 아키텍처
-            # "features_extractor_kwargs": {
-            #     "net_arch": [32, 32, 32]
-            # },
-            # "share_features_extractor": True,
+            # 커스텀 추출기
+            "features_extractor_class": CustomFeatureExtractor2,
+            # 추출기 아키텍처
+            "features_extractor_kwargs": {
+                "net_arch": [128]
+            },
+            "share_features_extractor": True,
         }
 
         if algorithm == 'sac':
@@ -817,6 +822,15 @@ class BasicRLDrivingEnv(gym.Env):
                         handle_timeout_termination=False
                     )
                     model.replay_buffer = shared_buffer
+                # shared_buffer = ReplayBuffer(
+                #     buffer_size=hyperparameters['buffer_size'],
+                #     observation_space=env.observation_space,
+                #     action_space=env.action_space,
+                #     device=self.device,
+                #     n_envs=hyperparameters['n_envs'],
+                #     handle_timeout_termination=False
+                # )
+                # model.replay_buffer = shared_buffer
             else:
                 # 공유 리플레이 버퍼 생성
                 shared_buffer = ReplayBuffer(
