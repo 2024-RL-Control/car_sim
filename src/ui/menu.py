@@ -21,7 +21,9 @@ class MainMenu:
             "2. Basic RL Driving Training(sac)",
             "3. Basic RL Driving Training(ppo)",
             "4. Basic RL Driving Testing",
-            "5. Quit"
+            "5. Classic Control Testing",
+            "6. Basic RL vs Classic Control",
+            "7. Quit"
         ]
 
     def show_main_menu(self):
@@ -44,7 +46,7 @@ class MainMenu:
             # 메뉴 항목 표시
             for i, item in enumerate(self.menu_items):
                 item_text = self.menu_font.render(item, True, (200, 200, 200))
-                item_rect = item_text.get_rect(center=(400, 250 + i * 50))
+                item_rect = item_text.get_rect(center=(400, 200 + i * 50))
                 self.screen.blit(item_text, item_rect)
 
             # 화면 업데이트
@@ -72,7 +74,15 @@ class MainMenu:
                         # 자율주행 테스트 모드
                         pygame.quit()
                         return 'basic_rl_testing'
-                    elif event.key == pygame.K_5 or event.key == pygame.K_ESCAPE:
+                    elif event.key == pygame.K_5:
+                        # 클래식 제어 테스트 모드
+                        pygame.quit()
+                        return 'classic_control'
+                    elif event.key == pygame.K_6:
+                        # 자율주행 vs 클래식 제어 비교 모드
+                        pygame.quit()
+                        return 'basic_rl_vs_classic'
+                    elif event.key == pygame.K_7 or event.key == pygame.K_ESCAPE:
                         # 종료
                         running = False
                         return 'quit'

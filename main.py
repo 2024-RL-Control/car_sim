@@ -48,7 +48,10 @@ if __name__ == "__main__":
         elif selected_option == 'basic_rl_testing':
             env = BasicRLDrivingEnv()
             env.test(algorithm='sac')
-
+        elif selected_option == 'classic_control':
+            pass
+        elif selected_option == 'basic_rl_vs_classic':
+            running = False
         elif selected_option == 'quit':
             running = False
         # 메뉴로 돌아가서 반복
