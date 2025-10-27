@@ -1,11 +1,13 @@
 ﻿# -*- coding: utf-8 -*-
+import io
 import pygame
-from src.examples.env_examples import manual_control_with_goal
-from src.env.env_rl import BasicRLDrivingEnv
-from src.ui.menu import MainMenu
 import cProfile
 import pstats
-import io
+from src.ui.menu import MainMenu
+from src.utils.config_utils import load_config
+from src.examples.env_examples import manual_control_with_goal
+from src.env.env_rl import BasicRLDrivingEnv
+from src.env.env_classic import ClassicDrivingEnv
 
 # ==============
 # Main Function
@@ -49,6 +51,8 @@ if __name__ == "__main__":
             env = BasicRLDrivingEnv()
             env.test(algorithm='sac')
         elif selected_option == 'classic_control':
+            env = ClassicDrivingEnv()
+            env.run()
             pass
         elif selected_option == 'basic_rl_vs_classic':
             running = False

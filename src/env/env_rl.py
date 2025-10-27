@@ -177,7 +177,7 @@ class BasicRLDrivingEnv(gym.Env):
     2. 장애물 회피
     3. 차선 유지
     """
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, verbose=1):
         """
         RL 환경 초기화
 
@@ -200,7 +200,8 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 관측 설정
         self.obs_stack_size = self.rl_config['frame_stack_size']
-        print(f"Frame Stacking 활성화: {self.obs_stack_size} 프레임")
+        if verbose > 0:
+            print(f"Frame Stacking 활성화: {self.obs_stack_size} 프레임")
         self.observation_buffers = [
             deque(maxlen=self.obs_stack_size) for _ in range(self.num_vehicles)
         ]
@@ -224,10 +225,12 @@ class BasicRLDrivingEnv(gym.Env):
                 action_dim=self.env.action_space.shape[0],
                 debug=self.rl_config.get('debug_action_timing', False)
             )
-            print(f"ActionController 활성화: {action_hz}Hz로 행동 선택")
+            if verbose > 0:
+                print(f"ActionController 활성화: {action_hz}Hz로 행동 선택")
         else:
             self.action_controller = None
-            print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
+            if verbose > 0:
+                print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
         self.action_space = gym.spaces.Box(
             low=np.tile(self.env.action_space.low, (self.num_vehicles, 1)),
             high=np.tile(self.env.action_space.high, (self.num_vehicles, 1)),
