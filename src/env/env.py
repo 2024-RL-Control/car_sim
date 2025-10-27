@@ -399,7 +399,7 @@ class CarSimulatorEnv(gym.Env):
         scale_steer = max(-1.0, min(1.0, state.steer / self.max_steer_rad))
         cos_yaw, sin_yaw = state.encoding_angle(state.yaw)
         scale_vel_long, scale_acc_long = state.scale_long(state.vel_long, state.acc_long, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
-        scale_target_vel_long, _ = state.scale_long(state.target_vel_long, 0.0, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
+        scale_target_vel_long, _ = state.scale_long(state.smoothed_target_vel_long, 0.0, self.max_vel_long, self.min_vel_long, self.max_acc_long, self.min_acc_long)
         vel_error_long = scale_target_vel_long - scale_vel_long
         scale_vel_lat, scale_acc_lat = state.scale_lat(state.vel_lat, state.acc_lat, self.max_vel_lat, self.max_acc_lat)
         cos_error_to_goal, sin_error_to_goal = state.encoding_angle(state.error_to_target)
@@ -483,70 +483,40 @@ class CarSimulatorEnv(gym.Env):
         """
         state = vehicle.get_state()
 
-        # 1. 종료 조건에 대한 즉각적인 보상/페널티
+        # --- 1. 터미널 보상 (R_terminal) ---
         if reached_target:
-            return self.rewards['goal_reached_reward']
+            return self.rewards['success']
         if collision:
-            return self.rewards['collision_penalty']
+            return self.rewards['collision']
         if outside_road:
-            return self.rewards['outside_road_penalty']
+            return self.rewards['outside']
 
-        # 2. 주행 과정에 대한 상세 보상
-        reward = 0
-
-        # --- 목표 지향 보상 ---
-
-        # 진행률(목표 거리)에 따른 보상 (가까울수록 높은 보상)
-        progress = state.get_progress()
-        progress_reward = progress * self.rewards['progress_factor']
-        reward += progress_reward
-
-        # --- 주행 안정성 보상 ---
-
-        # 차선 유지 보상 (차량이 도로 중앙에 가까울수록 높은 보상)
-        frenet_d_norm = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width']) # [-1 ~ 1]
-        frenet_d_norm = min(abs(frenet_d_norm), 1.0)  # 절대값으로 변환하여 1.0을 기준으로 정규화
-
-        lane_threshold = self.rewards['lane_zero_threshold']
-        if frenet_d_norm > lane_threshold:
-            lane_keeping_norm = 0.0
+        # --- 2. 진행 보상 (R_progress) ---
+        # progress = state.get_progress()
+        # delta_progress = state.get_delta_progress()
+        # 전진에 대한 기본 보상
+        if state.vel_long > 0:
+            R_progress = self.rewards['w_progress']
         else:
-            lane_keeping_norm = 1.0 - (frenet_d_norm / lane_threshold)
+            R_progress = 0
 
-        lane_keeping_reward = lane_keeping_norm * self.rewards['lane_keeping_factor']
-        reward += lane_keeping_reward
+        # --- 3. 비용 계산 (C_total) ---
+        # C_speed (속도 오차 비용)
+        vel_error = state.smoothed_target_vel_long - state.vel_long
+        if vel_error < 0: # 과속
+            norm_speed = min(3.0, self.rewards['s_speed_over'] * abs(vel_error))
+            C_speed = norm_speed * self.rewards['w_speed']
+        else: # 저속
+            norm_speed = min(1.0, self.rewards['s_speed_under'] * abs(vel_error))
+            C_speed = norm_speed * self.rewards['w_speed']
 
-        # 목표 속도 유지 보상 (도로가 제안하는 속도와 가까울수록 높은 보상)
-        current_vel = state.vel_long  # m/s 단위 유지
-        target_vel = state.target_vel_long or self.config['simulation']['path_planning']['default_speed']
+        # C_lane (차선 유지 비용)
+        norm_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width']) # [-1 ~ 1]
+        C_lane = self.rewards['w_lane'] * (norm_d ** 2)
 
-        speed_diff = abs(target_vel - current_vel)
+        C_total = C_lane + C_speed
 
-        # 속도 미달 또는 초과 여부에 따라 다른 기울기(slope)를 적용하여 페널티 계산
-        if current_vel < target_vel:
-            # 목표 속도보다 느릴 경우: 완만한 기울기 적용
-            penalty = speed_diff * self.rewards['speed_under_slope']
-        else:
-            # 목표 속도보다 빠를 경우(과속): 가파른 기울기 적용, 속도 초과에 대한 페널티 강화
-            penalty = speed_diff * self.rewards['speed_over_slope']
+        # --- 4. 최종 스텝 보상 ---
+        R_step = R_progress - C_total
 
-        # speed_norm = max(-2.0, min(1.0, 1.0 - penalty))
-        speed_norm = 1.0 - penalty
-        speed_reward = speed_norm * self.rewards['speed_factor']
-        reward += speed_reward
-
-        # 저속 페널티 [0.0 ~ slow_threshold] 구간에서 선형 감소, 0.0 이하에서는 최대 페널티
-        if 0.0 <= current_vel < self.rewards['slow_threshold']:
-            slow_ratio = 1.0 - (current_vel / self.rewards['slow_threshold'])
-            reward += slow_ratio * self.rewards['slow_penalty']
-        elif current_vel < 0.0:
-            reward += self.rewards['slow_penalty']
-
-        # 후진 페널티 [reverse_threshold ~ 0.0] 구간에서 선형 증가, -0.28 이하에서 최대 페널티, 저속 페널티에 "중첩"됨
-        if current_vel < 0.0:
-            reverse_ratio = min(abs(current_vel) / abs(self.rewards['reverse_threshold']), 1.0)
-            reward += reverse_ratio * self.rewards['reverse_penalty']
-
-        # print(f"Delta: {state.get_delta_progress()}, {stop_penalty}")
-        # print(f"Progress Reward: {progress_reward}, Lane Keeping Reward: {lane_keeping_reward}, Speed Reward: {speed_norm}, {speed_reward}")
-        return reward
+        return R_step

@@ -268,7 +268,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 조기 종료 설정
         self.termination_check_step = self.rl_config['termination_check_step']
         self.progress_change_threshold = self.rl_config['progress_change_threshold']
-        self.early_termination_penalty = self.rl_config['rewards'].get('early_termination_penalty', 0.0)
+        self.early_termination_penalty = self.rl_config['rewards']['termination']
         self.accumulated_delta_progress = defaultdict(float)
         self.next_progress_check_step = self.termination_check_step
 

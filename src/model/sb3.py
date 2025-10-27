@@ -470,16 +470,15 @@ class TensorBoardLogger(BaseCallback):
             hparam_dict.update(env_params)
 
             reward_params = {
-                "reward/success": self.env_config['reward_factor'].get('goal_reached_reward', 0.0),
-                "reward/progress": self.env_config['reward_factor'].get('progress_factor', 0.0),
-                "reward/outside": self.env_config['reward_factor'].get('outside_road_penalty', 0.0),
-                "reward/termination": self.env_config['reward_factor'].get('early_termination_penalty', 0.0),
-                "reward/collision": self.env_config['reward_factor'].get('collision_penalty', 0.0),
-                "reward/lane_keeping": self.env_config['reward_factor'].get('lane_keeping_factor', 0.0),
-                "reward/lane_zero_threshold": self.env_config['reward_factor'].get('lane_zero_threshold', 0.0),
-                "reward/speed": self.env_config['reward_factor'].get('speed_factor', 0.0),
-                "reward/slow": self.env_config['reward_factor'].get('slow_penalty', 0.0),
-                "reward/reverse": self.env_config['reward_factor'].get('reverse_penalty', 0.0),
+                "reward/success": self.env_config['reward_factor'].get('success', 0.0),
+                "reward/collision": self.env_config['reward_factor'].get('collision', 0.0),
+                "reward/outside": self.env_config['reward_factor'].get('outside', 0.0),
+                "reward/termination": self.env_config['reward_factor'].get('termination', 0.0),
+                "reward/progress": self.env_config['reward_factor'].get('w_progress', 0.0),
+                "reward/lane": self.env_config['reward_factor'].get('w_lane', 0.0),
+                "reward/speed": self.env_config['reward_factor'].get('w_speed', 0.0),
+                "reward/speed/under": self.env_config['reward_factor'].get('s_speed_under', 0.0),
+                "reward/speed/over": self.env_config['reward_factor'].get('s_speed_over', 0.0),
             }
             hparam_dict.update(reward_params)
 

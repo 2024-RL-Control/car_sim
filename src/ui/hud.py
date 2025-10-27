@@ -69,6 +69,7 @@ class HUD:
                 f"Progress: {state.get_progress():.2f}%",
                 f"Distance to target: {distance:.2f}m",
                 f"Target Velocity: {target_vel_long:.2f}",
+                f"Smoothed Target Velocity: {state.smoothed_target_vel_long:.2f}",
                 f"Goal Heading Error: {np.degrees(state.error_to_target):.1f}°",
                 f"Goal Heading Angle: {np.degrees(state.angle_to_target):.1f}°",
                 f"Frenet D: {frenet_d:.2f}",

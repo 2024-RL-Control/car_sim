@@ -820,6 +820,7 @@ class VehicleState:
     frenet_d: float = 0.0
     frenet_point: tuple = None
     target_vel_long: float = 0.0
+    smoothed_target_vel_long: float = 0.0
     error_to_ref: float = 0.0
     angle_to_ref: float = 0.0
 
@@ -877,6 +878,7 @@ class VehicleState:
         self.frenet_d = 0.0
         self.frenet_point = None
         self.target_vel_long = 0.0
+        self.smoothed_target_vel_long = 0.0
         self.error_to_ref = 0.0
         self.angle_to_ref = 0.0
 
@@ -1101,6 +1103,7 @@ class Vehicle:
         self.simulation_config = simulation_config
         self.state = VehicleState()
         self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
+        self.lookahead_time = self.simulation_config['rl']['lookahead_time']
 
         # Subsystem 관리자 초기화
         self.subsystem_manager = SubsystemManager(vehicle_instance=self, simulation_config=self.simulation_config)
@@ -1162,7 +1165,7 @@ class Vehicle:
             current_position=current_position,
             context={},
             sensor_args=(dt, time_elapsed, objects),
-            frenet_args=(road_manager, time_elapsed),
+            frenet_args=(road_manager, time_elapsed, dt),
             trajectory_args=(),
             collision_check_args=(objects,),
             goal_check_args=(),
@@ -1281,14 +1284,14 @@ class Vehicle:
                                self.physics_config['trajectory']['dt'])
         return self.state.physics_trajectory
 
-    def _update_frenet_callback(self, road_manager, time_elapsed):
+    def _update_frenet_callback(self, road_manager, time_elapsed, dt):
         """Frenet 업데이트 콜백 - road_manager를 통해 계산 및 보간 처리"""
         # 기본 frenet 업데이트
-        outside_road = self._update_road_data_internal(road_manager, time_elapsed)
+        outside_road = self._update_road_data_internal(road_manager, time_elapsed, dt)
 
         return outside_road
 
-    def _update_road_data_internal(self, road_manager, current_time: float = None):
+    def _update_road_data_internal(self, road_manager, current_time: float = None, dt: float = None):
         """내부용 road data 업데이트 - 서브 시스템 관리자에서 호출"""
         if current_time is None:
             current_time = 0.0  # 시뮬레이션 시간 기본값
@@ -1317,7 +1320,39 @@ class Vehicle:
                 self.state.cached_road_colliders = boundary_colliders
                 self.state.cached_segment_id = segment_id
 
+        if dt is not None:
+            self._update_smoothed_target_velocity(dt)
+
         return outside_road
+
+    def _update_smoothed_target_velocity(self, dt: float):
+        """물리적 한계를 고려하여 목표 속도를 스무딩합니다."""
+
+        # 도로가 제안하는 원시 목표 속도 (frenet 콜백에서 이미 계산됨)
+        raw_target_vel = self.state.target_vel_long
+
+        # '이전 스무딩 목표'를 기반
+        prev_smoothed_vel = self.state.smoothed_target_vel_long
+
+        # 물리적 한계, 최대/최소 가속도
+        max_accel = self.vehicle_config['max_accel']
+        max_decel = self.vehicle_config['max_brake']
+
+        max_accel_step = max_accel * dt
+        max_decel_step = max_decel * dt
+
+        if raw_target_vel > prev_smoothed_vel:
+            # 가속해야 하는 경우
+            self.state.smoothed_target_vel_long = min(
+                raw_target_vel,
+                prev_smoothed_vel + max_accel_step
+            )
+        elif raw_target_vel < prev_smoothed_vel:
+            # 감속해야 하는 경우
+            self.state.smoothed_target_vel_long = max(
+                raw_target_vel,
+                prev_smoothed_vel - max_decel_step
+            )
 
     def _update_sensor_callback(self, dt, time_elapsed, objects):
         """센서 업데이트 콜백"""

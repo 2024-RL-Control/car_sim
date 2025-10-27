@@ -4,7 +4,7 @@
 simulation:
   fps: 60
   dt: 0.016         # seconds, time step for simulation (1/fps)
-  num_vehicles: 1  # number of vehicles on the environment
+  num_vehicles: 1   # number of vehicles on the environment
   boundary:         # [m]
     x_min: -50
     x_max: 50
@@ -37,25 +37,21 @@ simulation:
     termination_check_step: 500     # 조기 종료를 위한 스텝 간격
     progress_change_threshold: 0.10 # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
     eval_episode: 10                # number of episodes for evaluation
+    lookahead_time: 0.5             # [s], lookahead time for target speed calculation
     observation:
       vehicle_state_dim: 19
-      lidar_dim: 11
+      lidar_dim: 17
       trajectory_dim: 0
     rewards:
-      goal_reached_reward: 10          # reward for reaching the goal
-      collision_penalty: -300           # penalty for collision
-      outside_road_penalty: -200        # penalty for going outside the road
-      early_termination_penalty: -100   # penalty for early termination
-      progress_factor: 0.1              # reward factor for reducing distance to goal
-      lane_keeping_factor: 0.3          # reward factor for staying in the lane
-      lane_zero_threshold: 0.25         # threshold for zero lane keeping reward
-      speed_factor: 0.6                 # reward factor for maintaining/reaching target speed
-      speed_under_slope: 0.2            # under speed reward slope
-      speed_over_slope: 1.0             # over speed reward slope
-      slow_penalty: -0.2                # penalty for very low speed
-      slow_threshold: 0.28              # speed threshold for slow penalty [m/s], # 1.0 km/h
-      reverse_penalty: -0.3             # penalty for driving in reverse
-      reverse_threshold: -0.56          # speed threshold for reverse penalty [m/s], # -2.0 km/h
+      success: 100                      # reward for reaching the goal
+      collision: -300                   # penalty for collision
+      outside: -200                     # penalty for going outside the road
+      termination: -100                 # penalty for early termination
+      w_progress: 1.0                   # reward weight for reducing progress to goal
+      w_lane: 0.5                       # lane weight for lane keeping
+      w_speed: 0.5                       # speed weight for speed control
+      s_speed_under: 0.2                # under speed reward slope
+      s_speed_over: 1.5                 # over speed reward slope
     resume_training:
       enabled: False                     # True로 설정 시 학습 이어하기 활성화
       model_path: "sac_2025-10-26-021059"
@@ -149,7 +145,7 @@ vehicle:
 
   # Powertrain Parameters
   max_accel: 4.0         # 최대 가속도 [m/s²]
-  max_brake: 4.0         # 최대 제동 [m/s²]
+  max_brake: 6.0         # 최대 제동 [m/s²]
   max_speed: 20.0        # 최대 속도 [m/s] (약 72 km/h)
   min_speed: -10.0       # 최소 속도 [m/s] (약 -36 km/h)
   max_vel_lat: 23.0      # 최대 횡방향 속도 [m/s], 종방향 속도에 대한 휴리스틱 값
@@ -160,7 +156,7 @@ vehicle:
       sensor_type: "LIDAR"
       relative_pos: [0.0, 0.0]  # 차량 중심 기준 상대 위치 [m]
       relative_angle: 0.0       # 차량 방향 기준 상대 각도 [degrees] - 저장 시 도 단위 사용
-      num_samples: 11           # 샘플(레이) 수
+      num_samples: 17           # 샘플(레이) 수
       angle_start: -170.0       # 시작 각도 [degrees] - 저장 시 도 단위 사용
       angle_end: 170.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       concentration: 1.5        # 각도 집중도 (0~1: 가장자리 집중, 1: 균등, >1: 중앙 집중)
@@ -195,7 +191,7 @@ physics:
   max_steer_speed_factor: 0.5     # 고속에서 50% 느리게
   steer_speed_threshold: 10.0     # 10.0 m/s (36 km/h)에서 조향 속도 계수 적용
   brake_priority_threshold: 0.1   # 브레이크 우선 적용 시작점
-  engine_brake_interference: 0.3  # 브레이크 시 엔진 출력 감소율
+  engine_brake_interference: 0.1  # 브레이크 시 엔진 출력 감소율
 
   # Pacejka Magic Formula coefficients
   pacejka:
