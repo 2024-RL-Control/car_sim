@@ -12,6 +12,7 @@ from .physics import PhysicsEngine
 from .trajectory import TrajectoryPredictor, TrajectoryData
 from .object import RectangleObstacle, GoalManager
 from .sensor import SensorManager
+from .road import FrenetState, LinearRoadSegment
 
 # ======================
 # Subsystem Management System
@@ -815,6 +816,8 @@ class VehicleState:
     # frenet 좌표
     prev_progress: float = 0.0     # 이전 목표까지의 진행률 [0 ~ 1.0]
     curr_progress: float = 0.0     # 현재 목표까지의 진행률 [0 ~ 1.0]
+    frenet_state: FrenetState = None    # 현재 frenet 상태
+    closest_segment: LinearRoadSegment = None  # 현재 가장 가까운 도로 세그먼트
     segment_length: float = 0.0    # 현재 세그먼트 전체 길이 [m]
     frenet_s: float = 0.0          # 현재 호장 길이 [m]
     frenet_d: float = 0.0
@@ -873,6 +876,8 @@ class VehicleState:
 
         self.prev_progress = 0.0
         self.curr_progress = 0.0
+        self.frenet_state = None
+        self.closest_segment = None
         self.segment_length = 0.0
         self.frenet_s = 0.0
         self.frenet_d = 0.0
@@ -1300,9 +1305,11 @@ class Vehicle:
             current_time = 0.0  # 시뮬레이션 시간 기본값
 
         # road_manager를 통해 Frenet 좌표 계산 (frenet_s, segment_length 포함)
-        closest_segment, segment_length, frenet_point, frenet_s, frenet_d, outside_road, target_vel_long, error_to_ref, angle_to_ref = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
+        frenet_state, closest_segment, segment_length, frenet_point, frenet_s, frenet_d, outside_road, target_vel_long, error_to_ref, angle_to_ref = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw, self.state.vel_long, self.state.vel_lat))
 
         # 상태 업데이트
+        self.state.frenet_state = frenet_state
+        self.state.closest_segment = closest_segment
         self.state.frenet_point = frenet_point
         self.state.frenet_s = frenet_s if frenet_s is not None else 0.0
         self.state.frenet_d = frenet_d

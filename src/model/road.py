@@ -1817,12 +1817,33 @@ class RoadSystemAPI:
 
     # === 차량 위치 계산 (핵심 API) ===
 
-    def get_vehicle_road_info(self, vehicle_pos: Tuple[float, float, float]) -> Optional[Dict[str, Any]]:
-        """차량의 도로 정보 계산 (Frenet 좌표, 권장 속도, heading error 포함)"""
+    def get_vehicle_road_info(self, vehicle_data: Tuple[float, float, float, float, float]) -> Optional[Dict[str, Any]]:
+        """
+        차량의 도로 정보 계산 (Frenet 좌표, 권장 속도, Frenet 속도, heading error 포함)
+
+        Args:
+            vehicle_data: (x, y, yaw, vel_long, vel_lat) 튜플
+        """
+        x, y, yaw, v_long, v_lat = vehicle_data
+        vehicle_pos = (x, y, yaw)
+
         frenet_state, closest_segment = self.network.calculate_frenet(vehicle_pos)
 
         if not frenet_state:
             return None
+
+        # Frenet 좌표계에서의 속도 계산
+        ref_yaw = frenet_state.yaw_ref
+        cos_yaw = math.cos(yaw)
+        sin_yaw = math.sin(yaw)
+        vx = v_long * cos_yaw - v_lat * sin_yaw
+        vy = v_long * sin_yaw + v_lat * cos_yaw
+        cos_ref_yaw = math.cos(ref_yaw)
+        sin_ref_yaw = math.sin(ref_yaw)
+        s_dot = vx * cos_ref_yaw + vy * sin_ref_yaw
+        d_dot = -vx * sin_ref_yaw + vy * cos_ref_yaw
+        frenet_state.s_dot = s_dot
+        frenet_state.d_dot = d_dot
 
         # 권장 속도 계산 (Lookahead 범위 최대 곡률 기반)
         if closest_segment:
@@ -1836,15 +1857,13 @@ class RoadSystemAPI:
             recommended_speed = self.config.get('default_speed', 15.0)
 
         # 차량의 진행 방향과 도로의 방향의 일치 정도 계산
-        vehicle_yaw = vehicle_pos[2]
-        road_yaw = frenet_state.yaw_ref
-        error_to_ref = normalize_angle(road_yaw - vehicle_yaw)
+        error_to_ref = normalize_angle(ref_yaw - yaw)
 
         # 차량 위치에서 참조점까지의 각도 계산
         ref_x, ref_y = frenet_state.x_ref, frenet_state.y_ref
-        dx_to_ref = ref_x - vehicle_pos[0]
-        dy_to_ref = ref_y - vehicle_pos[1]
-        angle_to_ref = normalize_angle(math.atan2(dy_to_ref, dx_to_ref) - vehicle_yaw)
+        dx_to_ref = ref_x - x
+        dy_to_ref = ref_y - y
+        angle_to_ref = normalize_angle(math.atan2(dy_to_ref, dx_to_ref) - yaw)
 
         # 세그먼트 전체 길이
         segment_length = closest_segment.get_length() if closest_segment else 0.0
@@ -1853,9 +1872,9 @@ class RoadSystemAPI:
         is_on_road = closest_segment.is_point_on_road(vehicle_pos[:2])
 
         return {
-            'closest_segment': closest_segment,
-            'segment_id': frenet_state.segment_id,
             'frenet_state': frenet_state,
+            'segment_id': frenet_state.segment_id,
+            'closest_segment': closest_segment,
             'segment_length': segment_length,
             'road_center_point': (frenet_state.x_ref, frenet_state.y_ref),
             's': frenet_state.s,
@@ -1892,11 +1911,13 @@ class RoadSystemAPI:
         # min_speed와 max_speed 사이로 제한
         return max(min_speed, min(max_speed, safe_speed))
 
-    def get_vehicle_update_data(self, vehicle_position: Tuple[float, float, float]):
+    def get_vehicle_update_data(self, vehicle_data: Tuple[float, float, float, float, float]):
         """차량 업데이트 데이터 계산 (곡률 기반 동적 권장 속도)
-
+        Args:
+            vehicle_data: 차량의 현재 위치 및 속도 (x, y, yaw, vel_long, vel_lat)
         Returns:
-            Tuple[closest_segment, segment_length, road_center_point, frenet_s, d, is_outside_road, recommended_speed, error_to_ref, angle_to_ref]
+            Tuple[frenet_state, closest_segment, segment_length, road_center_point, frenet_s, d, is_outside_road, recommended_speed, error_to_ref, angle_to_ref]
+            - frenet_state: Frenet 좌표계 상태 객체
             - closest_segment: 가장 가까운 도로 세그먼트 객체 (없으면 None)
             - segment_length: 현재 세그먼트 전체 길이 [m]
             - road_center_point: 도로 중심점 (x, y)
@@ -1909,12 +1930,13 @@ class RoadSystemAPI:
                             < 0: 도로가 오른쪽 → 우회전 필요
             - angle_to_ref: 차량 위치에서 도로 참조점까지의 각도 [rad] (-π~π)
         """
-        info = self.get_vehicle_road_info(vehicle_position)
+        info = self.get_vehicle_road_info(vehicle_data)
 
         if not info:
-            return None, None, None, None, None, True, None, None, None
+            return None, None, None, None, None, None, True, None, None, None
 
         return (
+            info['frenet_state'],
             info['closest_segment'],
             info['segment_length'],
             info['road_center_point'],

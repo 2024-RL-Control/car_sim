@@ -477,6 +477,10 @@ class BasicRLDrivingEnv(gym.Env):
 
         return np.array(stacked_obs_list, dtype=np.float64)
 
+    def deactivate_action_controller(self):
+        """ActionController 비활성화"""
+        self.action_controller = None
+
     def reset(self, *, seed=None, options=None):
         """
         환경 초기화 및 초기 관측값 반환
