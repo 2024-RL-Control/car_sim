@@ -1145,6 +1145,9 @@ class Vehicle:
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
 
+        # 목표 속도 스무딩 업데이트
+        self._update_smoothed_target_velocity(dt)
+
         # 객체 목록 생성
         objects = []
         if obstacles:
@@ -1320,8 +1323,8 @@ class Vehicle:
                 self.state.cached_road_colliders = boundary_colliders
                 self.state.cached_segment_id = segment_id
 
-        if dt is not None:
-            self._update_smoothed_target_velocity(dt)
+        # if dt is not None:
+        #     self._update_smoothed_target_velocity(dt)
 
         return outside_road
 
