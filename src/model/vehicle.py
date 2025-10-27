@@ -2,7 +2,7 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Any, Callable, Tuple
 from collections import deque, OrderedDict
-from math import degrees, pi, cos, sin, log, e, exp, sqrt
+from math import degrees, pi, cos, sin, log, e, exp, sqrt, atan2
 import pygame
 import numpy as np
 import time
@@ -152,69 +152,75 @@ class SubsystemManager:
             return
 
         hz_config = simulation_config['hz']
-        adaptive_config = {
-            'velocity_thresholds': [2.0, 10.0],
-            'interval_factors': [2.0, 0.5],
-            'min_distance': 0.05
-        }
+        # adaptive_config = {
+        #     'velocity_thresholds': [2.0, 10.0],
+        #     'interval_factors': [2.0, 0.5],
+        #     'min_distance': 0.05
+        # }
 
         try:
             # Frenet 업데이트 설정 (적응적 업데이트)
             if 'frenet_update' in hz_config:
                 frenet_hz = hz_config['frenet_update']
-                self.configure_subsystem('frenet', frenet_hz, adaptive_config)
+                self.configure_subsystem('frenet', frenet_hz)
+                # self.configure_subsystem('frenet', frenet_hz, adaptive_config)
                 # 안전한 콜백 등록 (weakref 사용)
                 self._register_safe_callback('frenet', '_update_frenet_callback', '_initialize_frenet_callback')
 
             # 라이다 센서 업데이트 설정 (적응적 업데이트)
             if 'lidar_update' in hz_config:
                 lidar_hz = hz_config['lidar_update']
-                self.configure_subsystem('sensor', lidar_hz, adaptive_config)
+                self.configure_subsystem('sensor', lidar_hz)
+                # self.configure_subsystem('sensor', lidar_hz, adaptive_config)
                 # 안전한 콜백 등록
                 self._register_safe_callback('sensor', '_update_sensor_callback', '_initialize_sensor_callback')
 
             # 궤적 예측 업데이트 설정 (적응적 업데이트)
             if 'trajectory_update' in hz_config:
                 trajectory_hz = hz_config['trajectory_update']
-                self.configure_subsystem('trajectory', trajectory_hz, adaptive_config)
+                self.configure_subsystem('trajectory', trajectory_hz)
+                # self.configure_subsystem('trajectory', trajectory_hz, adaptive_config)
                 # 안전한 콜백 등록
                 self._register_safe_callback('trajectory', '_update_trajectory_callback', '_initialize_trajectory_callback')
 
             # 충돌 검사 서브시스템 설정
             if 'collision_check' in hz_config:
                 collision_hz = hz_config['collision_check']
-                collision_adaptive_config = {
-                    'velocity_thresholds': [5.0, 15.0],
-                    'interval_factors': [3.0, 0.5],  # 저속에서 간격 늘리기, 고속에서 빠르게
-                    'min_distance': 0.1,
-                    'priority_mode': 'velocity'
-                }
-                self.configure_subsystem('collision_check', collision_hz, collision_adaptive_config)
+                # collision_adaptive_config = {
+                #     'velocity_thresholds': [5.0, 15.0],
+                #     'interval_factors': [3.0, 0.5],  # 저속에서 간격 늘리기, 고속에서 빠르게
+                #     'min_distance': 0.1,
+                #     'priority_mode': 'velocity'
+                # }
+                self.configure_subsystem('collision_check', collision_hz)
+                # self.configure_subsystem('collision_check', collision_hz, collision_adaptive_config)
                 self._register_safe_callback('collision_check', '_update_collision_check_callback', '_initialize_collision_check_callback')
 
             # 목적지 도달 확인 서브시스템 설정
             if 'goal_check' in hz_config:
                 goal_hz = hz_config['goal_check']
-                goal_adaptive_config = {
-                    'velocity_thresholds': [2.0, 8.0],
-                    'interval_factors': [2.0, 1.0],
-                    'min_distance': 0.05,
-                    'distance_thresholds': [3.0, 15.0],  # 목적지 기반 적응적 업데이트
-                    'priority_mode': 'hybrid'
-                }
-                self.configure_subsystem('goal_check', goal_hz, goal_adaptive_config)
+                # goal_adaptive_config = {
+                #     'velocity_thresholds': [2.0, 8.0],
+                #     'interval_factors': [2.0, 1.0],
+                #     'min_distance': 0.05,
+                #     'distance_thresholds': [3.0, 15.0],  # 목적지 기반 적응적 업데이트
+                #     'priority_mode': 'hybrid'
+                # }
+                self.configure_subsystem('goal_check', goal_hz)
+                # self.configure_subsystem('goal_check', goal_hz, goal_adaptive_config)
                 self._register_safe_callback('goal_check', '_update_goal_check_callback', '_initialize_goal_check_callback')
 
             # 상태 이력 서브시스템 설정
             if 'state_history' in hz_config:
                 history_hz = hz_config['state_history']
-                history_adaptive_config = {
-                    'velocity_thresholds': [1.0, 10.0],
-                    'interval_factors': [5.0, 0.8],  # 정지 시 이력 간격 늘리기
-                    'min_distance': 0.2,
-                    'priority_mode': 'velocity'
-                }
-                self.configure_subsystem('state_history', history_hz, history_adaptive_config)
+                # history_adaptive_config = {
+                #     'velocity_thresholds': [1.0, 10.0],
+                #     'interval_factors': [5.0, 0.8],  # 정지 시 이력 간격 늘리기
+                #     'min_distance': 0.2,
+                #     'priority_mode': 'velocity'
+                # }
+                self.configure_subsystem('state_history', history_hz)
+                # self.configure_subsystem('state_history', history_hz, history_adaptive_config)
                 self._register_safe_callback('state_history', '_update_state_history_callback', '_initialize_state_history_callback')
 
         except Exception as e:
@@ -316,6 +322,16 @@ class SubsystemManager:
             position: 현재 위치 (x, y)
             context: 추가 컨텍스트 정보 (목적지 거리, 장애물 거리 등)
         """
+        # 첫 업데이트인지 확인: 업데이트 카운트가 0이면 무조건 실행
+        if self._update_counts.get(subsystem_name, 0) == 0:
+            self._last_update_times[subsystem_name] = current_time
+            if position:
+                self._last_positions[subsystem_name] = position
+            if context:
+                self._context_data[subsystem_name].update(context)
+            self._update_counts[subsystem_name] = 1 # 카운트 증가
+            return True
+
         # 설정되지 않은 서브시스템은 항상 업데이트
         if subsystem_name not in self._update_intervals:
             return True
@@ -492,8 +508,8 @@ class SubsystemManager:
                     # 보간된 값으로 업데이트
                     state.frenet_d = interpolated_d
 
-                road_width = 8.0  # 기본 도로 폭
-                outside_road = abs(state.frenet_d) > (road_width / 2)
+                road_width = self._simulation_config['path_planning']['road_width']
+                outside_road = abs(state.frenet_d) > (road_width / 2) - 0.15  # 15cm 여유
                 return outside_road
 
         except Exception as e:
@@ -793,18 +809,23 @@ class VehicleState:
     initial_distance_to_target: float = 0.0  # 초기 목표까지의 거리
     prev_distance_to_target: float = 0.0  # 이전 목표까지의 거리
     curr_distance_to_target: float = 0.0  # 남은 목표까지의 거리
-    yaw_diff_to_target: float = 0.0  # 목표까지의 방향 차이
+    error_to_target: float = 0.0  # 목표와의 방향 차이
+    angle_to_target: float = 0.0  # 목표로의 각도 차이
 
     # frenet 좌표
-    frenet_d: float = 0.0
+    prev_progress: float = 0.0     # 이전 목표까지의 진행률 [0 ~ 1.0]
+    curr_progress: float = 0.0     # 현재 목표까지의 진행률 [0 ~ 1.0]
+    segment_length: float = 0.0    # 현재 세그먼트 전체 길이 [m]
     frenet_s: float = 0.0          # 현재 호장 길이 [m]
+    frenet_d: float = 0.0
     frenet_point: tuple = None
     target_vel_long: float = 0.0
-    heading_error: float = 0.0
-    segment_length: float = 0.0    # 현재 세그먼트 전체 길이 [m]
+    smoothed_target_vel_long: float = 0.0
+    error_to_ref: float = 0.0
+    angle_to_ref: float = 0.0
 
     # 도로 경계선 캐시 (라이다 센서 최적화용)
-    cached_road_boundaries: Optional[np.ndarray] = None  # Shape: (N, 4) - [x1, y1, x2, y2]
+    cached_road_colliders: Optional[np.ndarray] = None  # Shape: (N, 3) - [x1, y1, radius]
     cached_segment_id: str = ""    # 캐시 무효화 감지용
 
     # 라이다 센서 데이터, 거리 배열
@@ -847,16 +868,21 @@ class VehicleState:
         self.initial_distance_to_target = 0.0
         self.prev_distance_to_target = 0.0
         self.curr_distance_to_target = 0.0
-        self.yaw_diff_to_target = 0.0
+        self.error_to_target = 0.0
+        self.angle_to_target = 0.0
 
-        self.frenet_d = 0.0
+        self.prev_progress = 0.0
+        self.curr_progress = 0.0
+        self.segment_length = 0.0
         self.frenet_s = 0.0
+        self.frenet_d = 0.0
         self.frenet_point = None
         self.target_vel_long = 0.0
-        self.heading_error = 0.0
-        self.segment_length = 0.0
+        self.smoothed_target_vel_long = 0.0
+        self.error_to_ref = 0.0
+        self.angle_to_ref = 0.0
 
-        self.cached_road_boundaries = None
+        self.cached_road_colliders = None
         self.cached_segment_id = ""
 
         self.lidar_data.clear()
@@ -905,6 +931,9 @@ class VehicleState:
         return cos(angle), sin(angle)
 
     def get_progress(self):
+        return self.curr_progress
+
+    def calc_progress(self):
         """Frenet 기반 목표 도달 진행률 반환 (-1.0 ~ 1.0)
 
         현재 위치가 도로 세그먼트의 몇 퍼센트 지점인지를 기준으로
@@ -930,13 +959,12 @@ class VehicleState:
         """목표 도달 진행률 변화량 계산
 
         이전 프레임과 현재 프레임 사이의 거리 변화를 반환합니다.
-        양수: 목표에 가까워짐 (전진), 음수: 목표에서 멀어짐 (후진/이탈)
+        음수: 목표에 가까워짐 (전진), 양수: 목표에서 멀어짐 (후진/이탈)
 
         Returns:
-            거리 변화량 [m]
+            거리 변화율
         """
-        # 목표까지의 거리 감소량
-        return self.prev_distance_to_target - self.curr_distance_to_target
+        return self.prev_progress - self.curr_progress
 
     def scale_frenet_d(self, d, road_width=6.0):
         """frenet_d 값의 스케일링 (도로 폭에 따라 -1.0 ~ 1.0 범위로)"""
@@ -1075,6 +1103,7 @@ class Vehicle:
         self.simulation_config = simulation_config
         self.state = VehicleState()
         self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
+        self.lookahead_time = self.simulation_config['rl']['lookahead_time']
 
         # Subsystem 관리자 초기화
         self.subsystem_manager = SubsystemManager(vehicle_instance=self, simulation_config=self.simulation_config)
@@ -1116,6 +1145,9 @@ class Vehicle:
         # 충돌 바디 위치 및 방향 업데이트
         self._update_collision_body()
 
+        # 목표 속도 스무딩 업데이트
+        self._update_smoothed_target_velocity(dt)
+
         # 객체 목록 생성
         objects = []
         if obstacles:
@@ -1136,7 +1168,7 @@ class Vehicle:
             current_position=current_position,
             context={},
             sensor_args=(dt, time_elapsed, objects),
-            frenet_args=(road_manager, time_elapsed),
+            frenet_args=(road_manager, time_elapsed, dt),
             trajectory_args=(),
             collision_check_args=(objects,),
             goal_check_args=(),
@@ -1255,76 +1287,79 @@ class Vehicle:
                                self.physics_config['trajectory']['dt'])
         return self.state.physics_trajectory
 
-    def _update_frenet_callback(self, road_manager, time_elapsed):
+    def _update_frenet_callback(self, road_manager, time_elapsed, dt):
         """Frenet 업데이트 콜백 - road_manager를 통해 계산 및 보간 처리"""
         # 기본 frenet 업데이트
-        outside_road = self._update_road_data_internal(road_manager, time_elapsed)
+        outside_road = self._update_road_data_internal(road_manager, time_elapsed, dt)
 
         return outside_road
 
-    def _convert_boundaries_to_segments(self, left_boundary: List[Tuple[float, float]],
-                                        right_boundary: List[Tuple[float, float]]) -> np.ndarray:
-        """도로 경계선을 line segment 배열로 변환
-
-        Args:
-            left_boundary: 왼쪽 경계선 좌표 리스트 [(x, y), ...]
-            right_boundary: 오른쪽 경계선 좌표 리스트 [(x, y), ...]
-
-        Returns:
-            np.ndarray: Shape (N, 4) - 각 row는 [x1, y1, x2, y2] 형태의 line segment
-        """
-        segments = []
-
-        # 왼쪽 경계선을 line segments로 변환
-        for i in range(len(left_boundary) - 1):
-            x1, y1 = left_boundary[i]
-            x2, y2 = left_boundary[i + 1]
-            segments.append([x1, y1, x2, y2])
-
-        # 오른쪽 경계선을 line segments로 변환
-        for i in range(len(right_boundary) - 1):
-            x1, y1 = right_boundary[i]
-            x2, y2 = right_boundary[i + 1]
-            segments.append([x1, y1, x2, y2])
-
-        # NumPy 배열로 변환
-        return np.array(segments, dtype=np.float64) if segments else np.empty((0, 4), dtype=np.float64)
-
-    def _update_road_data_internal(self, road_manager, current_time: float = None):
+    def _update_road_data_internal(self, road_manager, current_time: float = None, dt: float = None):
         """내부용 road data 업데이트 - 서브 시스템 관리자에서 호출"""
         if current_time is None:
             current_time = 0.0  # 시뮬레이션 시간 기본값
 
         # road_manager를 통해 Frenet 좌표 계산 (frenet_s, segment_length 포함)
-        closest_segment, frenet_point, frenet_d, target_vel_long, outside_road, heading_error, frenet_s, segment_length = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
+        closest_segment, segment_length, frenet_point, frenet_s, frenet_d, outside_road, target_vel_long, error_to_ref, angle_to_ref = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw))
 
         # 상태 업데이트
         self.state.frenet_point = frenet_point
-        self.state.frenet_d = frenet_d
         self.state.frenet_s = frenet_s if frenet_s is not None else 0.0
+        self.state.frenet_d = frenet_d
         self.state.segment_length = segment_length if segment_length is not None else 0.0
         self.state.target_vel_long = target_vel_long
-        self.state.heading_error = heading_error
+        self.state.error_to_ref = error_to_ref
+        self.state.angle_to_ref = angle_to_ref
 
         # 도로 경계선 캐싱 (segment가 변경되었을 때만)
         if closest_segment is not None:
             segment_id = closest_segment.id if hasattr(closest_segment, 'id') else str(id(closest_segment))
 
             if segment_id != self.state.cached_segment_id:
-                # 경계선 데이터 가져오기
-                left_boundary, right_boundary = closest_segment.get_boundary_lines()
+                # 경계 충돌체 데이터 가져오기
+                boundary_colliders = closest_segment.get_boundary()
 
                 # line segment 배열로 변환 및 캐싱
-                self.state.cached_road_boundaries = self._convert_boundaries_to_segments(
-                    left_boundary, right_boundary
-                )
+                self.state.cached_road_colliders = boundary_colliders
                 self.state.cached_segment_id = segment_id
+
+        # if dt is not None:
+        #     self._update_smoothed_target_velocity(dt)
 
         return outside_road
 
+    def _update_smoothed_target_velocity(self, dt: float):
+        """물리적 한계를 고려하여 목표 속도를 스무딩합니다."""
+
+        # 도로가 제안하는 원시 목표 속도 (frenet 콜백에서 이미 계산됨)
+        raw_target_vel = self.state.target_vel_long
+
+        # '이전 스무딩 목표'를 기반
+        prev_smoothed_vel = self.state.smoothed_target_vel_long
+
+        # 물리적 한계, 최대/최소 가속도
+        max_accel = self.vehicle_config['max_accel']
+        max_decel = self.vehicle_config['max_brake']
+
+        max_accel_step = max_accel * dt
+        max_decel_step = max_decel * dt
+
+        if raw_target_vel > prev_smoothed_vel:
+            # 가속해야 하는 경우
+            self.state.smoothed_target_vel_long = min(
+                raw_target_vel,
+                prev_smoothed_vel + max_accel_step
+            )
+        elif raw_target_vel < prev_smoothed_vel:
+            # 감속해야 하는 경우
+            self.state.smoothed_target_vel_long = max(
+                raw_target_vel,
+                prev_smoothed_vel - max_decel_step
+            )
+
     def _update_sensor_callback(self, dt, time_elapsed, objects):
         """센서 업데이트 콜백"""
-        self.sensor_manager.update(dt, time_elapsed, objects, road_boundaries=self.state.cached_road_boundaries)
+        self.sensor_manager.update(dt, time_elapsed, objects, self.state.cached_road_colliders)
         self._update_sensor_data()
         return self.state.get_lidar_data()
 
@@ -1500,8 +1535,8 @@ class Vehicle:
         position_reached = distance <= position_tolerance
 
         # 방향 차이 계산, 목표 방향과 현재 방향의 차이 (절대값 -π ~ π 범위로)
-        yaw_diff = abs(self.state.yaw_diff_to_target)
-        direction_reached = yaw_diff <= yaw_tolerance
+        yaw_error = abs(self.state.error_to_target)
+        direction_reached = yaw_error <= yaw_tolerance
 
         reached = position_reached and direction_reached
 
@@ -1510,10 +1545,16 @@ class Vehicle:
     def _update_target_info(self):
         """목표 위치까지의 거리, 각도도 계산 및 업데이트"""
         self.state.prev_distance_to_target = self.state.curr_distance_to_target
-        dx = self.state.x - self.state.target_x
-        dy = self.state.y - self.state.target_y
+        dx = self.state.target_x - self.state.x
+        dy = self.state.target_y - self.state.y
         self.state.curr_distance_to_target = (dx**2 + dy**2) ** 0.5
-        self.state.yaw_diff_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
+        self.state.error_to_target = self.state.normalize_angle(self.state.target_yaw - self.state.yaw)
+        self.state.angle_to_target = self.state.normalize_angle(atan2(dy, dx) - self.state.yaw)
+        self._update_progress()
+
+    def _update_progress(self):
+        self.state.prev_progress = self.state.curr_progress
+        self.state.curr_progress = self.state.calc_progress()
 
     def draw(self, screen, world_to_screen_func, is_active=False, debug=False):
         """차량 및 타이어 렌더링"""
