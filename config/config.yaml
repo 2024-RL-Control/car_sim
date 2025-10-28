@@ -43,7 +43,7 @@ simulation:
       lidar_dim: 17
       trajectory_dim: 0
     rewards:
-      success: 100                      # reward for reaching the goal
+      success: 30                       # reward for reaching the goal
       collision: -300                   # penalty for collision
       outside: -200                     # penalty for going outside the road
       termination: -100                 # penalty for early termination
