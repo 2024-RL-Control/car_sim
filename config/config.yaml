@@ -15,10 +15,10 @@ simulation:
     num_dynamic_obstacles: 0
     buffer_distance: 5   # [m]
     boundary:            # [m]
-      x_min: -25
-      x_max: 25
-      y_min: -25
-      y_max: 25
+      x_min: -10
+      x_max: 10
+      y_min: -10
+      y_max: 10
   hz: # (시뮬레이션 시간 기준)
     frenet_update: 25      # Frenet 좌표 업데이트 주파수 [Hz]
     lidar_update: 25       # 라이다 스캔 주파수 [Hz]
@@ -55,8 +55,8 @@ simulation:
       enabled: False                     # True로 설정 시 학습 이어하기 활성화
       model_path: "sac_2025-10-26-021059"
     eval:
-      episodes: 50
-      model_path: "sac_2025-10-29-000409"
+      episodes: 20
+      model_path: "sac_2025-10-29-004631"
     callbacks:
       max_episodes_history: 500        # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
