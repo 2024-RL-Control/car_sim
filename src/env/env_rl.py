@@ -184,8 +184,8 @@ class BasicRLDrivingEnv(gym.Env):
         Args:
             config_path: 설정 파일 경로 (기본값: None)
         """
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        # self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
 
         self.verbose = verbose
         if self.verbose > 0:

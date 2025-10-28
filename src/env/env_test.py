@@ -225,7 +225,8 @@ class TestComparisonEnv:
         # 2. 고전 제어기(차량 1) 궤적 렌더링 (디버그 모드 활성화 시)
         if self.rl_env.env.config['visualization']['debug_mode']:
             # 차량 1이 활성 상태일 때만 궤적을 그림
-            if self.rl_env.active_agents[1]:
+            active_vehicle_index = self.vehicle_manager.get_active_vehicle_index()
+            if self.rl_env.active_agents[1] and active_vehicle_index == 1:
                 screen = self.rl_env.env.renderer.screen
                 world_to_screen_func = self.rl_env.env.camera.world_to_screen
 
@@ -246,8 +247,7 @@ class TestComparisonEnv:
                         best_screen_points = [world_to_screen_func(p) for p in best_world_points]
                         pygame.draw.lines(screen, self.best_trajectory_color, False, best_screen_points, 2)
 
-            # Pygame 디스플레이 업데이트 (render()가 이미 호출했으므로 중복 호출 피함)
-            # pygame.display.flip() # rl_env.render() 내부에서 이미 호출됨
+            pygame.display.flip()
 
     def close(self):
         """환경 및 로거 종료"""
