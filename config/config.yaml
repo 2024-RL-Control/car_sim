@@ -20,20 +20,20 @@ simulation:
       y_min: -20
       y_max: 20
   hz: # (시뮬레이션 시간 기준)
-    frenet_update: 20      # Frenet 좌표 업데이트 주파수 [Hz]
-    lidar_update: 20       # 라이다 스캔 주파수 [Hz]
+    frenet_update: 25      # Frenet 좌표 업데이트 주파수 [Hz]
+    lidar_update: 25       # 라이다 스캔 주파수 [Hz]
     trajectory_update: 0   # 궤적 예측 업데이트 주파수 [Hz]
     collision_check: 15    # 충돌 검사 주파수 [Hz]
-    goal_check: 20         # 목적지 도달 확인 주파수 [Hz]
+    goal_check: 25         # 목적지 도달 확인 주파수 [Hz]
     state_history: 5       # 상태 이력 저장 주파수 [Hz]
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   rl:
     train_max_steps: 10000000
     train_max_episode_steps: 5000   # maximum steps per episode
-    action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_selection_hz: 15         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false      # 행동 선택 타이밍 디버그 출력 여부
-    frame_stack_size: 7             # 프레임 스택 크기 (0.016s * 7 = 0.112s)
+    frame_stack_size: 4             # 프레임 스택 크기 (0.016s * 4 = 0.064s)
     termination_check_step: 500     # 조기 종료를 위한 스텝 간격
     progress_change_threshold: 0.10 # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
     eval_episode: 10                # number of episodes for evaluation
