@@ -61,7 +61,8 @@ class TestComparisonEnv:
             vehicle_config=self.config['vehicle'],
             control_config=self.config['classic']['control'],
             planning_config=self.config['classic']['planning'],
-            dt=self.dt
+            dt=self.dt,
+            verbose=0
         )
         # 고전 제어기 궤적 시각화 색상 설정 (env_classic.py 참조)
         self.best_trajectory_color = (0, 255, 100)
@@ -405,8 +406,8 @@ class TestComparisonEnv:
 
                 # --- 에피소드 종료 ---
                 print(f"[Test] Episode {ep}/{num_episodes} 완료 — Steps: {episode_steps}, Avg Reward: {episode_reward / max(1, episode_steps):.2f}")
-                print(f"  - RL (V0) 충돌: {info['collisions'].get(0, False)}, 성공: {info['reached_targets'].get(0, False)}")
-                print(f"  - Classic (V1) 충돌: {info['collisions'].get(1, False)}, 성공: {info['reached_targets'].get(1, False)}")
+                print(f"  - RL (V0) 실패: {info['truncated'].get(0, False)}, 성공: {info['terminated'].get(0, False)}")
+                print(f"  - Classic (V1) 실패: {info['truncated'].get(1, False)}, 성공: {info['terminated'].get(1, False)}")
 
         except KeyboardInterrupt:
             print("\n사용자에 의해 테스트가 중단되었습니다.")
@@ -419,6 +420,9 @@ class TestComparisonEnv:
             print("\n" + "="*30)
             print("--- Overall Performance Statistics (ms) ---")
             summary_text = "Overall Performance (ms):\n\n| Controller | Mean (ms) | Max (ms) | Min (ms) | Std (ms) |\n|:---|:---|:---|:---|:---|\n"
+            console_text = "Controller | Mean (ms) | Max (ms) | Min (ms) | Std (ms)"
+            print(console_text)
+            print("-"*40)
 
             if all_rl_times_ms:
                 rl_all_np = np.array(all_rl_times_ms)

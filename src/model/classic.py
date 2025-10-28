@@ -447,10 +447,11 @@ class ClassicController:
     클래식 제어 시스템 전체를 총괄하는 메인 클래스.
     RL 에이전트의 `predict()` 메서드를 대체합니다.
     """
-    def __init__(self, road_api: RoadSystemAPI, vehicle_config: Dict, control_config: Dict, planning_config: Dict, dt: float):
+    def __init__(self, road_api: RoadSystemAPI, vehicle_config: Dict, control_config: Dict, planning_config: Dict, dt: float, verbose: int = 1):
         self.road_api = road_api
         self.vehicle_config = vehicle_config
         self.dt = dt
+        self.verbose = verbose
 
         # 1. 지역 경로 계획기
         self.lattice_planner = LatticePlanner(planning_config)
@@ -489,7 +490,8 @@ class ClassicController:
         )
 
         if not self.candidate_trajectory:
-            print("Warning: Lattice planner failed to generate paths. Emergency stop.")
+            if self.verbose > 0:
+                print("    경고: Lattice planner가 경로 생성을 실패했습니다. 비상 정지.")
             return [-1.0, 0.0] # 경로 생성 실패 시 비상 정지
 
         # 3. Cost Function으로 최적 궤적 선택
@@ -500,7 +502,8 @@ class ClassicController:
         )
 
         if self.best_trajectory is None:
-            print("Warning: No safe path found. Emergency stop.")
+            if self.verbose > 0:
+                print("    경고: 안전한 경로를 찾을 수 없습니다. 비상 정지.")
             return [-1.0, 0.0] # 안전한 경로 없음 -> 비상 정지
 
         # 4. Vehicle Controller로 궤적 추종
