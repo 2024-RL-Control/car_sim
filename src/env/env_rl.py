@@ -792,7 +792,7 @@ class BasicRLDrivingEnv(gym.Env):
         if algorithm == 'sac':
             # SAC 하이퍼파라미터 설정
             hyperparameters ={
-                "buffer_size": self.max_step // 5,
+                "buffer_size": self.max_step // 3,
                 "learning_rate": 3e-4,
                 "batch_size": 512,
                 "learning_starts": 5000,

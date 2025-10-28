@@ -78,8 +78,6 @@ class TestComparisonEnv:
         """
         지정된 디렉토리에서 가장 최근에 학습된 모델 경로를 찾습니다.
         (env_rl.py의 _find_latest_model 로직과 유사하게 작동)
-
-        수정: 'final' 모델 대신 'best' 또는 가장 스텝이 높은 모델을 우선 탐색
         """
         if not os.path.exists(models_dir):
             return None
@@ -87,13 +85,19 @@ class TestComparisonEnv:
         files = os.listdir(models_dir)
         algorithm = self.rl_algorithm_name
 
-        # 1. 우선순위 1: best.zip (가장 성능 좋은 모델)
+        # 1. 우선순위 1: final.zip
+        final_model = os.path.join(models_dir, f"{algorithm}_final.zip")
+        if final_model in [os.path.join(models_dir, f) for f in files]:
+            print(f"    설정: 발견된 모델 (Final): {final_model}")
+            return final_model
+
+        # 2. 우선순위 2: best.zip (가장 성능 좋은 모델)
         best_model = os.path.join(models_dir, f"{algorithm}_best.zip")
         if best_model in [os.path.join(models_dir, f) for f in files]:
             print(f"    설정: 발견된 모델 (Best): {best_model}")
             return best_model
 
-        # 2. 우선순위 2: 가장 높은 step
+        # 3. 우선순위 3: 가장 높은 step
         step_models = []
         for f in files:
             match = re.match(rf"^{re.escape(algorithm)}_(\d+)_steps\.zip$", f)
@@ -106,12 +110,6 @@ class TestComparisonEnv:
             latest_step_model_path = step_models[0][1]
             print(f"    설정: 발견된 모델 (Latest Step): {latest_step_model_path}")
             return latest_step_model_path
-
-        # 3. 우선순위 3: final.zip
-        final_model = os.path.join(models_dir, f"{algorithm}_final.zip")
-        if final_model in [os.path.join(models_dir, f) for f in files]:
-            print(f"    설정: 발견된 모델 (Final): {final_model}")
-            return final_model
 
         return None
 
