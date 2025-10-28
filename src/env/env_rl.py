@@ -186,7 +186,9 @@ class BasicRLDrivingEnv(gym.Env):
         """
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
-        if verbose > 0:
+
+        self.verbose = verbose
+        if self.verbose > 0:
             print(f"    정보: 사용 중인 디바이스: {self.device}")
 
         # 기본 CarSimulator 환경 초기화
@@ -201,7 +203,7 @@ class BasicRLDrivingEnv(gym.Env):
 
         # 관측 설정
         self.obs_stack_size = self.rl_config['frame_stack_size']
-        if verbose > 0:
+        if self.verbose > 0:
             print(f"Frame Stacking 활성화: {self.obs_stack_size} 프레임")
         self.observation_buffers = [
             deque(maxlen=self.obs_stack_size) for _ in range(self.num_vehicles)
@@ -226,11 +228,11 @@ class BasicRLDrivingEnv(gym.Env):
                 action_dim=self.env.action_space.shape[0],
                 debug=self.rl_config.get('debug_action_timing', False)
             )
-            if verbose > 0:
+            if self.verbose > 0:
                 print(f"ActionController 활성화: {action_hz}Hz로 행동 선택")
         else:
             self.action_controller = None
-            if verbose > 0:
+            if self.verbose > 0:
                 print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
         self.action_space = gym.spaces.Box(
             low=np.tile(self.env.action_space.low, (self.num_vehicles, 1)),
@@ -337,7 +339,8 @@ class BasicRLDrivingEnv(gym.Env):
 
                 success = True
             except Exception as e:
-                print(f"Setup failed: {e}")
+                if self.verbose > 0:
+                    print(f"Setup failed: {e}")
                 continue
 
     def _setup_obstacles(self):
