@@ -20,7 +20,7 @@ class TestComparisonEnv:
     RL 에이전트와 Classic 컨트롤러를 비교 테스트하기 위한 환경
     """
 
-    def __init__(self, config_path: str, rl_algorithm: str = 'sac'):
+    def __init__(self, config_path: str = "", rl_algorithm: str = 'sac'):
         """
         비교 테스트 환경 초기화
 
@@ -35,11 +35,11 @@ class TestComparisonEnv:
         # --- 1. 차량 대수를 2로 강제 설정 ---
         original_num_vehicles = self.config['simulation']['num_vehicles']
         if original_num_vehicles != 2:
-            print(f"경고: 설정 파일의 차량 대수({original_num_vehicles})를 2로 강제 변경합니다.")
+            print(f"    설정: 설정 파일의 차량 대수({original_num_vehicles})를 2로 강제 변경합니다.")
             self.config['simulation']['num_vehicles'] = 2
 
         # --- 2. 기본 RL 환경 래퍼 초기화 ---
-        self.rl_env = BasicRLDrivingEnv(config_path=config_path, verbose=0)
+        self.rl_env = BasicRLDrivingEnv(config_path=config_path, config=self.config, verbose=0)
         # 공정한 비교를 위해 ActionController 비활성화, 두 알고리즘 모두 매 시뮬레이션 스텝마다 행동을 결정
         self.rl_env.deactivate_action_controller()
 
@@ -49,13 +49,13 @@ class TestComparisonEnv:
         self.dt = self.rl_env.env.fixed_dt
 
         # --- 3. 차량 0: 강화학습(RL) 모델 로드 ---
-        print(f"차량 0 (RL)을 위해 '{self.rl_algorithm_name}' 모델을 로드합니다...")
+        print(f"    설정: 차량 0 (RL)을 위해 '{self.rl_algorithm_name}' 모델을 로드합니다...")
         self.rl_model = self._load_rl_model(self.rl_algorithm_name)
         if self.rl_model is None:
             raise FileNotFoundError(f"로드할 '{self.rl_algorithm_name}' 모델을 찾을 수 없습니다.")
 
         # --- 4. 차량 1: 고전(Classic) 컨트롤러 초기화 ---
-        print("차량 1 (Classic)을 위해 'ClassicController'를 초기화합니다...")
+        print("    설정: 차량 1 (Classic)을 위해 'ClassicController'를 초기화합니다...")
         self.classic_controller = ClassicController(
             road_api=self.rl_env.env.road_manager,
             vehicle_config=self.config['vehicle'],
@@ -89,7 +89,7 @@ class TestComparisonEnv:
         # 1. 우선순위 1: best.zip (가장 성능 좋은 모델)
         best_model = os.path.join(models_dir, f"{algorithm}_best.zip")
         if best_model in [os.path.join(models_dir, f) for f in files]:
-            print(f"발견된 모델 (Best): {best_model}")
+            print(f"    설정: 발견된 모델 (Best): {best_model}")
             return best_model
 
         # 2. 우선순위 2: 가장 높은 step
@@ -103,13 +103,13 @@ class TestComparisonEnv:
         if step_models:
             step_models.sort(key=lambda x: x[0], reverse=True)
             latest_step_model_path = step_models[0][1]
-            print(f"발견된 모델 (Latest Step): {latest_step_model_path}")
+            print(f"    설정: 발견된 모델 (Latest Step): {latest_step_model_path}")
             return latest_step_model_path
 
         # 3. 우선순위 3: final.zip
         final_model = os.path.join(models_dir, f"{algorithm}_final.zip")
         if final_model in [os.path.join(models_dir, f) for f in files]:
-            print(f"발견된 모델 (Final): {final_model}")
+            print(f"    설정: 발견된 모델 (Final): {final_model}")
             return final_model
 
         return None
@@ -139,7 +139,7 @@ class TestComparisonEnv:
             latest_run_dir_name = max(algo_dirs)
             latest_run_dir_path = os.path.join(checkpoints_dir, latest_run_dir_name)
 
-            print(f"가장 최근 학습 디렉토리에서 모델을 찾습니다: {latest_run_dir_path}")
+            print(f"    설정: 가장 최근 학습 디렉토리에서 모델을 찾습니다: {latest_run_dir_path}")
             model_path = self._find_latest_model(latest_run_dir_path)
 
         except Exception as e:
@@ -164,7 +164,7 @@ class TestComparisonEnv:
                 device=self.rl_env.device
             )
             model.policy.eval() # 평가 모드
-            print(f"성공: {os.path.basename(model_path)} 모델 로드 완료")
+            print(f"    성공: {os.path.basename(model_path)} 모델 로드 완료")
             return model
         except Exception as e:
             print(f"모델 로드 실패: {e}")
@@ -195,7 +195,6 @@ class TestComparisonEnv:
 
     def reset(self):
         """환경 리셋"""
-        print("환경 리셋...")
         observations, active_agents = self.rl_env.reset()
         self.classic_controller.reset()
         return observations, active_agents
@@ -238,7 +237,6 @@ class TestComparisonEnv:
 
     def close(self):
         """환경 및 로거 종료"""
-        print("테스트 환경을 종료합니다.")
         self.rl_env.close()
         if self.writer:
             self.writer.close()
@@ -250,7 +248,10 @@ class TestComparisonEnv:
         try:
             num_episodes = self.config['simulation']['rl']['eval_episode']
             log_interval = 50
+
+            print("\n" + "="*30)
             print(f"총 {num_episodes} 에피소드 비교 테스트 시작... (스칼라 로그 간격: {log_interval} 스텝)")
+            print("="*30 + "\n")
 
             # 전체 실행 시간 측정을 위한 리스트
             all_rl_times_ms = []

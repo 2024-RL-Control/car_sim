@@ -9,9 +9,12 @@ from src.model.classic import ClassicController
 from src.utils.config_utils import load_config
 
 class ClassicDrivingEnv():
-    def __init__(self, config_path=None):
-        self.config = load_config(config_path)
-        self.rl_env = BasicRLDrivingEnv(config_path=config_path, verbose=0)
+    def __init__(self, config_path=None, config: dict = None):
+        if config:
+            self.config = config
+        else:
+            self.config = load_config(config_path)
+        self.rl_env = BasicRLDrivingEnv(config_path=config_path, config=self.config, verbose=0)
         self.rl_env.deactivate_action_controller()
         self.num_vehicles = self.rl_env.num_vehicles
         self.dt = self.rl_env.env.fixed_dt

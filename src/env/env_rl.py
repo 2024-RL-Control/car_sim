@@ -177,7 +177,7 @@ class BasicRLDrivingEnv(gym.Env):
     2. 장애물 회피
     3. 차선 유지
     """
-    def __init__(self, config_path=None, verbose=1):
+    def __init__(self, config_path=None, config: dict = None, verbose=1):
         """
         RL 환경 초기화
 
@@ -186,10 +186,11 @@ class BasicRLDrivingEnv(gym.Env):
         """
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
-        print(f"사용 중인 디바이스: {self.device}")
+        if verbose > 0:
+            print(f"    정보: 사용 중인 디바이스: {self.device}")
 
         # 기본 CarSimulator 환경 초기화
-        self.env = CarSimulatorEnv(config_path, setup=False)
+        self.env = CarSimulatorEnv(config_path, config, setup=False)
         self.vehicle_manager = self.env.get_vehicle_manager()
 
         self.num_vehicles = self.env.num_vehicles

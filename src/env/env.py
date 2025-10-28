@@ -24,7 +24,7 @@ class CarSimulatorEnv(gym.Env):
     """2D Top-Down 시점 차량 시뮬레이터(Gym) 환경"""
     metadata = {'render.modes': ['human', 'rgb_array'],}
 
-    def __init__(self, config_path: str = None, setup: bool = True):
+    def __init__(self, config_path: str = None, config: dict = None, setup: bool = True):
         """
         시뮬레이터 환경 초기화
 
@@ -34,7 +34,10 @@ class CarSimulatorEnv(gym.Env):
         super(CarSimulatorEnv, self).__init__()
 
         # config.yaml에서 설정 로드
-        self.config = load_config(config_path)
+        if config:
+            self.config = config
+        else:
+            self.config = load_config(config_path)
 
         self.fixed_dt = self.config['simulation']['dt']
 
