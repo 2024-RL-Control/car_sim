@@ -103,7 +103,7 @@ class ClassicDrivingEnv():
     def run(self):
         self.print_basic_controls()
 
-        num_episodes = self.config['simulation']['rl']['eval_episode']
+        num_episodes = self.config['simulation']['rl']['eval']['episodes']
         vehicle_manager = self.rl_env.env.get_vehicle_manager()
         obstacle_manager = self.rl_env.env.get_obstacle_manager()
 

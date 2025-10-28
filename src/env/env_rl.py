@@ -1084,7 +1084,7 @@ class BasicRLDrivingEnv(gym.Env):
             print(f"모델 파일이 존재하지 않습니다: {model_path}")
             return
 
-        max_episode = self.rl_config['eval_episode']
+        max_episode = self.rl_config['eval']['episodes']
 
         dummy_env = DummyEnv(self)
         env = Monitor(dummy_env)

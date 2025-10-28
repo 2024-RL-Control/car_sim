@@ -20,7 +20,7 @@ class TestComparisonEnv:
     RL 에이전트와 Classic 컨트롤러를 비교 테스트하기 위한 환경
     """
 
-    def __init__(self, config_path: str = "", rl_algorithm: str = 'sac'):
+    def __init__(self, config_path: str = ""):
         """
         비교 테스트 환경 초기화
 
@@ -30,7 +30,7 @@ class TestComparisonEnv:
         """
         print("비교 테스트 환경을 초기화합니다...")
         self.config = load_config(config_path)
-        self.rl_algorithm_name = rl_algorithm.lower()
+        self.rl_algorithm_name = self.config['simulation']['rl']['eval']['model_path'].split('_')[0]  # 'sac' 또는 'ppo'
 
         # --- 1. 차량 대수를 2로 강제 설정 ---
         original_num_vehicles = self.config['simulation']['num_vehicles']
@@ -49,8 +49,9 @@ class TestComparisonEnv:
         self.dt = self.rl_env.env.fixed_dt
 
         # --- 3. 차량 0: 강화학습(RL) 모델 로드 ---
+        self.rl_model_path = self.config['simulation']['rl']['eval']['model_path']
         print(f"    설정: 차량 0 (RL)을 위해 '{self.rl_algorithm_name}' 모델을 로드합니다...")
-        self.rl_model = self._load_rl_model(self.rl_algorithm_name)
+        self.rl_model = self._load_rl_model(self.rl_model_path)
         if self.rl_model is None:
             raise FileNotFoundError(f"로드할 '{self.rl_algorithm_name}' 모델을 찾을 수 없습니다.")
 
@@ -113,33 +114,20 @@ class TestComparisonEnv:
 
         return None
 
-    def _load_rl_model(self, algorithm: str):
+    def _load_rl_model(self, model_path: str):
         """
-        가장 최근에 학습된 RL 모델을 로드합니다.
+        특정 RL 모델을 로드합니다.
         (env_rl.py의 test() 메소드 로직 기반)
         """
-        checkpoints_dir = "./logs/checkpoints/"
-        model_path = None
+        checkpoints_dir = f"./logs/checkpoints/{model_path}"
+        algorithm = self.rl_algorithm_name
 
         if not os.path.exists(checkpoints_dir):
-            print(f"체크포인트 디렉토리가 존재하지 않습니다: {checkpoints_dir}")
+            print(f"{model_path} 체크포인트가 존재하지 않습니다")
             return None
 
         try:
-            # algorithm 이름으로 시작하는 모든 디렉토리 찾기
-            algo_dirs = [d for d in os.listdir(checkpoints_dir)
-                         if d.startswith(f"{algorithm}_") and
-                         os.path.isdir(os.path.join(checkpoints_dir, d))]
-
-            if not algo_dirs:
-                raise FileNotFoundError(f"'{checkpoints_dir}'에서 '{algorithm}' 알고리즘 기록을 찾을 수 없습니다.")
-
-            # 시간순으로 정렬하여 가장 최근 디렉토리 선택
-            latest_run_dir_name = max(algo_dirs)
-            latest_run_dir_path = os.path.join(checkpoints_dir, latest_run_dir_name)
-
-            print(f"    설정: 가장 최근 학습 디렉토리에서 모델을 찾습니다: {latest_run_dir_path}")
-            model_path = self._find_latest_model(latest_run_dir_path)
+            model_path = self._find_latest_model(checkpoints_dir)
 
         except Exception as e:
             print(f"최근 모델을 찾는 중 오류 발생: {e}")
@@ -278,7 +266,7 @@ class TestComparisonEnv:
 
             self.print_basic_controls()
 
-            num_episodes = self.config['simulation']['rl']['eval_episode']
+            num_episodes = self.config['simulation']['rl']['eval']['episodes']
 
             print("\n" + "="*30)
             print(f"총 {num_episodes} 에피소드 비교 테스트 시작...")
