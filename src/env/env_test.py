@@ -281,10 +281,9 @@ class TestComparisonEnv:
             self.print_basic_controls()
 
             num_episodes = self.config['simulation']['rl']['eval_episode']
-            log_interval = 50
 
             print("\n" + "="*30)
-            print(f"총 {num_episodes} 에피소드 비교 테스트 시작... (스칼라 로그 간격: {log_interval} 스텝)")
+            print(f"총 {num_episodes} 에피소드 비교 테스트 시작...")
             print("="*30 + "\n")
 
             # 에피소드별 성공 여부 기록
@@ -374,35 +373,33 @@ class TestComparisonEnv:
                     episode_steps += 1
 
                     # --- 5. TensorBoard 로깅 ---
-                    if self.writer and self.global_step % log_interval == 0:
-                        # 행동(Action) 출력 로깅
-                        self.writer.add_scalar('Action/RL/Throttle', current_actions[0, 0], self.global_step)
-                        self.writer.add_scalar('Action/RL/Steering', current_actions[0, 1], self.global_step)
-                        self.writer.add_scalar('Action/Classic/Throttle', current_actions[1, 0], self.global_step)
-                        self.writer.add_scalar('Action/Classic/Steering', current_actions[1, 1], self.global_step)
-
-                        # 개별 보상 로깅
-                        self.writer.add_scalar('Reward/RL_Individual', info['rewards'][0], self.global_step)
-                        self.writer.add_scalar('Reward/Classic_Individual', info['rewards'][1], self.global_step)
-
-                        # 스텝별 수행 속도 로깅 (0 이상일 때만)
-                        if rl_time_ms > 0:
-                            self.writer.add_scalar('Perf_Step/RL_Predict_ms', rl_time_ms, self.global_step)
-                        if cl_time_ms > 0:
-                            self.writer.add_scalar('Perf_Step/Classic_Plan_ms', cl_time_ms, self.global_step)
-
-                        # 차량 상태 로깅 (활성 상태일 때만)
+                    if self.writer:
+                        # 행동(Action) 및 차량 상태 로깅
                         if active_agents[0]:
+                            self.writer.add_scalar('Action/RL/Throttle', current_actions[0, 0], self.global_step)
+                            self.writer.add_scalar('Action/RL/Steering', current_actions[0, 1], self.global_step)
+                            self.writer.add_scalar('Reward/RL_Individual', info['rewards'][0], self.global_step)
+
                             rl_state = vehicles[0].get_state()
                             self.writer.add_scalar('Vehicle/RL/Speed_kmh', rl_state.vel_long * 3.6, self.global_step)
                             self.writer.add_scalar('Vehicle/RL/Progress', rl_state.get_progress(), self.global_step)
                             self.writer.add_scalar('Vehicle/RL/LaneOffset_m', rl_state.frenet_d, self.global_step)
 
                         if active_agents[1]:
+                            self.writer.add_scalar('Action/Classic/Throttle', current_actions[1, 0], self.global_step)
+                            self.writer.add_scalar('Action/Classic/Steering', current_actions[1, 1], self.global_step)
+                            self.writer.add_scalar('Reward/Classic_Individual', info['rewards'][1], self.global_step)
+
                             classic_state = vehicles[1].get_state()
                             self.writer.add_scalar('Vehicle/Classic/Speed_kmh', classic_state.vel_long * 3.6, self.global_step)
                             self.writer.add_scalar('Vehicle/Classic/Progress', classic_state.get_progress(), self.global_step)
                             self.writer.add_scalar('Vehicle/Classic/LaneOffset_m', classic_state.frenet_d, self.global_step)
+
+                        # 스텝별 수행 속도 로깅 (0 이상일 때만)
+                        if rl_time_ms > 0:
+                            self.writer.add_scalar('Perf_Step/RL_Predict_ms', rl_time_ms, self.global_step)
+                        if cl_time_ms > 0:
+                            self.writer.add_scalar('Perf_Step/Classic_Plan_ms', cl_time_ms, self.global_step)
 
                     # 에피소드 종료 시 평균 보상 기록
                     if self.writer and done:
@@ -427,6 +424,7 @@ class TestComparisonEnv:
                             self.writer.add_scalar('Perf_Episode/Classic/Std_ms', np.std(cl_times_np), ep)
                             all_classic_times_ms.extend(ep_classic_times_ms) # 전체 통계 리스트에 추가
 
+                        # 에피소드별 행동 분포 히스토그램 로깅
                         if rl_throttles:
                             self.writer.add_histogram('Action/RL/Throttle/Dist', np.array(rl_throttles), ep)
                             self.writer.add_histogram('Action/RL/Steering/Dist', np.array(rl_steers), ep)
