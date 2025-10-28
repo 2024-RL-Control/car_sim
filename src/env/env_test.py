@@ -260,6 +260,24 @@ class TestComparisonEnv:
         메인 비교 테스트 실행 루프
         """
         try:
+            if self.rl_model:
+                print("    정보: RL 모델 워밍업 중...")
+                try:
+                    # 모델이 기대하는 입력 형태 (e.g., (1, 7, 36))
+                    # self.rl_model.observation_space는 VecEnv 래핑으로 (1, k, dim) 형태를 가짐
+                    dummy_shape = self.rl_model.observation_space.shape
+
+                    # NumPy 배열로 더미 입력 생성
+                    dummy_obs = np.zeros(dummy_shape, dtype=np.float32)
+
+                    # 10회 정도 미리 실행하여 JIT 컴파일 및 GPU 메모리 할당을 강제 수행
+                    for _ in range(10):
+                        _ = self.rl_model.predict(dummy_obs, deterministic=True)
+
+                    print(f"    정보: 워밍업 완료. (입력 형태: {dummy_shape})")
+                except Exception as e:
+                    print(f"    경고: RL 모델 워밍업 실패 - {e}")
+
             self.print_basic_controls()
 
             num_episodes = self.config['simulation']['rl']['eval_episode']
@@ -268,6 +286,10 @@ class TestComparisonEnv:
             print("\n" + "="*30)
             print(f"총 {num_episodes} 에피소드 비교 테스트 시작... (스칼라 로그 간격: {log_interval} 스텝)")
             print("="*30 + "\n")
+
+            # 에피소드별 성공 여부 기록
+            all_rl_success = []
+            all_classic_success = []
 
             # 전체 실행 시간 측정을 위한 리스트
             all_rl_times_ms = []
@@ -420,9 +442,17 @@ class TestComparisonEnv:
                     self.render()
 
                 # --- 에피소드 종료 ---
+                all_rl_success.append(info['terminated'].get(0, False))
+                all_classic_success.append(info['terminated'].get(1, False))
                 print(f"[Test] Episode {ep}/{num_episodes} 완료 — Steps: {episode_steps}, Avg Reward: {episode_reward / max(1, episode_steps):.2f}")
-                print(f"  - RL (V0) 실패: {info['truncated'].get(0, False)}, 성공: {info['terminated'].get(0, False)}")
-                print(f"  - Classic (V1) 실패: {info['truncated'].get(1, False)}, 성공: {info['terminated'].get(1, False)}")
+                if info['terminated'].get(0, False):
+                    print("  - RL (Vehicle 0) 성공")
+                else:
+                    print("  - RL (Vehicle 0) 실패")
+                if info['terminated'].get(1, False):
+                    print("  - Classic (Vehicle 1) 성공")
+                else:
+                    print("  - Classic (Vehicle 1) 실패")
 
         except KeyboardInterrupt:
             print("\n사용자에 의해 테스트가 중단되었습니다.")
@@ -433,11 +463,15 @@ class TestComparisonEnv:
         finally:
             # --- 7. 전체 통계 출력 및 로깅 ---
             print("\n" + "="*30)
-            print("--- Overall Performance Statistics (ms) ---")
+            print("--- Overall Success Rates ---")
+            rl_success_rate = sum(all_rl_success) / len(all_rl_success) * 100
+            classic_success_rate = sum(all_classic_success) / len(all_classic_success) * 100
+            print(f"RL Agent (Vehicle 0) Success Rate: {rl_success_rate:.2f}% ({sum(all_rl_success)}/{len(all_rl_success)})")
+            print(f"Classic Controller (Vehicle 1) Success Rate: {classic_success_rate:.2f}% ({sum(all_classic_success)}/{len(all_classic_success)})")
+            print("\n--- Overall Performance Statistics (ms) ---")
             summary_text = "Overall Performance (ms):\n\n| Controller | Mean (ms) | Max (ms) | Min (ms) | Std (ms) |\n|:---|:---|:---|:---|:---|\n"
             console_text = "Controller | Mean (ms) | Max (ms) | Min (ms) | Std (ms)"
             print(console_text)
-            print("-"*40)
 
             if all_rl_times_ms:
                 rl_all_np = np.array(all_rl_times_ms)
