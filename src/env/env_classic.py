@@ -33,6 +33,19 @@ class ClassicDrivingEnv():
         self.best_trajectory_color = (0, 255, 100)  # 녹색
         self.candidate_trajectory_color = (100, 100, 100)  # 회색
 
+    def print_basic_controls(self):
+        print("\n=== Classic Driving Env ===")
+        print("  C: Toggle camera follow")
+        print("  R: Reset camera view")
+        print("  +/-: Zoom in/out")
+        print("  I/J/K/L: Pan camera")
+        print("  F1: Toggle Training Mode")
+        print("  F2: Toggle Visualization")
+        print("  F3: Toggle HUD")
+        print("  F4: Toggle debug mode")
+        print("  Tab: Switch between vehicles")
+        print("  ESC: Quit")
+
     def reset(self):
         observations, active_agents = self.rl_env.reset()
         for controller in self.controllers:
@@ -88,6 +101,8 @@ class ClassicDrivingEnv():
         self.rl_env.close()
 
     def run(self):
+        self.print_basic_controls()
+
         num_episodes = self.config['simulation']['rl']['eval_episode']
         vehicle_manager = self.rl_env.env.get_vehicle_manager()
         obstacle_manager = self.rl_env.env.get_obstacle_manager()

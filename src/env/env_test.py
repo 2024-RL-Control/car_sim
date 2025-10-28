@@ -194,6 +194,19 @@ class TestComparisonEnv:
 
         return np.array(objects) if objects else np.empty((0, 3))
 
+    def print_basic_controls(self):
+        print("\n=== Comparison Driving Env ===")
+        print("  C: Toggle camera follow")
+        print("  R: Reset camera view")
+        print("  +/-: Zoom in/out")
+        print("  I/J/K/L: Pan camera")
+        print("  F1: Toggle Training Mode")
+        print("  F2: Toggle Visualization")
+        print("  F3: Toggle HUD")
+        print("  F4: Toggle debug mode")
+        print("  Tab: Switch between vehicles")
+        print("  ESC: Quit")
+
     def reset(self):
         """환경 리셋"""
         observations, active_agents = self.rl_env.reset()
@@ -247,6 +260,8 @@ class TestComparisonEnv:
         메인 비교 테스트 실행 루프
         """
         try:
+            self.print_basic_controls()
+
             num_episodes = self.config['simulation']['rl']['eval_episode']
             log_interval = 50
 

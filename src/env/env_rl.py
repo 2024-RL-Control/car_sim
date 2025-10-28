@@ -681,7 +681,7 @@ class BasicRLDrivingEnv(gym.Env):
         self.env.close()
 
     def print_basic_controls(self):
-        print("=== RL Basic Driving Env ===")
+        print("\n=== RL Basic Driving Env ===")
         print("  C: Toggle camera follow")
         print("  R: Reset camera view")
         print("  +/-: Zoom in/out")
