@@ -36,7 +36,7 @@ simulation:
     frame_stack_size: 4             # 프레임 스택 크기 (0.016s * 4 = 0.064s)
     termination_check_step: 500     # 조기 종료를 위한 스텝 간격
     progress_change_threshold: 0.10 # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
-    eval_episode: 10                # number of episodes for evaluation
+    eval_episode: 100               # number of episodes for evaluation
     lookahead_time: 0.5             # [s], lookahead time for target speed calculation
     observation:
       vehicle_state_dim: 19
