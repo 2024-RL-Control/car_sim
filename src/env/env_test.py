@@ -273,8 +273,8 @@ class TestComparisonEnv:
             print("="*30 + "\n")
 
             # 에피소드별 성공 여부 기록
-            all_rl_success = []
-            all_classic_success = []
+            all_rl_success = 0
+            all_classic_success = 0
 
             # 전체 실행 시간 측정을 위한 리스트
             all_rl_times_ms = []
@@ -295,6 +295,9 @@ class TestComparisonEnv:
                 rl_throttles, rl_steers = [], []
                 cl_throttles, cl_steers = [], []
 
+                # 에피소드별 보상 총합 기록
+                rl_reward_total = 0.0
+                cl_reward_total = 0.0
                 while not done:
                     # --- 2. Pygame 이벤트 처리 ---
                     self.handle_keyboard_input()
@@ -356,6 +359,8 @@ class TestComparisonEnv:
                     next_observations, avg_reward, done, truncated, info = self.rl_env.step(current_actions)
 
                     episode_reward += avg_reward
+                    rl_reward_total += info['rewards'][0]
+                    cl_reward_total += info['rewards'][1]
                     episode_steps += 1
 
                     # --- 5. TensorBoard 로깅 ---
@@ -364,7 +369,7 @@ class TestComparisonEnv:
                         if active_agents[0]:
                             self.writer.add_scalar('Action/RL/Throttle', current_actions[0, 0], self.global_step)
                             self.writer.add_scalar('Action/RL/Steering', current_actions[0, 1], self.global_step)
-                            self.writer.add_scalar('Reward/RL_Individual', info['rewards'][0], self.global_step)
+                            self.writer.add_scalar('Step/Reward/RL', info['rewards'][0], self.global_step)
 
                             rl_state = vehicles[0].get_state()
                             self.writer.add_scalar('Vehicle/RL/Speed_kmh', rl_state.vel_long * 3.6, self.global_step)
@@ -374,7 +379,7 @@ class TestComparisonEnv:
                         if active_agents[1]:
                             self.writer.add_scalar('Action/Classic/Throttle', current_actions[1, 0], self.global_step)
                             self.writer.add_scalar('Action/Classic/Steering', current_actions[1, 1], self.global_step)
-                            self.writer.add_scalar('Reward/Classic_Individual', info['rewards'][1], self.global_step)
+                            self.writer.add_scalar('Step/Reward/Classic', info['rewards'][1], self.global_step)
 
                             classic_state = vehicles[1].get_state()
                             self.writer.add_scalar('Vehicle/Classic/Speed_kmh', classic_state.vel_long * 3.6, self.global_step)
@@ -389,9 +394,10 @@ class TestComparisonEnv:
 
                     # 에피소드 종료 시 평균 보상 기록
                     if self.writer and done:
-                        self.writer.add_scalar('Episode/AverageReward', avg_reward, ep)
                         self.writer.add_scalar('Episode/TotalReward', episode_reward, ep)
                         self.writer.add_scalar('Episode/Length', episode_steps, ep)
+                        self.writer.add_scalar('Episode/Reward/RL', rl_reward_total, ep)
+                        self.writer.add_scalar('Episode/Reward/Classic', cl_reward_total, ep)
 
                         # 에피소드별 수행 속도 통계 로깅
                         if ep_rl_times_ms:
@@ -412,11 +418,11 @@ class TestComparisonEnv:
 
                         # 에피소드별 행동 분포 히스토그램 로깅
                         if rl_throttles:
-                            self.writer.add_histogram('Action/RL/Throttle/Dist', np.array(rl_throttles), ep)
-                            self.writer.add_histogram('Action/RL/Steering/Dist', np.array(rl_steers), ep)
+                            self.writer.add_histogram('Action/Throttle/Dist/RL', np.array(rl_throttles), ep)
+                            self.writer.add_histogram('Action/Steering/Dist/RL', np.array(rl_steers), ep)
                         if cl_throttles:
-                            self.writer.add_histogram('Action/Classic/Throttle/Dist', np.array(cl_throttles), ep)
-                            self.writer.add_histogram('Action/Classic/Steering/Dist', np.array(cl_steers), ep)
+                            self.writer.add_histogram('Action/Throttle/Dist/Classic', np.array(cl_throttles), ep)
+                            self.writer.add_histogram('Action/Steering/Dist/Classic', np.array(cl_steers), ep)
 
                     self.global_step += 1
 
@@ -426,8 +432,10 @@ class TestComparisonEnv:
                     self.render()
 
                 # --- 에피소드 종료 ---
-                all_rl_success.append(info['terminated'].get(0, False))
-                all_classic_success.append(info['terminated'].get(1, False))
+                all_rl_success += info['terminated'].get(0, False)
+                all_classic_success += info['terminated'].get(1, False)
+                self.writer.add_scalar('Episode/Success/RL', all_rl_success, ep)
+                self.writer.add_scalar('Episode/Success/Classic', all_classic_success, ep)
                 print(f"[Test] Episode {ep}/{num_episodes} 완료 — Steps: {episode_steps}, Avg Reward: {episode_reward / max(1, episode_steps):.2f}")
                 if info['terminated'].get(0, False):
                     print("  - RL (Vehicle 0) 성공")
@@ -448,10 +456,10 @@ class TestComparisonEnv:
             # --- 7. 전체 통계 출력 및 로깅 ---
             print("\n" + "="*30)
             print("--- Overall Success Rates ---")
-            rl_success_rate = sum(all_rl_success) / len(all_rl_success) * 100
-            classic_success_rate = sum(all_classic_success) / len(all_classic_success) * 100
-            print(f"RL Agent (Vehicle 0) Success Rate: {rl_success_rate:.2f}% ({sum(all_rl_success)}/{len(all_rl_success)})")
-            print(f"Classic Controller (Vehicle 1) Success Rate: {classic_success_rate:.2f}% ({sum(all_classic_success)}/{len(all_classic_success)})")
+            rl_success_rate = all_rl_success / num_episodes * 100
+            classic_success_rate = all_classic_success / num_episodes * 100
+            print(f"RL Agent (Vehicle 0) Success Rate: {rl_success_rate:.2f}% ({all_rl_success}/{num_episodes})")
+            print(f"Classic Controller (Vehicle 1) Success Rate: {classic_success_rate:.2f}% ({all_classic_success}/{num_episodes})")
             print("\n--- Overall Performance Statistics (ms) ---")
             summary_text = "Overall Performance (ms):\n\n| Controller | Mean (ms) | Max (ms) | Min (ms) | Std (ms) |\n|:---|:---|:---|:---|:---|\n"
             console_text = "Controller | Mean (ms) | Max (ms) | Min (ms) | Std (ms)"

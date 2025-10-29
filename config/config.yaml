@@ -55,8 +55,8 @@ simulation:
       enabled: False                     # True로 설정 시 학습 이어하기 활성화
       model_path: "sac_2025-10-26-021059"
     eval:
-      episodes: 20
-      model_path: "sac_2025-10-29-004631"
+      episodes: 50
+      model_path: "sac_2025-10-29-000409"
     callbacks:
       max_episodes_history: 500        # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
