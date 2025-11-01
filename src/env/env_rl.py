@@ -509,7 +509,7 @@ class BasicRLDrivingEnv(gym.Env):
             env_seed = seed
         else:
             # 2. 내부 시퀀셜 RNG 사용
-            env_seed = self.env_seed_rng.integers(0, 2**32 - 1)
+            env_seed = self.env_seed_rng.randint(0, 2**31 - 1)
 
         # 환경 초기화
         _ = self.env.reset(seed=env_seed, options=options)
@@ -800,7 +800,7 @@ class BasicRLDrivingEnv(gym.Env):
             "features_extractor_class": CustomFeatureExtractor2,
             # 추출기 아키텍처
             "features_extractor_kwargs": {
-                "net_arch": [128]
+                "net_arch": [256]
             },
             "share_features_extractor": True,
         }
