@@ -800,7 +800,7 @@ class BasicRLDrivingEnv(gym.Env):
             "features_extractor_class": CustomFeatureExtractor2,
             # 추출기 아키텍처
             "features_extractor_kwargs": {
-                "net_arch": [256]
+                "net_arch": [128]
             },
             "share_features_extractor": True,
         }
