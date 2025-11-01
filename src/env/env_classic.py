@@ -15,6 +15,7 @@ class ClassicDrivingEnv():
         else:
             self.config = load_config(config_path)
         self.rl_env = BasicRLDrivingEnv(config_path=config_path, config=self.config, verbose=0)
+        self.rl_env.set_test_mode()
         self.rl_env.deactivate_action_controller()
         self.num_vehicles = self.rl_env.num_vehicles
         self.dt = self.rl_env.env.fixed_dt

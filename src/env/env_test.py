@@ -40,6 +40,8 @@ class TestComparisonEnv:
 
         # --- 2. 기본 RL 환경 래퍼 초기화 ---
         self.rl_env = BasicRLDrivingEnv(config_path=config_path, config=self.config, verbose=0)
+        # 훈련(learn)에서 사용된 시퀀스와 겹치지 않도록 테스트용 시드 시퀀스로 RNG를 재설정합니다.
+        self.rl_env.set_test_mode()
         # 공정한 비교를 위해 ActionController 비활성화, 두 알고리즘 모두 매 시뮬레이션 스텝마다 행동을 결정
         self.rl_env.deactivate_action_controller()
 
@@ -488,7 +490,7 @@ class TestComparisonEnv:
             print("="*30 + "\n")
 
             if self.writer:
-                self.writer.add_text('Overall_Performance/Summary', summary_text, self.global_step)
+                self.writer.add_text(f'Overall_Performance_(seed:{self.rl_env.get_test_seed()})/Summary', summary_text, self.global_step)
 
             # --- 8. 종료 ---
             self.close()

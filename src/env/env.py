@@ -284,7 +284,17 @@ class CarSimulatorEnv(gym.Env):
         """
         # 시드가 제공되면 설정
         if seed is not None:
+            import numpy as np
             np.random.seed(seed)
+            import random
+            random.seed(seed)
+            import torch
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+                # 재연성을 위한 CUDA 설정 (성능이 약간 저하될 수 있음)
+                torch.backends.cudnn.deterministic = True
+                torch.backends.cudnn.benchmark = False
 
         # 차량 초기화
         self.vehicle_manager.reset_vehicle()
@@ -411,7 +421,7 @@ class CarSimulatorEnv(gym.Env):
         cos_error_to_ref, sin_error_to_ref = state.encoding_angle(state.error_to_ref)
         # cos_angle_to_ref, sin_angle_to_ref = state.encoding_angle(state.angle_to_ref)
 
-        # 기본 차량 상태 (19, )
+        # 기본 차량 상태 (17, )
         obs = np.array([
             progress,               # -1 ~ 1
             state.throttle_engine,  # 0 ~ 1
@@ -420,9 +430,9 @@ class CarSimulatorEnv(gym.Env):
             cos_yaw,                # -1 ~ 1
             sin_yaw,                # -1 ~ 1
             scale_vel_long,         # -1 ~ 1
-            scale_acc_long,         # -1 ~ 1
+            # scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
-            scale_acc_lat,          # -1 ~ 1
+            # scale_acc_lat,          # -1 ~ 1
             scale_target_vel_long,  # -1 ~ 1
             vel_error_long,         # -1 ~ 1
             cos_error_to_goal,      # -1 ~ 1
@@ -436,7 +446,7 @@ class CarSimulatorEnv(gym.Env):
             # sin_angle_to_ref        # -1 ~ 1
         ], dtype=np.float32)
 
-        # (11, ), 0 ~ 1, 정규화된 데이터
+        # (15, ), 0 ~ 1, 정규화된 데이터
         lidar_data = state.get_lidar_data()
         obs = np.concatenate((obs, lidar_data))
 

@@ -12,7 +12,7 @@ simulation:
     y_max: 50
   obstacle:
     num_static_obstacles: 0
-    num_dynamic_obstacles: 0
+    num_dynamic_obstacles: 1
     buffer_distance: 5   # [m]
     boundary:            # [m]
       x_min: -10
@@ -20,43 +20,45 @@ simulation:
       y_min: -10
       y_max: 10
   hz: # (시뮬레이션 시간 기준)
-    frenet_update: 25      # Frenet 좌표 업데이트 주파수 [Hz]
-    lidar_update: 25       # 라이다 스캔 주파수 [Hz]
+    frenet_update: 20      # Frenet 좌표 업데이트 주파수 [Hz]
+    lidar_update: 20       # 라이다 스캔 주파수 [Hz]
     trajectory_update: 0   # 궤적 예측 업데이트 주파수 [Hz]
-    collision_check: 15    # 충돌 검사 주파수 [Hz]
-    goal_check: 25         # 목적지 도달 확인 주파수 [Hz]
-    state_history: 5       # 상태 이력 저장 주파수 [Hz]
+    collision_check: 20    # 충돌 검사 주파수 [Hz]
+    goal_check: 20         # 목적지 도달 확인 주파수 [Hz]
+    state_history: 2       # 상태 이력 저장 주파수 [Hz]
   # 강화학습 관련 설정 (시뮬레이션 시간 기준)
   rl:
-    train_max_steps: 3000000
+    seed: 42                        # 랜덤 시드
+    train_max_steps: 5000000
     train_max_episode_steps: 5000   # maximum steps per episode
-    action_selection_hz: 15         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
+    action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false      # 행동 선택 타이밍 디버그 출력 여부
-    frame_stack_size: 4             # 프레임 스택 크기 (0.016s * 4 = 0.064s)
+    frame_stack_size: 7             # 프레임 스택 크기 (0.016s * 7 = 0.112s)
     termination_check_step: 500     # 조기 종료를 위한 스텝 간격
     progress_change_threshold: 0.10 # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
-    lookahead_time: 0.5             # [s], lookahead time for target speed calculation
     observation:
-      vehicle_state_dim: 19
-      lidar_dim: 17
+      vehicle_state_dim: 17
+      lidar_dim: 15
       trajectory_dim: 0
     rewards:
-      success: 30                       # reward for reaching the goal
+      success: 100                      # reward for reaching the goal
       collision: -300                   # penalty for collision
       outside: -200                     # penalty for going outside the road
       termination: -100                 # penalty for early termination
       w_progress: 1.0                   # reward weight for reducing progress to goal
-      w_lane: 0.5                       # lane weight for lane keeping
-      w_speed: 0.5                       # speed weight for speed control
+      w_lane: 0.65                      # lane weight for lane keeping
+      w_speed: 0.35                     # speed weight for speed control
       s_speed_under: 0.2                # under speed reward slope
       s_speed_over: 1.5                 # over speed reward slope
     resume_training:
       enabled: False                     # True로 설정 시 학습 이어하기 활성화
       model_path: "sac_2025-10-26-021059"
+      buffer_load: False                 # 리플레이 버퍼 로드 여부
     eval:
       episodes: 100
       model_path: "sac_2025-10-29-000409"
+      test_seed_offset: 100000        # 테스트 시드 오프셋
     callbacks:
       max_episodes_history: 500        # 최근 에피소드 기록 최대 개수
       max_steps_history: 3000          # 최근 스텝 기록 최대 개수
@@ -68,17 +70,17 @@ simulation:
       save_best_model: true            # 최고 성능 모델 저장 여부
       verbose: 1                       # 콜백 시스템 상세 출력 레벨 (0: 없음, 1: 기본, 2: 상세)
   path_planning:
-    max_iterations: 250           # maximum iterations for path planning
+    max_iterations: 100           # maximum iterations for path planning
     base_step_size: 1.0           # Base for variable RRT step [m]
-    min_step_factor: 0.2          # Min multiplier for base_step_size
-    max_step_factor: 10.0         # Max multiplier for base_step_size
-    max_distance: 50.0            # 기준 거리 [m] for step size calculation
-    goal_distance_threshold: 1.0  # RRT node proximity to goal for final connection [m]
-    goal_sampling_rate: 0.4       # goal sampling rate for path planning [0, 1]
-    nearest_neighbor_count: 20    # RRT nearest neighbor search count for KD-Tree optimization
-    kdtree_rebuild_interval: 15   # KD-Tree 재구성 주기 [iterations]
+    min_step_factor: 0.1          # Min multiplier for base_step_size
+    max_step_factor: 5.0          # Max multiplier for base_step_size
+    max_distance: 25.0            # 기준 거리 [m] for step size calculation
+    goal_distance_threshold: 0.1  # RRT node proximity to goal for final connection [m]
+    goal_sampling_rate: 0.5       # goal sampling rate for path planning [0, 1]
+    nearest_neighbor_count: 10    # RRT nearest neighbor search count for KD-Tree optimization
+    kdtree_rebuild_interval: 50   # KD-Tree 재구성 주기 [iterations]
     road_width: 7.0               # Default road width [m]
-    min_radius: 6.0               # minimum turning radius for path planning [m]
+    min_radius: 10.0              # minimum turning radius for path planning [m]
     point_separation: 0.5         # minimum distance between points in the path [m]
     default_speed: 4.17           # default speed for path planning [m/s] (15 km/h)
     min_speed: 1.4                # minimum speed for path planning [m/s] (5 km/h)
@@ -158,7 +160,7 @@ vehicle:
       sensor_type: "LIDAR"
       relative_pos: [0.0, 0.0]  # 차량 중심 기준 상대 위치 [m]
       relative_angle: 0.0       # 차량 방향 기준 상대 각도 [degrees] - 저장 시 도 단위 사용
-      num_samples: 17           # 샘플(레이) 수
+      num_samples: 15           # 샘플(레이) 수
       angle_start: -170.0       # 시작 각도 [degrees] - 저장 시 도 단위 사용
       angle_end: 170.0          # 종료 각도 [degrees] - 저장 시 도 단위 사용
       concentration: 1.5        # 각도 집중도 (0~1: 가장자리 집중, 1: 균등, >1: 중앙 집중)

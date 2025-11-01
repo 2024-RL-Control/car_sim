@@ -75,7 +75,7 @@ class ActionController:
 
         if self.debug and should_select:
             actual_hz = 1.0 / time_since_last_selection if time_since_last_selection > 0 else float('inf')
-            print(f"새로운 행동 선택: 시간 {current_simulation_time:.4f}초, "
+            print(f"    디버깅: 새로운 행동 선택: 시간 {current_simulation_time:.4f}초, "
                   f"간격 {time_since_last_selection:.4f}초, 실제 Hz: {actual_hz:.2f}")
 
         return should_select
@@ -93,7 +93,7 @@ class ActionController:
         self.action_selection_count += 1
 
         if self.debug:
-            print(f"행동 업데이트: {self.action_selection_count}번째, "
+            print(f"    디버깅: 행동 업데이트: {self.action_selection_count}번째, "
                   f"행동값: {new_actions[0] if len(new_actions) > 0 else 'None'}")
 
     def get_current_action(self, current_simulation_time: float, new_actions: np.ndarray = None) -> np.ndarray:
@@ -117,12 +117,12 @@ class ActionController:
                 # new_actions가 제공되지 않았지만 새로운 행동이 필요한 경우
                 # 이전 행동을 그대로 사용
                 if self.debug:
-                    print("새로운 행동이 필요하지만 제공되지 않음. 이전 행동 유지.")
+                    print("    디버깅: 새로운 행동이 필요하지만 제공되지 않음. 이전 행동 유지.")
                 return self.last_actions.copy()
         else:
             # 이전 행동 유지
             if self.debug and self.step_count % 100 == 0:  # 너무 자주 출력하지 않도록
-                print(f"이전 행동 유지 (스텝 {self.step_count})")
+                print(f"    디버깅: 이전 행동 유지 (스텝 {self.step_count})")
             return self.last_actions.copy()
 
     def reset(self):
@@ -133,7 +133,7 @@ class ActionController:
         self.step_count = 0
 
         if self.debug:
-            print("ActionController 리셋")
+            print("    초기화: ActionController 리셋")
 
     def get_statistics(self) -> dict:
         """통계 정보 반환"""
@@ -201,10 +201,17 @@ class BasicRLDrivingEnv(gym.Env):
         self.rl_config = self.env.config['simulation']['rl']
         self.rl_callback_config = self.rl_config['callbacks']
 
+        self.base_seed = self.rl_config['seed']
+        self.test_base_seed = None
+        self.test_seed_offset = self.rl_config['eval']['test_seed_offset']
+        if self.verbose > 0:
+            print(f"    설정: 환경 시드 생성기 초기화 (Base Seed: {self.base_seed})")
+        self.env_seed_rng = np.random.RandomState(self.base_seed)
+
         # 관측 설정
         self.obs_stack_size = self.rl_config['frame_stack_size']
         if self.verbose > 0:
-            print(f"Frame Stacking 활성화: {self.obs_stack_size} 프레임")
+            print(f"    설정: Frame Stacking 활성화: {self.obs_stack_size} 프레임")
         self.observation_buffers = [
             deque(maxlen=self.obs_stack_size) for _ in range(self.num_vehicles)
         ]
@@ -229,11 +236,11 @@ class BasicRLDrivingEnv(gym.Env):
                 debug=self.rl_config.get('debug_action_timing', False)
             )
             if self.verbose > 0:
-                print(f"ActionController 활성화: {action_hz}Hz로 행동 선택")
+                print(f"    설정: ActionController 활성화: {action_hz}Hz로 행동 선택")
         else:
             self.action_controller = None
             if self.verbose > 0:
-                print("ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
+                print("    설정: ActionController 비활성화: 매 스텝마다 새로운 행동 선택")
         self.action_space = gym.spaces.Box(
             low=np.tile(self.env.action_space.low, (self.num_vehicles, 1)),
             high=np.tile(self.env.action_space.high, (self.num_vehicles, 1)),
@@ -496,8 +503,16 @@ class BasicRLDrivingEnv(gym.Env):
         Returns:
             observations: 차량별 초기 관측 값 (num_vehicles, obs_dim)
         """
+        env_seed = None
+        if seed is not None:
+            # 1. 명시적 시드 사용
+            env_seed = seed
+        else:
+            # 2. 내부 시퀀셜 RNG 사용
+            env_seed = self.env_seed_rng.integers(0, 2**32 - 1)
+
         # 환경 초기화
-        _ = self.env.reset(seed=seed, options=options)
+        _ = self.env.reset(seed=env_seed, options=options)
 
         # 스텝 카운터 초기화
         self.steps = 0
@@ -750,11 +765,12 @@ class BasicRLDrivingEnv(gym.Env):
         # 모델 불러오기 설정
         resume_config = self.rl_config['resume_training']
         resume = resume_config['enabled']
+        resume_buffer = resume_config['buffer_load']
         resume_dir = f"./logs/checkpoints/{resume_config['model_path']}"
         if resume:
             model_path, replay_buffer_path = self._find_latest_model(resume_dir, algorithm)
             if model_path is None:
-                print(f"경고: '{resume_dir}'에서 '{algorithm}' 알고리즘 모델을 찾을 수 없습니다. 새 학습을 시작합니다.")
+                print(f"    경고: '{resume_dir}'에서 '{algorithm}' 알고리즘 모델을 찾을 수 없습니다. 새 학습을 시작합니다.")
                 resume = False
 
         # 실행 이름 생성 (날짜-시간 포함)
@@ -776,7 +792,7 @@ class BasicRLDrivingEnv(gym.Env):
         # 신경망 아키텍처 설정 (강화학습 개선)
         policy_kwargs = {
             # 정책 및 가치 네트워크 아키텍처
-            "net_arch": [256, 256, 64],
+            "net_arch": [1024, 1024],
             # 활성화 함수
             "activation_fn": torch.nn.GELU,
 
@@ -792,7 +808,7 @@ class BasicRLDrivingEnv(gym.Env):
         if algorithm == 'sac':
             # SAC 하이퍼파라미터 설정
             hyperparameters ={
-                "buffer_size": self.max_step // 3,
+                "buffer_size": self.max_step // 5,
                 "learning_rate": 3e-4,
                 "batch_size": 512,
                 "learning_starts": 5000,
@@ -814,16 +830,27 @@ class BasicRLDrivingEnv(gym.Env):
                 print(f"SAC 모델 로드 완료: {os.path.basename(model_path)}")
 
                 # 리플레이 버퍼 로드
-                if replay_buffer_path and os.path.exists(replay_buffer_path):
-                    # 별도 저장된 버퍼 로드 (final, best)
-                    model.load_replay_buffer(replay_buffer_path)
-                    print(f"별도 리플레이 버퍼 로드 완료: {os.path.basename(replay_buffer_path)}")
-                elif model.replay_buffer is not None:
-                    # .zip 파일 내부에 저장된 버퍼 사용 (step 체크포인트)
-                    print("모델(.zip)에 포함된 리플레이 버퍼를 사용합니다.")
+                if resume_buffer:
+                    if replay_buffer_path and os.path.exists(replay_buffer_path):
+                        # 별도 저장된 버퍼 로드 (final, best)
+                        model.load_replay_buffer(replay_buffer_path)
+                        print(f"    설정: 별도 리플레이 버퍼 로드 완료: {os.path.basename(replay_buffer_path)}")
+                    elif model.replay_buffer is not None:
+                        # .zip 파일 내부에 저장된 버퍼 사용 (step 체크포인트)
+                        print("    설정: 모델(.zip)에 포함된 리플레이 버퍼를 사용합니다.")
+                    else:
+                        print("    경고: 리플레이 버퍼를 찾을 수 없습니다. 새 버퍼를 생성합니다.")
+                        shared_buffer = ReplayBuffer(
+                            buffer_size=hyperparameters['buffer_size'],
+                            observation_space=env.observation_space,
+                            action_space=env.action_space,
+                            device=self.device,
+                            n_envs=hyperparameters['n_envs'],
+                            handle_timeout_termination=False
+                        )
+                        model.replay_buffer = shared_buffer
                 else:
-                    # 버퍼를 찾을 수 없는 경우
-                    print("경고: 리플레이 버퍼를 찾을 수 없습니다. 새 버퍼를 생성합니다.")
+                    print("    설정: 새 버퍼를 생성합니다.")
                     shared_buffer = ReplayBuffer(
                         buffer_size=hyperparameters['buffer_size'],
                         observation_space=env.observation_space,
@@ -833,15 +860,6 @@ class BasicRLDrivingEnv(gym.Env):
                         handle_timeout_termination=False
                     )
                     model.replay_buffer = shared_buffer
-                # shared_buffer = ReplayBuffer(
-                #     buffer_size=hyperparameters['buffer_size'],
-                #     observation_space=env.observation_space,
-                #     action_space=env.action_space,
-                #     device=self.device,
-                #     n_envs=hyperparameters['n_envs'],
-                #     handle_timeout_termination=False
-                # )
-                # model.replay_buffer = shared_buffer
             else:
                 # 공유 리플레이 버퍼 생성
                 shared_buffer = ReplayBuffer(
@@ -857,6 +875,7 @@ class BasicRLDrivingEnv(gym.Env):
                 model = SACVehicleAlgorithm(
                     policy="MlpPolicy",
                     env=env,
+                    seed=self.base_seed,
                     logging_freq=self.rl_callback_config['logging_freq'],
                     learning_rate=hyperparameters['learning_rate'],
                     policy_kwargs=policy_kwargs,
@@ -898,12 +917,13 @@ class BasicRLDrivingEnv(gym.Env):
                     env=env,
                     device=self.device
                 )
-                print(f"PPO 모델 로드 완료: {os.path.basename(model_path)}")
+                print(f"    설정: PPO 모델 로드 완료: {os.path.basename(model_path)}")
             else:
                 # 커스텀 PPO 모델 생성
                 model = PPOVehicleAlgorithm(
                     policy="MlpPolicy",
                     env=env,
+                    seed=self.base_seed,
                     logging_freq=self.rl_callback_config['logging_freq'],
                     learning_rate=hyperparameters['learning_rate'],
                     n_steps=hyperparameters['n_steps'],
@@ -931,13 +951,19 @@ class BasicRLDrivingEnv(gym.Env):
         param_config = {
             "algorithm": model.__class__.__name__,
             "dir": run_name,
+            "seed": self.base_seed,
             "net_arch": str(policy_kwargs['net_arch']),
             "activation_fn": policy_kwargs['activation_fn'].__name__,
+            "action_space": str(self.action_space),
             "observation_space": str(self.observation_space),
             "observation_detail": str(self.rl_config['observation']),
-            "action_space": str(self.action_space),
+            "features_extractor_class": policy_kwargs['features_extractor_class'].__name__,
+            "features_extractor_net_arch": str(policy_kwargs['features_extractor_kwargs']['net_arch']),
+            "share_features_extractor": policy_kwargs['share_features_extractor'],
+            "frame_stack_size": self.obs_stack_size,
             "resume_training": resume,
-            "resume_model_path": resume_config['model_path'] if resume else "N/A"
+            "resume_model_path": resume_config['model_path'] if resume else "N/A",
+            "resume_buffer_load": resume_buffer if resume else "N/A"
         }
         param_config.update(hyperparameters)
 
@@ -1044,6 +1070,28 @@ class BasicRLDrivingEnv(gym.Env):
             # 환경 종료
             self.close()
 
+    def set_test_mode(self, test_seed_offset=None):
+        """
+        환경 시드 생성기(RNG)를 테스트용으로 재설정합니다.
+        훈련 시퀀스와 겹치지 않는 별도의 시드 시퀀스를 생성합니다.
+        (offset을 더해 훈련 시드와 완전히 다른 시작점을 보장)
+        """
+        if test_seed_offset is None:
+            test_base_seed = self.base_seed + self.test_seed_offset
+        else:
+            test_base_seed = self.base_seed + test_seed_offset
+
+        self.test_base_seed = test_base_seed
+        self.env_seed_rng = np.random.RandomState(test_base_seed)
+        if self.verbose > 0:
+            print(f"    설정: 테스트 모드 활성화. 환경 시드 RNG 재설정 (Base: {test_base_seed})")
+
+    def get_test_seed(self):
+        """
+        현재 테스트 시드를 반환합니다.
+        """
+        return self.test_base_seed
+
     def test(self, algorithm='sac'):
         """
         학습된 모델을 테스트하는 함수
@@ -1054,18 +1102,19 @@ class BasicRLDrivingEnv(gym.Env):
         checkpoints_dir = f"./logs/checkpoints/{model_path}"
 
         if not os.path.exists(checkpoints_dir):
-            print(f"{model_path} 체크포인트가 존재하지 않습니다")
+            print(f"    에러: {model_path} 체크포인트가 존재하지 않습니다")
             return
 
         files = os.listdir(checkpoints_dir)
         final_model = os.path.join(checkpoints_dir, f"{algorithm}_final.zip")
         if final_model in [os.path.join(checkpoints_dir, f) for f in files]:
-            print(f"최종 모델을 찾았습니다: {final_model}")
+            print(f"    설정: 최종 모델을 찾았습니다: {final_model}")
             model_path = final_model
         else:
-            print(f"최종 모델을 찾을 수 없습니다: {final_model}")
+            print(f"    에러: 최종 모델을 찾을 수 없습니다: {final_model}")
             return
 
+        self.set_test_mode()
         max_episode = self.rl_config['eval']['episodes']
 
         dummy_env = DummyEnv(self)

@@ -222,7 +222,7 @@ class MetricsCollectorCallback(BaseCallback):
     def _on_training_start(self) -> None:
         self.metrics_store.start_training()
         if self.verbose >= 1:
-            print("Metrics collection started")
+            print("    설정: Metrics collection started")
 
     def _on_step(self) -> bool:
         # GPU 메모리 추적

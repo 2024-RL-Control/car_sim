@@ -1108,7 +1108,6 @@ class Vehicle:
         self.simulation_config = simulation_config
         self.state = VehicleState()
         self.state.update_rear_axle_position(self.vehicle_config['wheelbase'] / 2.0)
-        self.lookahead_time = self.simulation_config['rl']['lookahead_time']
 
         # Subsystem 관리자 초기화
         self.subsystem_manager = SubsystemManager(vehicle_instance=self, simulation_config=self.simulation_config)
@@ -1522,17 +1521,17 @@ class Vehicle:
         목표 위치 도달 여부 확인
 
         Args:
-            position_tolerance: 위치 도달 판정 거리 [m] (None이면 차량 길이의 절반 사용)
-            yaw_tolerance: 방향 도달 판정 각도 [rad] (None이면 기본값 π/6 (30도) 사용)
+            position_tolerance: 위치 도달 판정 거리 [m] (None이면 차량 너비의 절반 사용)
+            yaw_tolerance: 방향 도달 판정 각도 [rad] (None이면 기본값 π/18 (10도) 사용)
 
         Returns:
             도달 여부 (Boolean)
         """
         if position_tolerance is None:
-            position_tolerance = self.vehicle_config['length'] / 2
+            position_tolerance = self.vehicle_config['width'] / 2
 
         if yaw_tolerance is None:
-            yaw_tolerance = np.pi/6  # 30도
+            yaw_tolerance = np.pi / 18  # 10도
 
         # 목표 정보 업데이트
         self._update_target_info()
