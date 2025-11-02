@@ -47,8 +47,8 @@ simulation:
       outside: -200                     # penalty for going outside the road
       termination: -100                 # penalty for early termination
       w_progress: 1.0                   # reward weight for reducing progress to goal
-      w_lane: 0.65                      # lane weight for lane keeping
-      w_speed: 0.35                     # speed weight for speed control
+      w_lane: 0.6                       # lane weight for lane keeping
+      w_speed: 0.4                      # speed weight for speed control
       s_speed_under: 0.2                # under speed reward slope
       s_speed_over: 1.5                 # over speed reward slope
     resume_training:
@@ -74,9 +74,10 @@ simulation:
     base_step_size: 1.0           # Base for variable RRT step [m]
     min_step_factor: 0.1          # Min multiplier for base_step_size
     max_step_factor: 5.0          # Max multiplier for base_step_size
-    max_distance: 25.0            # 기준 거리 [m] for step size calculation
-    goal_distance_threshold: 0.1  # RRT node proximity to goal for final connection [m]
+    max_distance: 10.0            # 기준 거리 [m] for step size calculation
     goal_sampling_rate: 0.5       # goal sampling rate for path planning [0, 1]
+    goal_distance_threshold: 0.1  # RRT node proximity to goal for final connection [m]
+    goal_yaw_threshold: 0.08725   # RRT node yaw proximity to goal for final connection [rad] (5 degrees)
     nearest_neighbor_count: 10    # RRT nearest neighbor search count for KD-Tree optimization
     kdtree_rebuild_interval: 50   # KD-Tree 재구성 주기 [iterations]
     road_width: 7.0               # Default road width [m]

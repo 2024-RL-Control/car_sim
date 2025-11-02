@@ -526,7 +526,7 @@ class CarSimulatorEnv(gym.Env):
         # C_lane (차선 유지 비용)
         norm_d = state.scale_frenet_d(state.frenet_d, self.config['simulation']['path_planning']['road_width']) # [-1 ~ 1]
         abs_norm_d = abs(norm_d)
-        cost_shape = np.exp(-0.5 * ((abs_norm_d - 1.0) / 0.3) ** 2)
+        cost_shape = np.exp(-0.5 * ((abs_norm_d - 1.0) / 0.35) ** 2)
         C_lane = self.rewards['w_lane'] * cost_shape
 
         C_total = C_lane + C_speed

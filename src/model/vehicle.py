@@ -510,7 +510,7 @@ class SubsystemManager:
                     state.frenet_d = interpolated_d
 
                 road_width = self._simulation_config['path_planning']['road_width']
-                outside_road = abs(state.frenet_d) > (road_width / 2) - 0.15  # 15cm 여유
+                outside_road = abs(state.frenet_d) > (road_width / 2)
                 return outside_road
 
         except Exception as e:
@@ -1522,7 +1522,7 @@ class Vehicle:
 
         Args:
             position_tolerance: 위치 도달 판정 거리 [m] (None이면 차량 너비의 절반 사용)
-            yaw_tolerance: 방향 도달 판정 각도 [rad] (None이면 기본값 π/18 (10도) 사용)
+            yaw_tolerance: 방향 도달 판정 각도 [rad] (None이면 기본값 π/12 (15도) 사용)
 
         Returns:
             도달 여부 (Boolean)
@@ -1531,7 +1531,7 @@ class Vehicle:
             position_tolerance = self.vehicle_config['width'] / 2
 
         if yaw_tolerance is None:
-            yaw_tolerance = np.pi / 18  # 10도
+            yaw_tolerance = np.pi / 12  # 15도
 
         # 목표 정보 업데이트
         self._update_target_info()

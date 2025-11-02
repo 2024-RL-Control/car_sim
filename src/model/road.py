@@ -92,7 +92,7 @@ class LinearRoadSegment:
         self._cached_curvatures = None  # 각 waypoint에서의 곡률
         self._cached_boundary_polygons = None
         self._cached_boundary_colliders = None
-        self.boundary_radius = 0.15  # 원형 충돌체 반지름
+        self.boundary_radius = 0.1  # 원형 충돌체 반지름
 
         # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
         self._cache_config = {
@@ -857,13 +857,14 @@ class PathPlanner:
     def __init__(self, config):
         self.local_planner = Dubins(radius=config["min_radius"],
                                   point_separation=config["point_separation"])
-        self.precision = (5, 5, 1)
         self.width = config["road_width"]
         self.config = config
         self.default_speed = self.config.get('default_speed', 15.0)
         self.min_speed = self.config.get('min_speed', 5.0)
         self.max_speed = self.config.get('max_speed', 25.0)
         self.max_lateral_accel = self.config.get('max_lateral_acceleration', 4.0)
+        self.goal_distance_threshold = config.get("goal_distance_threshold", 0.5)
+        self.goal_yaw_threshold = config.get("goal_yaw_threshold", math.radians(5.0))
 
     def plan_path(self, start: Tuple[float, float, float],
                  end: Tuple[float, float, float],
@@ -1293,10 +1294,10 @@ class PathPlanner:
 
     def _is_goal(self, sample, goal):
         """목표 도달 확인"""
-        for i, (val, target) in enumerate(zip(sample, goal)):
-            if abs(target - val) > self.precision[i]:
-                return False
-        return True
+        dist_check = math.sqrt((sample[0] - goal[0])**2 + (sample[1] - goal[1])**2) <= self.goal_distance_threshold
+        yaw_check = abs(normalize_angle(sample[2] - goal[2])) <= self.goal_yaw_threshold
+
+        return dist_check and yaw_check
 
     def _reconstruct_path(self, root_pos, goal_pos, nodes, edges):
         """경로 재구성"""
