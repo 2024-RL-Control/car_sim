@@ -313,7 +313,7 @@ class TestComparisonEnv:
                                 return
 
                     # --- 3. 행동(Action) 결정 ---
-                    current_actions = np.zeros((self.rl_env.num_vehicles, 2)) # (2, 2)
+                    current_actions = np.zeros((self.rl_env.num_vehicles, 2), dtype=np.float32) # (2, 2)
                     vehicles = self.vehicle_manager.get_all_vehicles()
 
                     rl_time_ms = 0.0 # 스텝별 시간 (기본값 0)

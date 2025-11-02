@@ -45,7 +45,7 @@ class ActionController:
         self.debug = debug
 
         # 이전 행동 저장
-        self.last_actions = np.zeros((num_vehicles, action_dim), dtype=np.float64)
+        self.last_actions = np.zeros((num_vehicles, action_dim), dtype=np.float32)
 
         # 타이밍 관리
         self.last_action_selection_time = 0.0
@@ -151,12 +151,10 @@ class DummyEnv(gym.Env):
         # single_stacked_shape = (self.rl_env.observation_space.shape[1],)
         single_stacked_shape = self.rl_env.stacked_obs_dim # (frame_stack_size, single_obs_dim)
         self.observation_space = gym.spaces.Box(
-            # low=np.tile(self.rl_env.env.observation_space.low, self.rl_env.obs_stack_size),
-            # high=np.tile(self.rl_env.env.observation_space.high, self.rl_env.obs_stack_size),
-            low=-1.0,  # 정규화된 최소값
-            high=1.0,  # 정규화된 최대값
+            low=-np.float32(-1.0),  # 정규화된 최소값
+            high=np.float32(1.0),  # 정규화된 최대값
             shape=single_stacked_shape,
-            dtype=np.float64
+            dtype=np.float32
         )
         self.action_space = self.rl_env.env.action_space
 
@@ -184,8 +182,14 @@ class BasicRLDrivingEnv(gym.Env):
         Args:
             config_path: 설정 파일 경로 (기본값: None)
         """
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.device = torch.device("cpu" if torch.cuda.is_available() else "cpu")
+        device = None
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+            device = "mps"
+        else:
+            device = "cpu"
+        self.device = torch.device(device)
 
         self.verbose = verbose
         if self.verbose > 0:
@@ -216,13 +220,12 @@ class BasicRLDrivingEnv(gym.Env):
             deque(maxlen=self.obs_stack_size) for _ in range(self.num_vehicles)
         ]
         self.single_obs_dim = self.env.observation_space.shape[0]
-        # self.stacked_obs_dim = self.single_obs_dim * self.obs_stack_size
         self.stacked_obs_dim = (self.obs_stack_size, self.single_obs_dim)
         self.observation_space = gym.spaces.Box(
-            low=-1.0,  # 정규화된 최소값
-            high=1.0,  # 정규화된 최대값
+            low=np.float32(-1.0),  # 정규화된 최소값
+            high=np.float32(1.0),  # 정규화된 최대값
             shape=(self.num_vehicles, *self.stacked_obs_dim), # (num_vehicles, frame_stack_size, obs_dim)
-            dtype=np.float64
+            dtype=np.float32
         )
 
         # 행동 설정 및 ActionController 초기화
@@ -245,7 +248,7 @@ class BasicRLDrivingEnv(gym.Env):
             low=np.tile(self.env.action_space.low, (self.num_vehicles, 1)),
             high=np.tile(self.env.action_space.high, (self.num_vehicles, 1)),
             shape=(self.num_vehicles, self.env.action_space.shape[0]),
-            dtype=np.float64
+            dtype=np.float32
         )
 
         # 장애물 및 환경 설정
@@ -484,9 +487,9 @@ class BasicRLDrivingEnv(gym.Env):
 
             # # 버퍼의 모든 프레임을 하나의 벡터로 결합 (axis=None으로 1D로 flatten)
             # stacked_obs_list.append(np.concatenate(list(buffer), axis=None))
-            stacked_obs_list.append(np.array(list(buffer), dtype=np.float64)) # (frame_stack_size, obs_dim)
+            stacked_obs_list.append(np.array(list(buffer), dtype=np.float32)) # (frame_stack_size, obs_dim)
 
-        return np.array(stacked_obs_list, dtype=np.float64)
+        return np.array(stacked_obs_list, dtype=np.float32)
 
     def deactivate_action_controller(self):
         """ActionController 비활성화"""
@@ -535,7 +538,7 @@ class BasicRLDrivingEnv(gym.Env):
         self.setup_environment()
 
         # 초기 스텝으로 환경 안정화
-        dummy_actions = np.zeros((self.num_vehicles, self.env.action_space.shape[-1]), dtype=np.float64)
+        dummy_actions = np.zeros((self.num_vehicles, self.env.action_space.shape[-1]), dtype=np.float32)
         self.env.step(dummy_actions)
 
         # 초기 관측값 반환
@@ -952,6 +955,7 @@ class BasicRLDrivingEnv(gym.Env):
             "algorithm": model.__class__.__name__,
             "dir": run_name,
             "seed": self.base_seed,
+            "device": str(self.device),
             "net_arch": str(policy_kwargs['net_arch']),
             "activation_fn": policy_kwargs['activation_fn'].__name__,
             "action_space": str(self.action_space),

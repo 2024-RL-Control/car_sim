@@ -140,7 +140,7 @@ class ClassicDrivingEnv():
                 else:
                     objects = np.empty((0, 3))
 
-                current_actions = np.zeros((self.num_vehicles, 2))
+                current_actions = np.zeros((self.num_vehicles, 2), dtype=np.float32)
                 for i, vehicle in enumerate(vehicles):
                     # BasicRLDrivingEnv가 관리하는 생존 상태(active_agents)인지 확인
                     if not active_agents[i]:

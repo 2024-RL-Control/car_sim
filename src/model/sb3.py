@@ -830,7 +830,7 @@ class SACVehicleAlgorithm(SAC):
                 # 활성화된 에이전트의 관측값만 선택
                 active_obs = self.prev_observations[active_mask]
                 # 배치로 한번에 예측
-                active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
+                active_obs_tensor = torch.as_tensor(active_obs, device=self.device, dtype=torch.float32)
                 with torch.no_grad():
                     actions_tensor, _ = self.policy.actor.action_log_prob(active_obs_tensor)
                 # NumPy 배열로 변환
@@ -1045,7 +1045,7 @@ class PPOVehicleAlgorithm(PPO):
             # 활성 에이전트에 한해서만 정책 네트워크를 통과
             if active_mask.any():
                 active_obs = self.prev_observations[active_mask]
-                active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
+                active_obs_tensor = torch.as_tensor(active_obs, device=self.device, dtype=torch.float32)
                 with torch.no_grad():
                     actions_tensor, values_tensor, log_prob_tensor = self.policy.forward(active_obs_tensor)
 

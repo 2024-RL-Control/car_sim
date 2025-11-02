@@ -91,19 +91,19 @@ class CarSimulatorEnv(gym.Env):
 
         # 각 차량의 조작 공간
         self.action_space = spaces.Box(
-            low=np.array([-1.0, -1.0]),   # 가속[-1,1], 조향[-1,1]
-            high=np.array([1.0,  1.0]),
+            low=np.array([-1.0, -1.0], dtype=np.float32),   # 가속[-1,1], 조향[-1,1]
+            high=np.array([1.0,  1.0], dtype=np.float32),
             shape=(2,),
-            dtype=np.float64
+            dtype=np.float32
         )
 
         # 각 차량의 관측 공간, 모든 관측 값이 [-1, 1] 또는 [0, 1] 범위로 정규화됨
         self.obs_dim = self._calculate_obs_dim()
         self.observation_space = spaces.Box(
-            low=-1.0,
-            high=1.0,
+            low=-np.float32(-1.0),
+            high=np.float32(1.0),
             shape=(self.obs_dim,),
-            dtype=np.float64
+            dtype=np.float32
         )
 
         self.rewards = self.config['simulation']['rl']['rewards']
