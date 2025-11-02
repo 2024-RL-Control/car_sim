@@ -34,7 +34,7 @@ simulation:
     action_selection_hz: 10         # 새로운 행동 선택 주파수 [Hz] (시뮬레이션 시간 기준)
     action_hold_behavior: true      # 새로운 행동 선택 전까지 이전 행동 유지 여부
     debug_action_timing: false      # 행동 선택 타이밍 디버그 출력 여부
-    frame_stack_size: 7             # 프레임 스택 크기 (0.016s * 7 = 0.112s)
+    frame_stack_size: 5             # 프레임 스택 크기 (0.016s * 5 = 0.08s)
     termination_check_step: 500     # 조기 종료를 위한 스텝 간격
     progress_change_threshold: 0.10 # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
     observation:
