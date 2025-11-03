@@ -421,7 +421,7 @@ class CarSimulatorEnv(gym.Env):
         cos_error_to_ref, sin_error_to_ref = state.encoding_angle(state.error_to_ref)
         # cos_angle_to_ref, sin_angle_to_ref = state.encoding_angle(state.angle_to_ref)
 
-        # 기본 차량 상태 (17, )
+        # 기본 차량 상태 (19, )
         obs = np.array([
             progress,               # -1 ~ 1
             state.throttle_engine,  # 0 ~ 1
@@ -430,9 +430,9 @@ class CarSimulatorEnv(gym.Env):
             cos_yaw,                # -1 ~ 1
             sin_yaw,                # -1 ~ 1
             scale_vel_long,         # -1 ~ 1
-            # scale_acc_long,         # -1 ~ 1
+            scale_acc_long,         # -1 ~ 1
             scale_vel_lat,          # -1 ~ 1
-            # scale_acc_lat,          # -1 ~ 1
+            scale_acc_lat,          # -1 ~ 1
             scale_target_vel_long,  # -1 ~ 1
             vel_error_long,         # -1 ~ 1
             cos_error_to_goal,      # -1 ~ 1

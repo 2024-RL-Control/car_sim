@@ -38,7 +38,7 @@ simulation:
     termination_check_step: 500     # 조기 종료를 위한 스텝 간격
     progress_change_threshold: 0.10 # 조기 종료를 위한 활성화 차량의 평균 진행률 변화량의 임계값
     observation:
-      vehicle_state_dim: 17
+      vehicle_state_dim: 19
       lidar_dim: 15
       trajectory_dim: 0
     rewards:
