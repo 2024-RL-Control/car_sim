@@ -81,7 +81,7 @@ class BaseSensor(ABC):
         return self._cached_pos
 
     @abstractmethod
-    def update(self, dt, time_elapsed=0, obstacles=None, road_boundaries=None):
+    def update(self, dt, time_elapsed=0, obstacles=[], roads=[]):
         """
         센서 상태 업데이트 (반드시 구현 필요)
 
@@ -89,7 +89,7 @@ class BaseSensor(ABC):
             dt: 시간 간격 [s]
             time_elapsed: 시뮬레이션 누적 시간 [s]
             obstacles: 장애물 외접원
-            road_boundaries: 도로 경계선 line segment 배열 (N, 4) [x1, y1, x2, y2]
+            roads: 도로 경계 충돌체 배열 (N, 3) [(x, y, radius), ...]
 
         Returns:
             측정이 수행되었는지 여부 (Boolean)
@@ -241,22 +241,22 @@ class LidarSensor(BaseSensor):
         self.ray_angles = self.angle_start + (self.angle_end - self.angle_start) * (t_concentrated + 1) / 2
         self.ray_directions = np.array([(np.cos(angle), np.sin(angle)) for angle in self.ray_angles])
 
-    def update(self, dt, time_elapsed=0, objects=None, road_boundaries=None):
+    def update(self, dt, time_elapsed=0, objects=[], roads=[]):
         """
         라이다 센서 업데이트 및 스캔 수행
 
         Args:
             dt: 시간 간격 [s]
             time_elapsed: 시뮬레이션 누적 시간 [s]
-            objects: 객체 외접원
-            road_boundaries: 도로 경계선 line segment 배열 (N, 4) [x1, y1, x2, y2]
+            objects: 객체 외접원 [(x1, y1, radius), ...] (N, 3)
+            roads: 도로 경계 충돌체 배열 [(x1, y1, radius), ...] (N, 3)
 
         Returns:
             측정이 수행되었는지 여부 (Boolean)
         """
         try:
-            # 스캔 수행 (objects + road_boundaries)
-            self.current_data = self._perform_scan(time_elapsed, objects or [], road_boundaries)
+            # 스캔 수행 (objects + roads)
+            self.current_data = self._perform_scan(time_elapsed, objects, roads)
 
             # 스캔 결과 히스토리 저장
             if self.scan_history is not None:
@@ -277,14 +277,14 @@ class LidarSensor(BaseSensor):
                 )
             return False
 
-    def _perform_scan(self, timestamp, objects, road_boundaries=None):
+    def _perform_scan(self, timestamp, objects, roads):
         """
         라이다 스캔 수행 - 벡터화된 연산으로 구현
 
         Args:
             timestamp: 현재 시간 [s]
-            objects: 객체 외접원
-            road_boundaries: 도로 경계선 line segment 배열 (N, 4) [x1, y1, x2, y2]
+            objects: 객체 외접원 [(x1, y1, radius), ...] (N, 3)
+            roads: 도로 경계 충돌체 배열 [(x1, y1, radius), ...] (N, 3)
         Returns:
             LidarData: 라이다 스캔 결과
         """
@@ -296,13 +296,13 @@ class LidarSensor(BaseSensor):
         global_dirs_x = np.cos(global_angles)
         global_dirs_y = np.sin(global_angles)
 
-        # 벡터화된 레이캐스팅 수행 (objects + road_boundaries)
+        # 벡터화된 레이캐스팅 수행 (objects + roads)
         closest_hits = self._raycast_vectorized(
             sensor_x, sensor_y,
             global_dirs_x, global_dirs_y,
             global_angles,
             objects,
-            road_boundaries
+            roads
         )
 
         # 라이다 데이터 생성
@@ -312,14 +312,14 @@ class LidarSensor(BaseSensor):
             ranges=closest_hits
         )
 
-    def _raycast_road_boundaries_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, road_boundaries):
+    def _raycast_segments_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, segments):
         """
-        도로 경계선에 대한 벡터화된 레이캐스팅
+        선분에 대한 벡터화된 레이캐스팅
 
         Args:
             origin_x, origin_y: 레이 시작점 [m]
             dirs_x, dirs_y: 레이 방향 벡터 배열 (N_rays,)
-            road_boundaries: 도로 경계선 배열 (N_segments, 4) [x1, y1, x2, y2]
+            segments: 선분 배열 (N_segments, 4) [x1, y1, x2, y2]
 
         Returns:
             np.ndarray: 각 레이의 최소 거리 (N_rays,), 감지 실패 시 max_range
@@ -327,15 +327,15 @@ class LidarSensor(BaseSensor):
         num_rays = len(dirs_x)
         min_distances = np.ones(num_rays) * self.max_range
 
-        if road_boundaries is None or len(road_boundaries) == 0:
+        if segments is None or len(segments) == 0:
             return min_distances
 
         # Line segment 데이터 추출
-        # road_boundaries shape: (N_segments, 4) - [x1, y1, x2, y2]
-        x1 = road_boundaries[:, 0]  # (N_segments,)
-        y1 = road_boundaries[:, 1]
-        x2 = road_boundaries[:, 2]
-        y2 = road_boundaries[:, 3]
+        # segments shape: (N_segments, 4) - [x1, y1, x2, y2]
+        x1 = segments[:, 0]  # (N_segments,)
+        y1 = segments[:, 1]
+        x2 = segments[:, 2]
+        y2 = segments[:, 3]
 
         # Line segment 방향 벡터
         seg_dx = x2 - x1  # (N_segments,)
@@ -382,7 +382,9 @@ class LidarSensor(BaseSensor):
 
         # 유효성 검증: t >= min_range, 0 <= s <= 1
         valid_mask &= (t >= self.min_range) & (t <= self.max_range)
-        valid_mask &= (s >= 0.0) & (s <= 1.0)
+        # valid_mask &= (s >= 0.0) & (s <= 1.0)
+        s_epsilon = 1e-6
+        valid_mask &= (s >= -s_epsilon) & (s <= 1.0 + s_epsilon)
 
         # 각 레이별로 최소 t 찾기
         t_masked = np.where(valid_mask, t, self.max_range)
@@ -390,14 +392,14 @@ class LidarSensor(BaseSensor):
 
         return min_distances
 
-    def _raycast_objects_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, objects):
+    def _raycast_circles_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, circles):
         """
         원형 장애물에 대한 벡터화된 레이캐스팅
 
         Args:
             origin_x, origin_y: 레이 시작점 [m]
             dirs_x, dirs_y: 레이 방향 벡터 배열 (N_rays,)
-            objects: 객체 외접원 리스트 [(x, y, radius), ...]
+            circles: 원형 장애물 리스트 [(x, y, radius), ...]
 
         Returns:
             np.ndarray: 각 레이의 최소 거리 (N_rays,), 감지 실패 시 max_range
@@ -405,11 +407,11 @@ class LidarSensor(BaseSensor):
         num_rays = len(dirs_x)
         min_distances = np.ones(num_rays) * self.max_range
 
-        if len(objects) == 0:
+        if len(circles) == 0:
             return min_distances
 
         # 객체 데이터를 NumPy 배열로 변환
-        object_array = np.array(objects)  # (N_objects, 3) - [x, y, radius]
+        object_array = np.array(circles)  # (N_objects, 3) - [x, y, radius]
 
         # Broadcasting을 위한 차원 확장
         # dirs_x, dirs_y: (N_rays,) -> (N_rays, 1)
@@ -458,9 +460,9 @@ class LidarSensor(BaseSensor):
 
         return min_distances
 
-    def _raycast_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, global_angles, objects, road_boundaries=None):
+    def _raycast_vectorized(self, origin_x, origin_y, dirs_x, dirs_y, global_angles, objects, roads):
         """
-        완전 벡터화된 레이캐스팅 수행 (objects + road_boundaries)
+        완전 벡터화된 레이캐스팅 수행 (objects + roads)
 
         성능 최적화:
         - 객체 레이캐스팅: Broadcasting을 활용한 완전 벡터화 (O(N) 루프 제거)
@@ -471,20 +473,20 @@ class LidarSensor(BaseSensor):
             origin_x, origin_y: 레이 시작점 [m]
             dirs_x, dirs_y: 레이 방향 벡터 배열 (정규화됨) (N_rays,)
             global_angles: 레이의 글로벌 각도 배열 (N_rays,)
-            objects: 객체 외접원 리스트 [(x, y, radius), ...]
-            road_boundaries: 도로 경계선 배열 (N_segments, 4) [x1, y1, x2, y2]
+            objects: 객체 외접원 리스트 [(x, y, radius), ...] (N, 3)
+            roads: 도로 경계 충돌체 배열 [(x, y, radius), ...] (N, 3)
 
         Returns:
             List[LidarMeasurement]: 모든 레이에 대한 측정 결과
         """
         # === Step 1: Objects(원형 장애물)에 대한 레이캐스팅 ===
-        min_distances_objects = self._raycast_objects_vectorized(
+        min_distances_objects = self._raycast_circles_vectorized(
             origin_x, origin_y, dirs_x, dirs_y, objects
         )
 
         # === Step 2: Road boundaries(도로 경계선)에 대한 레이캐스팅 ===
-        min_distances_boundaries = self._raycast_road_boundaries_vectorized(
-            origin_x, origin_y, dirs_x, dirs_y, road_boundaries
+        min_distances_boundaries = self._raycast_circles_vectorized(
+            origin_x, origin_y, dirs_x, dirs_y, roads
         )
 
         # === Step 3: Objects와 Boundaries 중 최소 거리 선택 ===
@@ -814,7 +816,7 @@ class SensorManager:
         """
         return self.sensors
 
-    def update(self, dt, time_elapsed=0, objects=[], road_boundaries=None):
+    def update(self, dt, time_elapsed=0, objects=[], roads=[]):
         """
         모든 센서 업데이트
 
@@ -822,12 +824,12 @@ class SensorManager:
             dt: 시간 간격 [s]
             time_elapsed: 시뮬레이션 누적 시간 [s]
             objects: 객체 외접원 리스트
-            road_boundaries: 도로 경계선 line segment 배열 (N, 4) [x1, y1, x2, y2]
+            roads: 도로 경계 충돌체 배열 (N, 3) [(x, y, radius), ...]
         """
         failed_sensors = []
         for sensor_id, sensor in self.sensors.items():
             try:
-                sensor.update(dt, time_elapsed, objects, road_boundaries)
+                sensor.update(dt, time_elapsed, objects, roads)
             except Exception as e:
                 print(f"Warning: Sensor {sensor_id} update failed: {e}")
                 failed_sensors.append(sensor_id)

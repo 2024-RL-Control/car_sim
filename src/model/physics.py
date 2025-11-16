@@ -27,40 +27,35 @@ class InputProcessor:
         # 액션 배열에서 입력값 추출
         accel_input = np.clip(action[0], -1.0, 1.0)     # 가속 입력 (-1: 최대 제동, 1: 최대 가속)
         steer_input = np.clip(action[1], -1.0, 1.0)     # 조향 입력 (-1: 좌회전, 1: 우회전)
-        # engine_input = np.clip(action[0], 0.0, 1.0)     # 엔진 입력 (0: 정지, 1: 최대 가속)
-        # brake_input = np.clip(action[1], 0.0, 1.0)      # 브레이크 입력 (0: 정지, 1: 최대 제동)
 
+        # 1. 쓰로틀 처리
         # 가속 입력을 전진(engine)과 후진/브레이크(brake)로 분리
         if accel_input >= 0:
-            # 양수 입력: 전진 스로틀로 사용
             target_throttle_engine = accel_input
             target_throttle_brake = 0.0
         else:
-            # 음수 입력: 브레이크/후진 스로틀로 사용 (값을 양수로 변환)
             target_throttle_engine = 0.0
             target_throttle_brake = -accel_input
 
+        # 스로틀 응답 지연
+        throttle_response_rate = physics_config['throttle_response_rate']
+        state.throttle_engine += (target_throttle_engine - state.throttle_engine) * throttle_response_rate * dt
+        state.throttle_brake  += (target_throttle_brake  - state.throttle_brake) * throttle_response_rate * dt
+        state.throttle_engine = np.clip(state.throttle_engine, 0.0, 1.0)
+        state.throttle_brake = np.clip(state.throttle_brake, 0.0, 1.0)
+
+        # 2. 조향 처리
         # 최대 조향각 (라디안)
         max_steer_rad = np.radians(config['max_steer'])
 
-        # 속도 의존적 조향 효과 적용
-        effective_steer_input = cls._calculate_speed_dependent_steering(steer_input, state.vel_long, physics_config)
+        # 목표 조향각 계산
+        target_steer = steer_input * max_steer_rad
 
-        # 목표 조향각 계산 (개선된 입력 * 최대 조향각)
-        target_steer = effective_steer_input * max_steer_rad
-
-        # 스로틀 응답 지연 (점진적 변화)
-        throttle_response_rate = physics_config['throttle_response_rate']
-        state.throttle_engine += (target_throttle_engine - state.throttle_engine) * throttle_response_rate * dt
-        state.throttle_brake  += (target_throttle_brake  - state.throttle_brake ) * throttle_response_rate * dt
-
-        # 조향 응답 지연 (점진적 변화, 속도에 따라 조정)
+        # 조향 응답 지연
         # 속도에 따른 조향 응답 조정 (고속에서 조향이 느려지도록)
         steer_speed_factor = cls._calculate_steer_speed_factor(state.vel_long, physics_config)
         steering_response_rate = physics_config['steering_response_rate'] * steer_speed_factor
         state.steer += (target_steer - state.steer) * steering_response_rate * dt
-
-        # 조향각 제한
         state.steer = np.clip(state.steer, -max_steer_rad, max_steer_rad)
 
     @classmethod
@@ -96,38 +91,6 @@ class InputProcessor:
             t = abs_speed / steer_speed_thresh
             return min_steer_factor * (1 - t) + max_steer_factor * t
 
-    @classmethod
-    def _calculate_speed_dependent_steering(cls, steer_input, vel_long, physics_config):
-        """
-        속도에 따른 조향 효과 조정
-        저속에서는 조향 효과 감소, 고속에서는 민감도 감소
-
-        Args:
-            steer_input: 조향 입력 [-1, 1]
-            vel_long: 차량 속도 [m/s]
-            physics_config: 물리 설정
-
-        Returns:
-            조정된 조향 입력
-        """
-        # 설정값 로드 (기본값 제공)
-        min_steering_speed = physics_config.get('min_steering_speed', 0.5)  # 0.5 m/s
-        max_steering_efficiency_speed = physics_config.get('max_steering_efficiency_speed', 15.0)  # 15 m/s
-
-        abs_speed = abs(vel_long)
-
-        if abs_speed < min_steering_speed:
-            # 매우 저속에서는 조향 효과 감소 (현실적)
-            steering_efficiency = abs_speed / min_steering_speed * 0.3
-        elif abs_speed > max_steering_efficiency_speed:
-            # 고속에서는 조향 민감도 감소
-            steering_efficiency = max_steering_efficiency_speed / abs_speed * 0.8
-        else:
-            # 적정 속도에서는 최대 효율
-            steering_efficiency = 1.0
-
-        return steer_input * steering_efficiency
-
 
 class ForceCalculator:
     """
@@ -156,24 +119,17 @@ class ForceCalculator:
         friction_coeff = physics_config['terrain_friction'][state.terrain_type]
 
         # 개선된 엔진-브레이크 상호작용 처리
-        effective_engine, effective_brake = cls._calculate_effective_inputs(
-            state.throttle_engine, state.throttle_brake, physics_config
-        )
+        effective_engine, effective_brake = cls._calculate_effective_inputs(state.throttle_engine, state.throttle_brake, physics_config)
 
-        # 가속도 계산 (개선된 로직 적용)
-        acc_long = cls._calculate_blended_acceleration(
-            effective_engine, effective_brake, vehicle_config, friction_coeff
-        )
+        # 가속도 계산
+        applied_acc_long = cls._calculate_blended_acceleration(effective_engine, effective_brake, vehicle_config, friction_coeff)
 
-        # 저항력 계산 (개선된 로직)
-        total_input_magnitude = effective_engine + effective_brake
-        rolling_acc = cls._calculate_rolling_resistance(
-            vel_long, total_input_magnitude, vehicle_config, physics_config, dt
-        )
+        # 저항력 계산
+        rolling_acc = cls._calculate_rolling_resistance(vel_long, applied_acc_long, vehicle_config, physics_config, dt)
         drag_acc = cls._calculate_drag(vel_long, vehicle_config, physics_config)
 
         # 최종 종방향 가속도
-        acc_long = acc_long + rolling_acc + drag_acc
+        acc_long = applied_acc_long + rolling_acc + drag_acc
 
         # 회전 반경 및 각속도 계산
         yaw_rate, acc_lat = cls._calculate_lateral_dynamics(state.steer, vel_long, physics_config, vehicle_config)
@@ -181,24 +137,25 @@ class ForceCalculator:
         return acc_long, acc_lat, yaw_rate
 
     @classmethod
-    def _calculate_rolling_resistance(cls, vel_long, total_input_magnitude, vehicle_config, physics_config, dt):
+    def _calculate_rolling_resistance(cls, vel_long, applied_acc_long, vehicle_config, physics_config, dt):
         """단순화된 구름 저항 계산 - RL 친화적"""
         rolling_force = physics_config['roll_resist'] * vehicle_config['mass'] * physics_config['gravity']
         rolling_acc_magnitude = rolling_force / vehicle_config['mass']
+        min_speed_threshold = physics_config['min_speed_threshold']
 
-        # 속도가 있으면 속도 반대 방향으로 저항
-        if abs(vel_long) > physics_config['min_speed_threshold']:
-            return -rolling_acc_magnitude * np.sign(vel_long)
-
-        # 정지 상태에서는 입력 크기에 따라 처리
-        static_friction_threshold = physics_config.get('static_friction_threshold', 0.05)
-
-        if total_input_magnitude > static_friction_threshold:
-            # 입력이 충분하면 정적 마찰 극복
-            return 0
+        if abs(vel_long) <= min_speed_threshold:
+            # 차량이 거의 정지 상태일 때
+            if abs(applied_acc_long) > rolling_acc_magnitude:
+                # 가해지는 힘이 구름 저항보다 클 때: 움직이기 시작해야 함
+                # 구름 저항은 가해지는 힘의 반대 방향으로 작용
+                return -rolling_acc_magnitude * np.sign(applied_acc_long)
+            else:
+                # 가해지는 힘이 구름 저항보다 작거나 같을 때: 움직이지 않거나 멈춰야 함
+                # 현재 속도를 상쇄시키는 강한 댐핑 저항을 반환하여 정지 상태 유지/유도
+                return -vel_long / dt if dt > 1e-6 else 0.0
         else:
-            # 입력이 부족하면 완전 정지로 수렴
-            return -vel_long / dt
+            # 차량이 움직이고 있을 때: 표준 구름 저항 적용 (속도 반대 방향)
+            return -rolling_acc_magnitude * np.sign(vel_long)
 
     @classmethod
     def _calculate_drag(cls, vel_long, vehicle_config, physics_config):

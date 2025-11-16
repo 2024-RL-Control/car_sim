@@ -11,7 +11,8 @@ from typing import List, Tuple, Optional, Dict, Any, Union
 from dataclasses import dataclass
 from pathlib import Path
 from scipy.spatial import KDTree
-
+from shapely.geometry import LineString
+from shapely.ops import unary_union
 
 # =============================================================================
 # 1. 기본 유틸리티 함수
@@ -88,8 +89,10 @@ class LinearRoadSegment:
         self._cached_total_length = None
         self._cached_segment_lengths = None
         self._cached_cumulative_lengths = None
-        self._cached_boundary_lines = None
         self._cached_curvatures = None  # 각 waypoint에서의 곡률
+        self._cached_boundary_polygons = None
+        self._cached_boundary_colliders = None
+        self.boundary_radius = 0.1  # 원형 충돌체 반지름
 
         # 메모리 관리 설정 (기본값 설정 후 config에서 로드)
         self._cache_config = {
@@ -365,66 +368,78 @@ class LinearRoadSegment:
             return value
         return None
 
-    def get_boundary_lines(self) -> Tuple[List[Tuple[float, float]], List[Tuple[float, float]]]:
-        """도로 경계선 계산"""
-        if self._cached_boundary_lines:
-            return self._cached_boundary_lines
+    def get_boundary(self) -> np.ndarray:
+        """
+        Shapely를 사용하여 도로 경계선과 원형 충돌체를 계산
+        자가 교차 및 침범 영역이 자동으로 처리된 후, 레이캐스팅을 위한 NumPy 선분 배열을 반환
+        """
+        if self._cached_boundary_colliders is not None:
+            return self._cached_boundary_colliders
 
         if len(self.waypoints) < 2:
-            return [], []
+            return np.empty((0, 3))
 
-        half_width = self.width / 2
-        left_boundary = []
-        right_boundary = []
+        waypoints_2d = [wp[:2] for wp in self.waypoints]
+        centerline = LineString(waypoints_2d)
+        road_polygon = centerline.buffer(self.width / 2, cap_style='round', join_style='bevel')
 
-        for i in range(len(self.waypoints) - 1):
-            p1 = self.waypoints[i]
-            p2 = self.waypoints[i + 1]
+        sampling_distance = self.boundary_radius
+        if sampling_distance < 0.01:
+            sampling_distance = 0.01
 
-            # 방향 벡터
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            length = math.sqrt(dx*dx + dy*dy)
+        def sample_line_string(coords: List[Tuple[float, float]], sampling_dist: float) -> List[Tuple[float, float]]:
+            """Shapely 좌표 리스트(coords)를 받아, 선분 위를 촘촘히 샘플링"""
+            sampled_points = []
+            if not coords:
+                return []
 
-            if length < 1e-6:
-                continue
+            for i in range(len(coords) - 1):
+                p1 = np.array(coords[i])
+                p2 = np.array(coords[i+1])
+                segment_vec = p2 - p1
+                segment_len = np.linalg.norm(segment_vec)
 
-            # 정규화된 수직 벡터
-            perp_x = -dy / length
-            perp_y = dx / length
+                # 항상 시작점은 추가
+                sampled_points.append(tuple(p1))
 
-            # 경계점 계산
-            left_x = p1[0] + perp_x * half_width
-            left_y = p1[1] + perp_y * half_width
-            right_x = p1[0] - perp_x * half_width
-            right_y = p1[1] - perp_y * half_width
+                # 선분 길이가 샘플링 간격보다 길 때만 보간
+                if segment_len > sampling_dist:
+                    # 보간할 점의 개수
+                    num_steps = int(segment_len // sampling_dist)
+                    if num_steps > 0:
+                        # 단위 벡터가 아닌, 정확한 스텝 벡터 계산
+                        step_vec = segment_vec * (sampling_dist / segment_len)
 
-            left_boundary.append((left_x, left_y))
-            right_boundary.append((right_x, right_y))
+                        for j in range(1, num_steps + 1):
+                            interp_point = p1 + step_vec * j
+                            sampled_points.append(tuple(interp_point))
 
-        # 마지막 점 추가
-        if len(self.waypoints) >= 2:
-            p1 = self.waypoints[-2]
-            p2 = self.waypoints[-1]
+            # Shapely coords는 닫혀있으므로(첫점==끝점) 마지막 점 별도 추가 불필요
+            return sampled_points
 
-            dx = p2[0] - p1[0]
-            dy = p2[1] - p1[1]
-            length = math.sqrt(dx*dx + dy*dy)
+        exterior_points = []
+        interior_points = []
+        boundary_points = []
+        geoms = list(road_polygon.geoms) if hasattr(road_polygon, 'geoms') else [road_polygon]
 
-            if length > 1e-6:
-                perp_x = -dy / length
-                perp_y = dx / length
+        for poly in geoms:
+            # 1. 외부 경계선(exterior)을 선분 및 좌표로 추가
+            exterior_coords = list(poly.exterior.coords)
+            exterior_points.append(exterior_coords)
+            sampled_exterior = sample_line_string(exterior_coords, sampling_distance)
+            boundary_points.extend(sampled_exterior)
 
-                left_x = p2[0] + perp_x * half_width
-                left_y = p2[1] + perp_y * half_width
-                right_x = p2[0] - perp_x * half_width
-                right_y = p2[1] - perp_y * half_width
+            # 2. 모든 내부 경계선(interiors)을 선분 및 좌표로 추가
+            for interior in poly.interiors:
+                interior_coords = list(interior.coords)
+                interior_points.append(interior_coords)
+                sampled_interior = sample_line_string(interior_coords, sampling_distance)
+                boundary_points.extend(sampled_interior)
 
-                left_boundary.append((left_x, left_y))
-                right_boundary.append((right_x, right_y))
-
-        self._cached_boundary_lines = (left_boundary, right_boundary)
-        return left_boundary, right_boundary
+        self._cached_boundary_polygons = (exterior_points, interior_points)
+        points_array = np.unique(np.array(boundary_points), axis=0)
+        self._cached_boundary_colliders = np.hstack([points_array, np.full((points_array.shape[0], 1), self.boundary_radius)])
+        return self._cached_boundary_colliders
 
     def is_point_on_road(self, point: Tuple[float, float]) -> bool:
         """점이 도로 위에 있는지 확인"""
@@ -522,20 +537,24 @@ class LinearRoadSegment:
         road_color = (100, 100, 100)
         line_color = (255, 255, 0)
 
-        # 경계선 그리기
-        left_boundary, right_boundary = self.get_boundary_lines()
-
-        if left_boundary and right_boundary:
-            left_screen = [world_to_screen_func(pt) for pt in left_boundary]
-            right_screen = [world_to_screen_func(pt) for pt in right_boundary]
-
-            # 중심선
-            center_points = [(wp[0], wp[1]) for wp in self.waypoints]
-            center_screen = [world_to_screen_func(pt) for pt in center_points]
-
+        center_points = [(wp[0], wp[1]) for wp in self.waypoints]
+        center_screen = [world_to_screen_func(pt) for pt in center_points]
+        if len(center_screen) > 1:
             pygame.draw.lines(screen, road_color, False, center_screen, 2)
-            pygame.draw.lines(screen, line_color, False, left_screen, 2)
-            pygame.draw.lines(screen, line_color, False, right_screen, 2)
+
+        # 경계선 그리기
+        _ = self.get_boundary()
+        (all_exteriors, all_interiors) = self._cached_boundary_polygons
+
+        for exterior_points in all_exteriors:
+            if len(exterior_points) > 1:
+                exterior_screen = [world_to_screen_func(pt) for pt in exterior_points]
+                pygame.draw.lines(screen, line_color, False, exterior_screen, 2)
+
+        for interior_points in all_interiors:
+            if len(interior_points) > 1:
+                interior_screen = [world_to_screen_func(pt) for pt in interior_points]
+                pygame.draw.lines(screen, line_color, False, interior_screen, 2)
 
         if debug:
             font = pygame.font.SysFont(None, 12)
@@ -838,13 +857,14 @@ class PathPlanner:
     def __init__(self, config):
         self.local_planner = Dubins(radius=config["min_radius"],
                                   point_separation=config["point_separation"])
-        self.precision = (5, 5, 1)
         self.width = config["road_width"]
         self.config = config
         self.default_speed = self.config.get('default_speed', 15.0)
         self.min_speed = self.config.get('min_speed', 5.0)
         self.max_speed = self.config.get('max_speed', 25.0)
         self.max_lateral_accel = self.config.get('max_lateral_acceleration', 4.0)
+        self.goal_distance_threshold = config.get("goal_distance_threshold", 0.5)
+        self.goal_yaw_threshold = config.get("goal_yaw_threshold", math.radians(5.0))
 
     def plan_path(self, start: Tuple[float, float, float],
                  end: Tuple[float, float, float],
@@ -1274,10 +1294,10 @@ class PathPlanner:
 
     def _is_goal(self, sample, goal):
         """목표 도달 확인"""
-        for i, (val, target) in enumerate(zip(sample, goal)):
-            if abs(target - val) > self.precision[i]:
-                return False
-        return True
+        dist_check = math.sqrt((sample[0] - goal[0])**2 + (sample[1] - goal[1])**2) <= self.goal_distance_threshold
+        yaw_check = abs(normalize_angle(sample[2] - goal[2])) <= self.goal_yaw_threshold
+
+        return dist_check and yaw_check
 
     def _reconstruct_path(self, root_pos, goal_pos, nodes, edges):
         """경로 재구성"""
@@ -1798,12 +1818,33 @@ class RoadSystemAPI:
 
     # === 차량 위치 계산 (핵심 API) ===
 
-    def get_vehicle_road_info(self, vehicle_pos: Tuple[float, float, float]) -> Optional[Dict[str, Any]]:
-        """차량의 도로 정보 계산 (Frenet 좌표, 권장 속도, heading error 포함)"""
+    def get_vehicle_road_info(self, vehicle_data: Tuple[float, float, float, float, float]) -> Optional[Dict[str, Any]]:
+        """
+        차량의 도로 정보 계산 (Frenet 좌표, 권장 속도, Frenet 속도, heading error 포함)
+
+        Args:
+            vehicle_data: (x, y, yaw, vel_long, vel_lat) 튜플
+        """
+        x, y, yaw, v_long, v_lat = vehicle_data
+        vehicle_pos = (x, y, yaw)
+
         frenet_state, closest_segment = self.network.calculate_frenet(vehicle_pos)
 
         if not frenet_state:
             return None
+
+        # Frenet 좌표계에서의 속도 계산
+        ref_yaw = frenet_state.yaw_ref
+        cos_yaw = math.cos(yaw)
+        sin_yaw = math.sin(yaw)
+        vx = v_long * cos_yaw - v_lat * sin_yaw
+        vy = v_long * sin_yaw + v_lat * cos_yaw
+        cos_ref_yaw = math.cos(ref_yaw)
+        sin_ref_yaw = math.sin(ref_yaw)
+        s_dot = vx * cos_ref_yaw + vy * sin_ref_yaw
+        d_dot = -vx * sin_ref_yaw + vy * cos_ref_yaw
+        frenet_state.s_dot = s_dot
+        frenet_state.d_dot = d_dot
 
         # 권장 속도 계산 (Lookahead 범위 최대 곡률 기반)
         if closest_segment:
@@ -1816,29 +1857,36 @@ class RoadSystemAPI:
         else:
             recommended_speed = self.config.get('default_speed', 15.0)
 
-        # Heading error 계산 (차량 기준 상대 각도)
-        vehicle_yaw = vehicle_pos[2]
-        road_yaw = frenet_state.yaw_ref
-        heading_error = normalize_angle(road_yaw - vehicle_yaw)
+        # 차량의 진행 방향과 도로의 방향의 일치 정도 계산
+        error_to_ref = normalize_angle(ref_yaw - yaw)
+
+        # 차량 위치에서 참조점까지의 각도 계산
+        ref_x, ref_y = frenet_state.x_ref, frenet_state.y_ref
+        dx_to_ref = ref_x - x
+        dy_to_ref = ref_y - y
+        angle_to_ref = normalize_angle(math.atan2(dy_to_ref, dx_to_ref) - yaw)
 
         # 세그먼트 전체 길이
         segment_length = closest_segment.get_length() if closest_segment else 0.0
 
+        # 도로 위에 있는지 여부
+        is_on_road = closest_segment.is_point_on_road(vehicle_pos[:2])
+
         return {
-            'closest_segment': closest_segment,
             'frenet_state': frenet_state,
             'segment_id': frenet_state.segment_id,
-            'distance_to_center': abs(frenet_state.d),
-            'is_on_road': self.network.is_point_on_road(vehicle_pos[:2]),
+            'closest_segment': closest_segment,
+            'segment_length': segment_length,
+            'road_center_point': (frenet_state.x_ref, frenet_state.y_ref),
             's': frenet_state.s,
             'd': frenet_state.d,
             's_dot': frenet_state.s_dot,
             'd_dot': frenet_state.d_dot,
-            'road_center_point': (frenet_state.x_ref, frenet_state.y_ref),
             'road_yaw': frenet_state.yaw_ref,
+            'is_on_road': is_on_road,
             'recommended_speed': recommended_speed,
-            'heading_error': heading_error,
-            'segment_length': segment_length
+            'error_to_ref': error_to_ref,
+            'angle_to_ref': angle_to_ref
         }
 
     def _calculate_speed_from_curvature(self, curvature: float) -> float:
@@ -1864,39 +1912,44 @@ class RoadSystemAPI:
         # min_speed와 max_speed 사이로 제한
         return max(min_speed, min(max_speed, safe_speed))
 
-    def get_vehicle_update_data(self, vehicle_position: Tuple[float, float, float]):
+    def get_vehicle_update_data(self, vehicle_data: Tuple[float, float, float, float, float]):
         """차량 업데이트 데이터 계산 (곡률 기반 동적 권장 속도)
-
+        Args:
+            vehicle_data: 차량의 현재 위치 및 속도 (x, y, yaw, vel_long, vel_lat)
         Returns:
-            Tuple[closest_segment, road_center_point, d, recommended_speed, is_outside_road, heading_error, frenet_s, segment_length]
+            Tuple[frenet_state, closest_segment, segment_length, road_center_point, frenet_s, d, is_outside_road, recommended_speed, error_to_ref, angle_to_ref]
+            - frenet_state: Frenet 좌표계 상태 객체
             - closest_segment: 가장 가까운 도로 세그먼트 객체 (없으면 None)
+            - segment_length: 현재 세그먼트 전체 길이 [m]
             - road_center_point: 도로 중심점 (x, y)
+            - frenet_s: Frenet 호장 길이 [m]
             - d: 횡방향 거리 [m] (왼쪽 양수)
-            - recommended_speed: 곡률 기반 권장 종방향 속도 [m/s]
             - is_outside_road: 도로 이탈 여부
-            - heading_error: 차량 기준 heading error [rad] (road_yaw - vehicle_yaw, -π~π)
+            - recommended_speed: 곡률 기반 권장 종방향 속도 [m/s]
+            - error_to_ref: 차량과 도로 참조점 접선의 일치도 [rad] (road_yaw - vehicle_yaw, -π~π)
                             > 0: 도로가 왼쪽 → 좌회전 필요
                             < 0: 도로가 오른쪽 → 우회전 필요
-            - frenet_s: Frenet 호장 길이 [m]
-            - segment_length: 현재 세그먼트 전체 길이 [m]
+            - angle_to_ref: 차량 위치에서 도로 참조점까지의 각도 [rad] (-π~π)
         """
-        info = self.get_vehicle_road_info(vehicle_position)
+        info = self.get_vehicle_road_info(vehicle_data)
 
         if not info:
-            return None, None, None, None, True, None, None, None
+            return None, None, None, None, None, None, True, None, None, None
 
         return (
+            info['frenet_state'],
             info['closest_segment'],
+            info['segment_length'],
             info['road_center_point'],
-            info['d'],
-            info['recommended_speed'],
-            not info['is_on_road'],
-            info['heading_error'],
             info['s'],
-            info['segment_length']
+            info['d'],
+            not info['is_on_road'],
+            info['recommended_speed'],
+            info['error_to_ref'],
+            info['angle_to_ref']
         )
 
-    def get_road_wdith(self, segment_id: str) -> Optional[float]:
+    def get_road_width(self, segment_id: str) -> Optional[float]:
         """도로 폭 반환"""
         segment = self.network.get_segment(segment_id)
         if segment:

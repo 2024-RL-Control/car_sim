@@ -5,16 +5,18 @@ import torch
 import torch.nn as nn
 import pygame
 import numpy as np
+from math import isnan
 import json
 import gzip
+import gymnasium as gym
 from typing import Dict, Any, Optional, Union, List
-from collections import deque
+from collections import deque, defaultdict
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import re
 from stable_baselines3 import SAC, PPO
 from stable_baselines3.common.callbacks import (
-    CheckpointCallback, BaseCallback, EvalCallback
+    CheckpointCallback, BaseCallback, EvalCallback, CallbackList
 )
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.logger import HParam, TensorBoardOutputFormat
@@ -37,7 +39,13 @@ class EpisodeData:
     outside_roads: Dict[int, bool]
     individual_rewards: List[float]
     elapsed_time: float
+    early_termination: bool
 
+@dataclass
+class StepData:
+    """스텝 데이터 구조"""
+    timestep: int
+    gpu_memory: Optional[float]
 
 class MetricsStore:
     """
@@ -75,7 +83,7 @@ class MetricsStore:
         self.training_start_time = time.time()
         self.last_step_time = time.time()
 
-    def record_step(self, timestep: int, gpu_memory: Optional[float] = None):
+    def record_step(self, step_data: StepData):
         """스텝 기록"""
         current_time = time.time()
 
@@ -83,11 +91,11 @@ class MetricsStore:
             step_time = current_time - self.last_step_time
             self.step_times.append(step_time)
 
-        if gpu_memory is not None:
-            self.gpu_memory_usage.append(gpu_memory)
+        if step_data.gpu_memory is not None:
+            self.gpu_memory_usage.append(step_data.gpu_memory)
 
         self.last_step_time = current_time
-        self.total_timesteps = timestep
+        self.total_timesteps = step_data.timestep
 
     def record_episode(self, episode_data: EpisodeData):
         """에피소드 기록"""
@@ -123,7 +131,7 @@ class MetricsStore:
         )
         return total_collisions / max(1, len(recent_episodes))
 
-    def get_goal_success_rate(self, window: int = 100) -> float:
+    def get_success_rate(self, window: int = 100) -> float:
         """목표 달성률 계산"""
         if not self.episodes:
             return 0.0
@@ -133,21 +141,67 @@ class MetricsStore:
         )
         return total_goals / max(1, len(recent_episodes))
 
+    def get_outside_road_rate(self, window: int = 100) -> float:
+        """도로 이탈률 계산"""
+        if not self.episodes:
+            return 0.0
+        recent_episodes = list(self.episodes)[-window:]
+        total_outside = sum(
+            sum(ep.outside_roads.values()) for ep in recent_episodes
+        )
+        return total_outside / max(1, len(recent_episodes))
+
+    def get_termination_rate(self, window: int = 100) -> float:
+        """조기 종료 비율 계산"""
+        if not self.episodes:
+            return 0.0
+        recent_episodes = list(self.episodes)[-window:]
+        total_early_terminations = sum(
+            1 for ep in recent_episodes if ep.early_termination
+        )
+        return total_early_terminations / max(1, len(recent_episodes))
+
+    def get_rates(self, window: int = 100) -> tuple[float, float, float, float]:
+        """목표 달성률, 조기 종료 비율, 도로 이탈율, 충돌률 반환"""
+        if not self.episodes:
+            return 0.0, 0.0, 0.0, 0.0
+        recent_episodes = list(self.episodes)[-window:]
+        length = len(recent_episodes)
+
+        total_goals = sum(
+            sum(ep.goals_reached.values()) for ep in recent_episodes
+        )
+        total_early_terminations = sum(
+            1 for ep in recent_episodes if ep.early_termination
+        )
+        total_outside = sum(
+            sum(ep.outside_roads.values()) for ep in recent_episodes
+        )
+        total_collisions = sum(
+            sum(ep.collisions.values()) for ep in recent_episodes
+        )
+
+        success_rate = total_goals / max(1, length)
+        termination_rate = total_early_terminations / max(1, length)
+        outside_road_rate = total_outside / max(1, length)
+        collision_rate = total_collisions / max(1, length)
+        return success_rate, termination_rate, outside_road_rate, collision_rate
+
     def get_performance_metrics(self) -> Dict[str, float]:
         """성능 메트릭 반환"""
         metrics = {}
 
         if self.training_start_time:
             elapsed_time = time.time() - self.training_start_time
-            metrics['elapsed_hours'] = elapsed_time / 3600
-            metrics['steps_per_second'] = self.total_timesteps / elapsed_time if elapsed_time > 0 else 0
+            metrics['time/elapsed(h)'] = elapsed_time / 3600
+            metrics['step/per_second(num)'] = self.total_timesteps / elapsed_time if elapsed_time > 0 else 0
 
         if self.step_times:
-            metrics['avg_step_time_ms'] = np.mean(self.step_times) * 1000
+            metrics['step/avg_time(ms)'] = np.mean(self.step_times) * 1000
 
         if self.gpu_memory_usage:
-            metrics['gpu_memory_current_gb'] = self.gpu_memory_usage[-1]
-            metrics['gpu_memory_max_gb'] = max(self.gpu_memory_usage)
+            metrics['gpu/current_memory(gb)'] = self.gpu_memory_usage[-1]
+            metrics['gpu/max_memory(gb)'] = max(self.gpu_memory_usage)
 
         return metrics
 
@@ -168,7 +222,7 @@ class MetricsCollectorCallback(BaseCallback):
     def _on_training_start(self) -> None:
         self.metrics_store.start_training()
         if self.verbose >= 1:
-            print("Metrics collection started")
+            print("    설정: Metrics collection started")
 
     def _on_step(self) -> bool:
         # GPU 메모리 추적
@@ -177,7 +231,8 @@ class MetricsCollectorCallback(BaseCallback):
             if torch.cuda.is_available():
                 gpu_memory = torch.cuda.memory_allocated() / (1024 ** 3)
 
-        self.metrics_store.record_step(self.num_timesteps, gpu_memory)
+        step_data = StepData(timestep=self.num_timesteps, gpu_memory=gpu_memory)
+        self.metrics_store.record_step(step_data)
         return True
 
 
@@ -196,7 +251,7 @@ class VehicleSpecificCallback(BaseCallback):
     def _on_step(self) -> bool:
         # 에피소드 종료 시 즉시 로깅
         if self.metrics_store.episode_count > self.last_episode_count:
-            self._log_vehicle_metrics()
+            self._log_vehicle_metrics(10)
             self.last_episode_count = self.metrics_store.episode_count
 
         return True
@@ -231,16 +286,16 @@ class VehicleSpecificCallback(BaseCallback):
 
             if vehicle_rewards:
                 # 차량별 보상 통계
-                self.logger.record(f"vehicle_{vehicle_id}/mean_reward", np.mean(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/std_reward", np.std(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/max_reward", np.max(vehicle_rewards))
-                self.logger.record(f"vehicle_{vehicle_id}/min_reward", np.min(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/mean/{window}", np.mean(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/std/{window}", np.std(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/max/{window}", np.max(vehicle_rewards))
+                self.logger.record(f"vehicle_{vehicle_id}/reward/min/{window}", np.min(vehicle_rewards))
 
                 # 차량별 성능 지표
                 num_episodes = len(recent_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/collision_rate", vehicle_collisions / num_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/goal_success_rate", vehicle_goals / num_episodes)
-                self.logger.record(f"vehicle_{vehicle_id}/outside_road_rate", vehicle_outside_roads / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate/success/{window}", vehicle_goals / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate/outside/{window}", vehicle_outside_roads / num_episodes)
+                self.logger.record(f"vehicle_{vehicle_id}/rate/collision/{window}", vehicle_collisions / num_episodes)
 
 
 class SystemPerformanceCallback(BaseCallback):
@@ -292,8 +347,71 @@ class TensorBoardLogger(BaseCallback):
             None
         )
 
-        # 하이퍼파라미터 로깅
-        self._log_hyperparameters()
+    def _on_training_end(self) -> None:
+        """훈련 종료 시 최종 성능과 하이퍼파라미터를 기록합니다."""
+        if self.tb_formatter is None:
+            return
+
+        # 1. 하이퍼파라미터 로깅
+        hparam_dict = self._get_hparam_dict()
+
+        # 2. 최종 성능 지표 로깅
+        mean_reward_10 = self.metrics_store.get_recent_mean_reward(window=10)
+        mean_length_10 = self.metrics_store.get_recent_mean_length(window=10)
+
+        success_rate_10, termination_rate_10, outside_road_rate_10, collision_rate_10 = self.metrics_store.get_rates(window=10)
+        success_rate_30, termination_rate_30, outside_road_rate_30, collision_rate_30 = self.metrics_store.get_rates(window=30)
+        success_rate_50, term_rate_50, out_rate_50, coll_rate_50 = self.metrics_store.get_rates(window=50)
+        perf_metrics = self.metrics_store.get_performance_metrics()
+
+        metric_dict = {
+            "episode/reward/mean/10": mean_reward_10,
+            "episode/length/mean/10": mean_length_10,
+            "episode/reward/best": self.metrics_store.best_reward,
+            "rate/success/10": success_rate_10,
+            "rate/termination/10": termination_rate_10,
+            "rate/outside/10": outside_road_rate_10,
+            "rate/collision/10": collision_rate_10,
+            "rate/success/30": success_rate_30,
+            "rate/termination/30": termination_rate_30,
+            "rate/outside/30": outside_road_rate_30,
+            "rate/collision/30": collision_rate_30,
+            "rate/success/50": success_rate_50,
+            "rate/termination/50": term_rate_50,
+            "rate/outside/50": out_rate_50,
+            "rate/collision/50": coll_rate_50,
+            "time/elapsed(h)": perf_metrics['time/elapsed(h)'],
+            "step/per_second(num)": perf_metrics['step/per_second(num)'],
+            "step/avg_time(ms)": perf_metrics['step/avg_time(ms)'],
+        }
+
+        cleaned_metric_dict = {}
+        for key, value in metric_dict.items():
+            if value is None or (isinstance(value, float) and isnan(value)):
+                cleaned_metric_dict[key] = "N/A"
+            elif isinstance(value, float):
+                cleaned_metric_dict[key] = f"{value:.4f}" # 소수점 4자리까지
+            else:
+                cleaned_metric_dict[key] = value
+
+        # 3. 딕셔너리를 Markdown 테이블 형식의 문자열로 변환
+        hparam_md = "### Hyperparameters\n| Parameter | Value |\n|:---|:---|\n"
+        for key, value in hparam_dict.items():
+            hparam_md += f"| {key} | {value} |\n"
+
+        metric_md = "\n### Metrics\n| Metric | Value |\n|:---|:---|\n"
+        for key, value in cleaned_metric_dict.items():
+            metric_md += f"| {key} | {value} |\n"
+
+        # 4. add_text를 사용하여 TensorBoard에 기록
+        final_summary_text = hparam_md + metric_md
+        self.tb_formatter.writer.add_text("Final Summary", final_summary_text, self.num_timesteps)
+        self.tb_formatter.writer.flush()
+
+        if self.verbose > 0:
+            print("\n" + "="*30)
+            print("HParams logged to TensorBoard.")
+            print("="*30 + "\n")
 
     def _on_step(self) -> bool:
         if self.n_calls % self.log_freq == 0:
@@ -304,73 +422,67 @@ class TensorBoardLogger(BaseCallback):
             mean_reward = self.metrics_store.get_recent_mean_reward(window=10)
             mean_length = self.metrics_store.get_recent_mean_length(window=10)
 
-            self.logger.record("rollout/episode_reward_mean_10", mean_reward)
-            self.logger.record("rollout/episode_length_mean_10", mean_length)
-            self.logger.record("rollout/best_reward", self.metrics_store.best_reward)
+            self.logger.record("rollout/episode/reward/mean/10", mean_reward)
+            self.logger.record("rollout/episode/length/mean/10", mean_length)
+            self.logger.record("rollout/episode/reward/best", self.metrics_store.best_reward)
 
-            # 차량 메트릭
-            collision_rate = self.metrics_store.get_collision_rate(window=50)
-            goal_rate = self.metrics_store.get_goal_success_rate(window=50)
+            # 메트릭
+            success_rate_30, termination_rate_30, outside_road_rate_30, collision_rate_30 = self.metrics_store.get_rates(window=30)
+            self.logger.record("rollout/rate/success/30", success_rate_30)
+            self.logger.record("rollout/rate/termination/30", termination_rate_30)
+            self.logger.record("rollout/rate/outside/30", outside_road_rate_30)
+            self.logger.record("rollout/rate/collision/30", collision_rate_30)
 
-            self.logger.record("vehicles/collision_rate", collision_rate)
-            self.logger.record("vehicles/goal_success_rate", goal_rate)
+            success_rate_50, termination_rate_50, outside_road_rate_50, collision_rate_50 = self.metrics_store.get_rates(window=50)
+            self.logger.record("rollout/rate/success/50", success_rate_50)
+            self.logger.record("rollout/rate/termination/50", termination_rate_50)
+            self.logger.record("rollout/rate/outside/50", outside_road_rate_50)
+            self.logger.record("rollout/rate/collision/50", collision_rate_50)
 
             # 방금전 에피소드 메트릭
             episode = self.metrics_store.episodes[-1]
-            self.logger.record("rollout/episode_reward", episode.reward)
-            self.logger.record("rollout/episode_length", episode.length)
+            self.logger.record("rollout/episode/reward", episode.reward)
+            self.logger.record("rollout/episode/length", episode.length)
             self.logger.dump(episode.timesteps)
 
             self.last_episode_count = self.metrics_store.episode_count
 
         return True
 
-    def _log_hyperparameters(self):
+    def _get_hparam_dict(self) -> Dict[str, Any]:
         """하이퍼파라미터 로깅"""
-        hparam_dict = {
-            "algorithm": self.model.__class__.__name__,
-            "learning_rate": float(self.model.learning_rate),
-            "gamma": float(self.model.gamma),
-        }
+        hparam_dict = {}
 
-        # 알고리즘별 특화 파라미터
-        algo_specific = {
-            'batch_size': getattr(self.model, 'batch_size', None),
-            'buffer_size': getattr(self.model, 'buffer_size', None),
-            'tau': getattr(self.model, 'tau', None),
-            'ent_coef': getattr(self.model, 'ent_coef', None),
-            'n_steps': getattr(self.model, 'n_steps', None),
-            'n_epochs': getattr(self.model, 'n_epochs', None),
-        }
-
-        for key, value in algo_specific.items():
+        for key, value in self.env_config['hyperparameters'].items():
             if value is not None:
                 hparam_dict[key] = float(value) if isinstance(value, (int, float)) else value
 
         # 환경 설정
         if self.env_config:
             env_params = {
-                "num_vehicles": self.env_config.get('num_vehicles', 1),
-                "max_episode_steps": self.env_config.get('max_episode_steps', 1000),
-                "num_static_obstacles": self.env_config.get('num_static_obstacles', 0),
-                "num_dynamic_obstacles": self.env_config.get('num_dynamic_obstacles', 0),
+                "env/num_vehicles": self.env_config.get('num_vehicles', 1),
+                "env/max_episode_steps": self.env_config.get('max_episode_steps', 1000),
+                "env/num_static_obstacles": self.env_config.get('num_static_obstacles', 0),
+                "env/num_dynamic_obstacles": self.env_config.get('num_dynamic_obstacles', 0),
+                "env/termination_check_step": self.env_config.get('termination_check_step', 0),
+                "env/progress_change_threshold": self.env_config.get('progress_change_threshold', 0),
             }
             hparam_dict.update(env_params)
 
-        # 메트릭 정의
-        metric_dict = {
-            "rollout/episode_reward_mean_10": 0.0,
-            "rollout/episode_length_mean_10": 0.0,
-            "vehicles/collision_rate": 0.0,
-            "vehicles/goal_success_rate": 0.0,
-            "performance/steps_per_second": 0.0,
-        }
+            reward_params = {
+                "reward/success": self.env_config['reward_factor'].get('success', 0.0),
+                "reward/collision": self.env_config['reward_factor'].get('collision', 0.0),
+                "reward/outside": self.env_config['reward_factor'].get('outside', 0.0),
+                "reward/termination": self.env_config['reward_factor'].get('termination', 0.0),
+                "reward/progress": self.env_config['reward_factor'].get('w_progress', 0.0),
+                "reward/lane": self.env_config['reward_factor'].get('w_lane', 0.0),
+                "reward/speed": self.env_config['reward_factor'].get('w_speed', 0.0),
+                "reward/speed/under": self.env_config['reward_factor'].get('s_speed_under', 0.0),
+                "reward/speed/over": self.env_config['reward_factor'].get('s_speed_over', 0.0),
+            }
+            hparam_dict.update(reward_params)
 
-        self.logger.record(
-            "hparams",
-            HParam(hparam_dict, metric_dict),
-            exclude=("stdout", "log", "json", "csv"),
-        )
+        return hparam_dict
 
     def _log_metrics(self):
         """메트릭 로깅"""
@@ -427,8 +539,8 @@ class CustomCSVLogger(BaseCallback):
     def _init_csv(self):
         """CSV 파일 초기화"""
         headers = [
-            "elapsed_time", "episode", "timesteps", "reward", "length", "collision_rate",
-            "success_rate", "best_reward"
+            "elapsed_time", "episode", "timesteps", "reward", "length", "rate_success", "termination",
+            "rate_collision", "best_reward"
         ]
 
         with open(self.csv_file, 'w', encoding='utf-8') as f:
@@ -446,8 +558,9 @@ class CustomCSVLogger(BaseCallback):
         try:
             episode = self.metrics_store.episodes[-1]
 
+            success_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
+            termination = 1.0 if episode.early_termination else 0.0
             collision_rate = sum(episode.collisions.values()) / max(1, len(episode.collisions))
-            goal_rate = sum(episode.goals_reached.values()) / max(1, len(episode.goals_reached))
 
             row = [
                 f"{episode.elapsed_time:.2f}",
@@ -455,8 +568,9 @@ class CustomCSVLogger(BaseCallback):
                 episode.timesteps,
                 f"{episode.reward:.4f}",
                 episode.length,
+                f"{success_rate:.4f}",
+                f"{termination:.4f}",
                 f"{collision_rate:.4f}",
-                f"{goal_rate:.4f}",
                 f"{self.metrics_store.best_reward:.4f}"
             ]
 
@@ -485,6 +599,7 @@ class SmartCheckpointManager(BaseCallback):
         self.max_checkpoints = max_checkpoints
         self.checkpoint_metadata = []
         self.save_best_model = save_best_model
+        self.best_success_rate = -np.inf
         self.last_episode_count = 0  # 마지막 로깅한 에피소드 수
 
         # 저장 디렉토리 생성
@@ -500,10 +615,15 @@ class SmartCheckpointManager(BaseCallback):
         # 에피소드 종료 시 최고 성능 모델 저장
         if self.save_best_model:
             if self.metrics_store.episode_count > self.last_episode_count:
-                episode = self.metrics_store.episodes[-1]
-                if episode.reward >= self.metrics_store.best_reward:
+                success_rate = self.metrics_store.get_success_rate(window=30)
+                if success_rate > self.best_success_rate:
+                    self.best_success_rate = success_rate
                     self._save_best_model()
                 self.last_episode_count = self.metrics_store.episode_count
+                # episode = self.metrics_store.episodes[-1]
+                # if episode.reward >= self.metrics_store.best_reward:
+                #     self._save_best_model()
+                # self.last_episode_count = self.metrics_store.episode_count
 
         return True
 
@@ -517,13 +637,16 @@ class SmartCheckpointManager(BaseCallback):
 
     def _save_checkpoint_metadata(self):
         """체크포인트 메타데이터 저장"""
+        success_rate, termination_rate, outside_road_rate, collision_rate = self.metrics_store.get_rates(window=50)
         metadata = {
             'timestep': self.num_timesteps,
             'episode': self.metrics_store.episode_count,
-            'mean_reward': self.metrics_store.get_recent_mean_reward(10),
+            'mean_reward': self.metrics_store.get_recent_mean_reward(window=50),
             'best_reward': self.metrics_store.best_reward,
-            'collision_rate': self.metrics_store.get_collision_rate(50),
-            'goal_success_rate': self.metrics_store.get_goal_success_rate(50),
+            'rate_success': success_rate,
+            'rate_termination': termination_rate,
+            'rate_outside': outside_road_rate,
+            'rate_collision': collision_rate,
             'timestamp': time.time()
         }
 
@@ -556,7 +679,6 @@ class SmartCheckpointManager(BaseCallback):
         self.model.save(checkpoint_path)
         if self.name_prefix == 'sac':
             self.model.save_replay_buffer(os.path.join(self.save_path, f"{self.name_prefix}_best_replay_buffer"))
-
 
 # 콜백 팩토리 함수
 def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir: str) -> List[BaseCallback]:
@@ -619,7 +741,7 @@ def create_optimized_callbacks(config: Dict[str, Any], log_dir: str, models_dir:
         metrics_store,
         config.get('checkpoint_freq', 10000),
         models_dir,
-        config.get('algorithm', 'model'),
+        config.get('algorithm'),
         config.get('max_checkpoints', 5),
         config.get('save_best_model', True),
         config.get('verbose', 0)
@@ -644,7 +766,7 @@ class SACVehicleAlgorithm(SAC):
     """
     다중 차량을 위한 커스텀 강화학습 알고리즘 클래스
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, logging_freq: int = 100, **kwargs):
         super().__init__(*args, **kwargs)
         # 추가 속성 설정
         self.rl_env = None
@@ -654,6 +776,7 @@ class SACVehicleAlgorithm(SAC):
         self.total_reward = 0
         self.individual_rewards = None
         self.metrics_store = None  # 메트릭 스토어 참조
+        self.logging_freq = logging_freq
 
     def set_env_info(self, rl_env):
         """
@@ -707,7 +830,7 @@ class SACVehicleAlgorithm(SAC):
                 # 활성화된 에이전트의 관측값만 선택
                 active_obs = self.prev_observations[active_mask]
                 # 배치로 한번에 예측
-                active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
+                active_obs_tensor = torch.as_tensor(active_obs, device=self.device, dtype=torch.float32)
                 with torch.no_grad():
                     actions_tensor, _ = self.policy.actor.action_log_prob(active_obs_tensor)
                 # NumPy 배열로 변환
@@ -724,7 +847,12 @@ class SACVehicleAlgorithm(SAC):
         # 4) 렌더링
         self.rl_env.render()
 
-        # 5) 활성화된 에이전트만 경험 저장
+        # 5) 콜백 호출
+        callback.update_locals(locals())
+        if not callback.on_step():
+            return False
+
+        # 6) 활성화된 에이전트만 경험 저장
         active_idx = np.where(active_mask)[0]
         for idx in active_idx:
             self.replay_buffer.add(
@@ -736,14 +864,9 @@ class SACVehicleAlgorithm(SAC):
                 infos={"terminal_observation": next_observations[idx] if done else None}
             )
 
-        # 6) 내부 상태 갱신
+        # 7) 내부 상태 갱신
         self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
-        self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
-
-        # 7) 콜백 호출
-        callback.update_locals(locals())
-        if not callback.on_step():
-            return False
+        self.prev_active_mask = np.array(info['active_agents'], dtype=bool)
 
         # 8) 에피소드 종료 시 처리
         if done:
@@ -755,7 +878,7 @@ class SACVehicleAlgorithm(SAC):
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
-        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}")
+        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}, "f"Early Termination: {info['early_termination']}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
         if self.metrics_store:
@@ -767,8 +890,9 @@ class SACVehicleAlgorithm(SAC):
                 collisions=info['collisions'].copy(),
                 goals_reached=info['reached_targets'].copy(),
                 outside_roads=info['outside_roads'].copy(),
+                early_termination=info['early_termination'],
                 individual_rewards=self.individual_rewards.tolist(),
-                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
+                elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0,
             )
 
             self.metrics_store.record_episode(episode_data)
@@ -810,9 +934,57 @@ class SACVehicleAlgorithm(SAC):
         callback.on_training_end()
         return self
 
+    def _get_tb_writer(self):
+        """
+        로거에서 TensorBoard writer를 찾아 반환합니다.
+        """
+        output_formats = self.logger.output_formats
+        tb_formatter = next(
+            (formatter for formatter in output_formats
+            if isinstance(formatter, TensorBoardOutputFormat)),
+            None
+        )
+        return tb_formatter.writer if tb_formatter else None
+
+    def train(self, batch_size: int, gradient_steps: int) -> None:
+        """
+        SAC 훈련 스텝을 수행하고 추가 메트릭을 로깅합니다.
+        """
+        super().train(batch_size=batch_size, gradient_steps=gradient_steps)
+
+        if self.num_timesteps % self.logging_freq == 0:
+            # 텐서보드 writer 가져오기
+            tb_writer = self._get_tb_writer()
+
+            # 훈련 전에 리플레이 버퍼에서 데이터 샘플링
+            if tb_writer:
+                replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
+                with torch.no_grad():
+                    # Critic을 통해 Q-가치 예측
+                    qf1_values, qf2_values = self.critic(replay_data.observations, replay_data.actions)
+                    q_values = torch.min(qf1_values, qf2_values).cpu().numpy().flatten()
+                    actions = replay_data.actions.cpu().numpy()
+                    throttle_actions = actions[:, 0]
+                    steering_actions = actions[:, 1]
+
+                    # 스칼라 값 로깅 (Q-Value)
+                    self.logger.record("sac/q_values/mean", np.mean(q_values))
+
+                    # 스칼라 값 로깅 (가속/제동)
+                    self.logger.record("sac/actions/throttle/mean", np.mean(throttle_actions))
+                    self.logger.record("sac/actions/throttle/std", np.std(throttle_actions))
+
+                    # 스칼라 값 로깅 (조향)
+                    self.logger.record("sac/actions/steering/mean", np.mean(steering_actions))
+                    self.logger.record("sac/actions/steering/std", np.std(steering_actions))
+
+                    # 히스토그램 로깅
+                    tb_writer.add_histogram("sac/q_values", q_values, self.num_timesteps)
+                    tb_writer.add_histogram("sac/actions/throttle", throttle_actions, self.num_timesteps)
+                    tb_writer.add_histogram("sac/actions/steering", steering_actions, self.num_timesteps)
 
 class PPOVehicleAlgorithm(PPO):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, logging_freq: int = 100, **kwargs):
         super().__init__(*args, **kwargs)
         # 추가 속성 설정
         self.rl_env = None
@@ -823,6 +995,7 @@ class PPOVehicleAlgorithm(PPO):
         self.individual_rewards = None
         self._is_new_episode = True
         self.metrics_store = None
+        self.logging_freq = logging_freq
 
     def set_env_info(self, rl_env):
         """
@@ -872,7 +1045,7 @@ class PPOVehicleAlgorithm(PPO):
             # 활성 에이전트에 한해서만 정책 네트워크를 통과
             if active_mask.any():
                 active_obs = self.prev_observations[active_mask]
-                active_obs_tensor = torch.as_tensor(active_obs, device=self.device)
+                active_obs_tensor = torch.as_tensor(active_obs, device=self.device, dtype=torch.float32)
                 with torch.no_grad():
                     actions_tensor, values_tensor, log_prob_tensor = self.policy.forward(active_obs_tensor)
 
@@ -897,7 +1070,12 @@ class PPOVehicleAlgorithm(PPO):
             # 4) 렌더링
             self.rl_env.render()
 
-            # 5) 활성 에이전트마다 RolloutBuffer에 transition 추가
+            # 5) 콜백 호출
+            callback.update_locals(locals())
+            if not callback.on_step():
+                return False
+
+            # 6) 활성 에이전트마다 RolloutBuffer에 transition 추가
             active_indices = np.where(active_mask)[0]
             for idx in active_indices:
                 # 개별 차량을 rollout buffer에 저장
@@ -913,16 +1091,11 @@ class PPOVehicleAlgorithm(PPO):
                 if step_count >= n_steps:
                     return True
 
-            # 6) 내부 상태 갱신
+            # 7) 내부 상태 갱신
             if self._is_new_episode:
                 self._is_new_episode = False
             self.prev_observations = next_observations  # shape=(num_vehicles, obs_dim)
-            self.prev_active_mask = np.array(self.rl_env.active_agents, dtype=bool)
-
-            # 7) 콜백 호출
-            callback.update_locals(locals())
-            if not callback.on_step():
-                return False
+            self.prev_active_mask = np.array(info['active_agents'], dtype=bool)
 
             # 8) 에피소드 종료 시 처리
             if done:
@@ -934,7 +1107,7 @@ class PPOVehicleAlgorithm(PPO):
     def _handle_episode_end(self, info):
         """에피소드 종료 시 처리 (메트릭 스토어 업데이트 포함)"""
         # 기본 로깅
-        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}")
+        print(f"Episode {info['episode_count']}, "f"Steps: {info['episode_length']}, "f"Total Reward: {self.total_reward:.2f}, "f"Early Termination: {info['early_termination']}")
 
         # 메트릭 스토어에 에피소드 데이터 기록
         if self.metrics_store:
@@ -946,6 +1119,7 @@ class PPOVehicleAlgorithm(PPO):
                 collisions=info['collisions'].copy(),
                 goals_reached=info['reached_targets'].copy(),
                 outside_roads=info['outside_roads'].copy(),
+                early_termination=info['early_termination'],
                 individual_rewards=self.individual_rewards.tolist(),
                 elapsed_time=time.time() - self.metrics_store.training_start_time if self.metrics_store.training_start_time else 0
             )
@@ -980,11 +1154,64 @@ class PPOVehicleAlgorithm(PPO):
             if not continue_training:
                 break
 
+            if self.num_timesteps % self.logging_freq == 0:
+                if self.rollout_buffer.full:
+                    # 어드밴티지 계산
+                    self.rollout_buffer.compute_returns_and_advantage(
+                        last_values=torch.zeros(self.num_vehicles,),  # Dummy last values
+                        dones=np.zeros(self.num_vehicles,) # Dummy dones
+                    )
+                    self._log_ppo_specific_metrics()
+
             self.train()
             self.rollout_buffer.reset()
 
         callback.on_training_end()
         return self
+
+    def _get_tb_writer(self):
+        """
+        로거에서 TensorBoard writer를 찾아 반환합니다.
+        """
+        output_formats = self.logger.output_formats
+        tb_formatter = next(
+            (formatter for formatter in output_formats
+            if isinstance(formatter, TensorBoardOutputFormat)),
+            None
+        )
+        return tb_formatter.writer if tb_formatter else None
+
+    def _log_ppo_specific_metrics(self):
+        """PPO 롤아웃 데이터를 텐서보드에 로깅합니다."""
+        # 텐서보드 writer 가져오기
+        tb_writer = self._get_tb_writer()
+        if not tb_writer:
+            return
+
+        # 데이터 추출 (Numpy 배열로 변환)
+        actions = self.rollout_buffer.actions
+        throttle_actions = actions[:, 0]
+        steering_actions = actions[:, 1]
+        advantages = self.rollout_buffer.advantages.flatten()
+        values = self.rollout_buffer.values.flatten()
+
+        # 스칼라 값 로깅 (가속/제동)
+        self.logger.record("ppo/actions/throttle/mean", np.mean(throttle_actions))
+        self.logger.record("ppo/actions/throttle/std", np.std(throttle_actions))
+
+        # 스칼라 값 로깅 (조향)
+        self.logger.record("ppo/actions/steering/mean", np.mean(steering_actions))
+        self.logger.record("ppo/actions/steering/std", np.std(steering_actions))
+
+        # 스칼라 값 로깅 (Advantages & Values)
+        self.logger.record("ppo/advantages/mean", np.mean(advantages))
+        self.logger.record("ppo/values/mean", np.mean(values))
+
+        # 히스토그램 로깅
+        tb_writer.add_histogram("ppo/actions/throttle", throttle_actions, self.num_timesteps)
+        tb_writer.add_histogram("ppo/actions/steering", steering_actions, self.num_timesteps)
+        tb_writer.add_histogram("ppo/advantages", advantages, self.num_timesteps)
+        tb_writer.add_histogram("ppo/values", values, self.num_timesteps)
 
 
 # 커스텀 피처 익스트랙터
@@ -1052,3 +1279,45 @@ class CustomFeatureExtractor(BaseFeaturesExtractor):
     def forward(self, obs):
         x = self.flatten(obs)
         return self.mlp(x)
+
+class CustomFeatureExtractor2(BaseFeaturesExtractor):
+    """
+    RNN(GRU)을 사용하여 (k, features) 시퀀스를 처리하는 커스텀 피처 추출기
+    입력: (Batch, k, obs_dim)
+    출력: (Batch, features_dim)
+    """
+    def __init__(self, observation_space: gym.Space, net_arch: list[int]):
+        # features_dim은 RNN의 은닉 크기(출력 크기)가 됩니다.
+        super().__init__(observation_space, features_dim=net_arch[-1])
+
+        # observation_space.shape는 (k, obs_dim)
+        # (gym.Space는 배치 차원을 포함하지 않습니다)
+        if len(observation_space.shape) != 2:
+            raise ValueError(
+                f"예상된 관측 공간 형태는 (k, obs_dim)이지만, "
+                f"실제 형태는 {observation_space.shape}입니다."
+            )
+
+        k_frames = observation_space.shape[0] # 프레임 수 (k)
+        obs_dim = observation_space.shape[1]  # 관측 차원 (obs_dim)
+
+        self.rnn = nn.GRU(
+            input_size=obs_dim,       # 27
+            hidden_size=net_arch[-1], # 128 (지정된 features_dim)
+            num_layers=1,             # RNN 레이어 수
+            batch_first=True          # 입력 텐서 형태: (Batch, Seq, Feat)
+        )
+
+    def forward(self, observations: torch.Tensor) -> torch.Tensor:
+        """
+        observations 텐서의 형태: (Batch, k, obs_dim)
+        (Batch는 여기서 num_vehicles 또는 활성화된 에이전트 수)
+        """
+        # rnn_output 형태: (Batch, k, 128)
+        # hidden_state 형태: (1, Batch, 128)
+        # rnn(observations)는 (시퀀스 전체의 출력, 마지막 은닉 상태)를 반환합니다.
+        rnn_output, hidden_state = self.rnn(observations)
+
+        # 우리는 시퀀스의 마지막 타임스텝의 출력만 정책망에 전달합니다.
+        # rnn_output[:, -1, :]는 (Batch, 128) 형태가 됩니다.
+        return rnn_output[:, -1, :]
