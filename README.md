@@ -44,11 +44,6 @@ The `car_sim` repository is a 2D top-down vehicle simulator designed for reinfor
 
 This document provides a high-level architectural overview of the entire system. For detailed information on specific subsystems:
 
-* Configuration parameters: see [Configuration System](/2024-RL-Control/car_sim/2.1-configuration-system)
-* RL training procedures: see [Reinforcement Learning](/2024-RL-Control/car_sim/5-reinforcement-learning)
-* Physics and vehicle dynamics: see [Physics Engine](/2024-RL-Control/car_sim/3.2-physics-engine)
-* Path planning algorithms: see [Road Network and Path Planning](/2024-RL-Control/car_sim/3.3-road-network-and-path-planning)
-
 **Sources**: [config/config.yaml L1-L226](https://github.com/2024-RL-Control/car_sim/blob/a8670ab1/config/config.yaml#L1-L226)
 
  [main.py L1-L66](https://github.com/2024-RL-Control/car_sim/blob/a8670ab1/main.py#L1-L66)
@@ -427,8 +422,6 @@ simulation.rl:
     outside: -200
 ```
 
-For comprehensive configuration documentation, see [Configuration System](/2024-RL-Control/car_sim/2.1-configuration-system).
-
 **Sources**: [config/config.yaml L1-L226](https://github.com/2024-RL-Control/car_sim/blob/a8670ab1/config/config.yaml#L1-L226)
 
 ---
@@ -461,8 +454,6 @@ Renderer --> HUD
 ```
 
 The `Renderer` class maintains performance metrics (FPS, physics time) and supports debug visualization modes. The `Camera` class provides viewport management with zoom and pan capabilities. The `HUD` overlays state information including vehicle velocities, progress, and system performance.
-
-For detailed rendering system documentation, see [Visualization and User Interface](/2024-RL-Control/car_sim/6-visualization-and-user-interface).
 
 **Sources**: [src/ui/renderer.py](https://github.com/2024-RL-Control/car_sim/blob/a8670ab1/src/ui/renderer.py)
 
