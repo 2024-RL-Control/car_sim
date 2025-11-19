@@ -213,10 +213,10 @@ classic:
     pid_kp: 0.6       # PID Proportional gain
     pid_ki: 0.1       # PID Integral gain
     pid_kd: 0.05      # PID Derivative gain
-    stanley_k_e: 0.5    # Stanley crosstrack error gain
-    stanley_k_s: 0.2    # Stanley softening gain (for low speed)
+    stanley_k_e: 0.7    # Stanley crosstrack error gain
+    stanley_k_s: 0.35   # Stanley softening gain (for low speed)
   planning:
-    t_horizons: [0.3, 0.5, 0.8, 1.0, 1.5]  # [s] 계획 시간 범위
+    t_horizons: [0.3, 0.5, 0.8, 1.0]  # [s] 계획 시간 범위
     d_offsets: [-2.0, -1.0, 0.0, 1.0, 2.0] # [m] 횡방향 오프셋
     path_resolution_dt: 0.2     # [s] 궤적 샘플링 간격
     w_safety: 100.0             # 안전 비용 가중치

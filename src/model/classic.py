@@ -86,7 +86,7 @@ class QuinticPolynomial:
 
 class LatticePlanner:
     """
-    Frenet 좌표계에서 다수의 후보 궤적을 생성하는 Lattice Planner
+    Frenet 좌표계에서 다수의 후보 궤적을 생성하는 Lattice Planner (Vectorized)
     """
     def __init__(self, planning_config: Dict):
         # config.yaml에서 로드할 파라미터
@@ -97,14 +97,6 @@ class LatticePlanner:
     def plan(self, current_frenet: FrenetState, current_segment: LinearRoadSegment, target_vel: float) -> List[Trajectory]:
         """
         후보 궤적들을 계획합니다.
-
-        Args:
-            current_frenet: 현재 차량의 Frenet 상태 (s, s_dot, d, d_dot 포함)
-            current_segment: 차량이 위치한 현재 도로 세그먼트
-            target_vel: 목표 종방향 속도 (s_dot)
-
-        Returns:
-            List[Trajectory]: 생성된 후보 궤적 리스트
         """
         candidate_trajectories = []
 
@@ -114,65 +106,22 @@ class LatticePlanner:
 
         for T in self.T_HORIZONS:
             for D in self.D_OFFSETS:
-                # 1. 종방향(s) 궤적 생성 (목표 속도 추종)
+                # 1. 종방향(s) 궤적 생성
                 s_end_state = (s0 + target_vel * T, target_vel, 0.0)
                 s_poly = QuinticPolynomial(s0, s_dot0, s_ddot0, s_end_state[0], s_end_state[1], s_end_state[2], T)
 
-                # 2. 횡방향(d) 궤적 생성 (목표 오프셋 추종)
-                d_end_state = (D, 0.0, 0.0) # 횡방향 속도/가속도 0으로 수렴
+                # 2. 횡방향(d) 궤적 생성
+                d_end_state = (D, 0.0, 0.0)
                 d_poly = QuinticPolynomial(d0, d_dot0, d_ddot0, d_end_state[0], d_end_state[1], d_end_state[2], T)
 
                 if not s_poly.valid or not d_poly.valid:
                     continue
 
-                # 3. 궤적 샘플링 및 전역 변환
-                frenet_path = []
-                global_path = []
-                t_samples = np.arange(0.0, T + self.PATH_RESOLUTION, self.PATH_RESOLUTION)
+                # 3. 궤적 샘플링 및 전역 변환 (벡터화 적용)
+                global_path, frenet_path = self._generate_path_vectorized(s_poly, d_poly, T, current_segment)
 
-                valid_path = True
-                for t in t_samples:
-                    s = s_poly.calc(t)
-                    s_dot = s_poly.calc_d(t)
-                    d = d_poly.calc(t)
-                    d_dot = d_poly.calc_d(t)
-
-                    if s_dot < 0.1: # 속도가 너무 낮으면 (분모 0 방지)
-                        s_dot = 0.1 # 최소 속도 보장
-
-                    frenet_path.append(FrenetState(s=s, d=d, s_dot=s_dot, d_dot=d_dot))
-
-                    # Frenet -> Cartesian 변환
-                    try:
-                        ref_point = current_segment.evaluate_at_arc_length(s)
-                        ref_x, ref_y, ref_yaw = ref_point[0], ref_point[1], ref_point[2]
-                        ref_kappa = current_segment.get_curvature_at_s(s)
-
-                        # Frenet -> Cartesian 변환 공식
-                        x = ref_x - d * sin(ref_yaw)
-                        y = ref_y + d * cos(ref_yaw)
-
-                        # 경로의 Yaw 계산
-                        d_prime = d_dot / s_dot # d'(s)
-                        one_minus_kappa_d = 1 - ref_kappa * d
-
-                        if abs(one_minus_kappa_d) < 1e-6: # 분모 0 방지
-                            valid_path = False
-                            break
-
-                        path_yaw = normalize_angle(ref_yaw + atan2(d_prime, one_minus_kappa_d))
-
-                        # 경로의 속도 계산 (v)
-                        path_vel = s_dot * (one_minus_kappa_d / cos(path_yaw - ref_yaw))
-
-                        global_path.append(Waypoint(x=x, y=y, yaw=path_yaw, v=path_vel, kappa=ref_kappa))
-
-                    except Exception as e:
-                        print(f"Warning: Path conversion failed. {e}")
-                        valid_path = False
-                        break
-
-                if valid_path and global_path:
+                # 경로 생성에 성공했을 경우에만 추가
+                if global_path is not None:
                     candidate_trajectories.append(Trajectory(
                         global_path=global_path,
                         frenet_path=frenet_path,
@@ -180,6 +129,76 @@ class LatticePlanner:
                     ))
 
         return candidate_trajectories
+
+    def _generate_path_vectorized(self, s_poly, d_poly, T, current_segment):
+        """
+        NumPy를 이용하여 궤적 포인트들을 한 번에 계산합니다. (최적화됨)
+        """
+        # 시간 배열 생성 (예: [0.0, 0.2, 0.4 ... T])
+        t_samples = np.arange(0.0, T + self.PATH_RESOLUTION, self.PATH_RESOLUTION)
+
+        # 1. 다항식 평가 (NumPy Broadcasting)
+        # 입력이 배열이면 출력도 배열로 나옵니다.
+        s_values = s_poly.calc(t_samples)
+        s_dot_values = s_poly.calc_d(t_samples)
+        d_values = d_poly.calc(t_samples)
+        d_dot_values = d_poly.calc_d(t_samples)
+
+        # 분모 0 방지 (최소 속도 클리핑)
+        s_dot_values = np.maximum(s_dot_values, 0.1)
+
+        # 2. 도로 참조점 조회 (List Comprehension)
+        # RoadSystemAPI가 스칼라 입력만 받는다고 가정할 때, 이곳은 Python 루프를 돕니다.
+        # (만약 evaluate_at_arc_length가 numpy array를 지원한다면 이 부분도 더 빨라질 수 있습니다)
+        try:
+            ref_points = np.array([current_segment.evaluate_at_arc_length(s) for s in s_values])
+            ref_kappas = np.array([current_segment.get_curvature_at_s(s) for s in s_values])
+
+            # ref_points shape: (N, 3) -> x, y, yaw
+            ref_x = ref_points[:, 0]
+            ref_y = ref_points[:, 1]
+            ref_yaw = ref_points[:, 2]
+        except Exception as e:
+            # 도로 범위를 벗어나는 등 에러 발생 시 해당 궤적 폐기
+            return None, None
+
+        # 3. Frenet -> Global 좌표 변환 (전체 배열 연산)
+        # math.sin 대신 np.sin을 사용해야 배열 연산이 가능합니다.
+        x = ref_x - d_values * np.sin(ref_yaw)
+        y = ref_y + d_values * np.cos(ref_yaw)
+
+        # Yaw 및 속도 계산을 위한 중간 변수
+        d_prime = d_dot_values / s_dot_values
+        one_minus_kappa_d = 1.0 - ref_kappas * d_values
+
+        # 유효성 검사: 분모가 0에 가까운지 확인 (Singularity check)
+        if np.any(np.abs(one_minus_kappa_d) < 1e-6):
+            return None, None
+
+        # Path Yaw 계산 (vectorized)
+        # np.arctan2 사용
+        yaw_diff = np.arctan2(d_prime, one_minus_kappa_d)
+        path_yaw = ref_yaw + yaw_diff
+
+        # 정규화 (-pi ~ pi)
+        path_yaw = np.arctan2(np.sin(path_yaw), np.cos(path_yaw))
+
+        # Path Velocity 계산
+        path_vel = s_dot_values * (one_minus_kappa_d / np.cos(path_yaw - ref_yaw))
+
+        # 4. 결과 패키징 (Waypoint 객체 리스트로 변환)
+        # 최종 결과는 다른 모듈과의 호환성을 위해 객체 리스트로 반환합니다.
+        global_path = [
+            Waypoint(x=xi, y=yi, yaw=yawi, v=vi, kappa=ki)
+            for xi, yi, yawi, vi, ki in zip(x, y, path_yaw, path_vel, ref_kappas)
+        ]
+
+        frenet_path = [
+            FrenetState(s=si, d=di, s_dot=sdi, d_dot=ddi)
+            for si, di, sdi, ddi in zip(s_values, d_values, s_dot_values, d_dot_values)
+        ]
+
+        return global_path, frenet_path
 
 class CostFunction:
     """
@@ -292,6 +311,7 @@ class PIDController:
     def reset(self):
         self.integral = 0.0
         self.prev_error = 0.0
+        self.prev_v = 0.0
 
     def compute_throttle(self, current_v: float, target_v: float) -> float:
         """
@@ -318,11 +338,13 @@ class PIDController:
         i_term = self.Ki * self.integral
 
         # 미분 (Derivative)
-        derivative = (error - self.prev_error) / self.dt
+        # derivative = (error - self.prev_error) / self.dt
+        derivative = - (current_v - self.prev_v) / self.dt  # 노이즈 감소를 위해 속도 변화로 대체
         d_term = self.Kd * derivative
 
         # Update
         self.prev_error = error
+        self.prev_v = current_v
 
         # 최종 출력
         output = p_term + i_term + d_term
