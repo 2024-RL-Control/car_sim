@@ -27,8 +27,8 @@ class TrajectoryData:
         return cos(angle), sin(angle)
 
     def _normalize_angle(self, angle):
-        """[-π, π] 범위로 각도 정규화"""
-        return (angle + pi) % (2 * pi) - pi
+        """-pi ~ pi 범위로 정규화 (numpy 지원)"""
+        return np.arctan2(np.sin(angle), np.cos(angle))
 
     def _scale_distance(self, distance):
         """거리 정규화"""

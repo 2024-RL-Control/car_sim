@@ -9,12 +9,8 @@ from .vehicle import VehicleState
 from .road import RoadSystemAPI, FrenetState, LinearRoadSegment
 
 def normalize_angle(angle: float) -> float:
-    """각도를 -pi 에서 +pi 범위로 정규화합니다."""
-    while angle > pi:
-        angle -= 2.0 * pi
-    while angle < -pi:
-        angle += 2.0 * pi
-    return angle
+    """-pi ~ pi 범위로 정규화 (numpy 지원)"""
+    return np.arctan2(np.sin(angle), np.cos(angle))
 
 @dataclass
 class Waypoint:

@@ -928,8 +928,8 @@ class VehicleState:
         return new_state
 
     def normalize_angle(self, angle):
-        """[-π, π] 범위로 각도 정규화"""
-        return (angle + pi) % (2 * pi) - pi
+        """-pi ~ pi 범위로 정규화 (numpy 지원)"""
+        return np.arctan2(np.sin(angle), np.cos(angle))
 
     def encoding_angle(self, angle):
         """cos/sin 인코딩을 통한 각도 표현"""
@@ -1303,8 +1303,11 @@ class Vehicle:
         if current_time is None:
             current_time = 0.0  # 시뮬레이션 시간 기본값
 
+        # 현재 차량 상태에 저장된 캐시 ID 가져오기
+        cached_id = self.state.cached_segment_id
+
         # road_manager를 통해 Frenet 좌표 계산 (frenet_s, segment_length 포함)
-        frenet_state, closest_segment, segment_length, frenet_point, frenet_s, frenet_d, outside_road, target_vel_long, error_to_ref, angle_to_ref = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw, self.state.vel_long, self.state.vel_lat))
+        frenet_state, closest_segment, segment_length, frenet_point, frenet_s, frenet_d, outside_road, target_vel_long, error_to_ref, angle_to_ref = road_manager.get_vehicle_update_data((self.state.x, self.state.y, self.state.yaw, self.state.vel_long, self.state.vel_lat), cached_id)
 
         # 상태 업데이트
         self.state.frenet_state = frenet_state
@@ -1321,12 +1324,9 @@ class Vehicle:
         if closest_segment is not None:
             segment_id = closest_segment.id if hasattr(closest_segment, 'id') else str(id(closest_segment))
 
+            # 세그먼트가 변경되었을 때만 충돌체 정보 갱신
             if segment_id != self.state.cached_segment_id:
-                # 경계 충돌체 데이터 가져오기
-                boundary_colliders = closest_segment.get_boundary()
-
-                # line segment 배열로 변환 및 캐싱
-                self.state.cached_road_colliders = boundary_colliders
+                self.state.cached_road_colliders = closest_segment.get_boundary()
                 self.state.cached_segment_id = segment_id
 
         # if dt is not None:

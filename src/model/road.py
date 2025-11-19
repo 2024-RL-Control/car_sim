@@ -29,8 +29,8 @@ def dist(pt_a, pt_b):
 
 
 def normalize_angle(angle):
-    """각도를 -pi~pi 범위로 정규화"""
-    return (angle + math.pi) % (2 * math.pi) - math.pi
+    """-pi ~ pi 범위로 정규화 (numpy 지원)"""
+    return np.arctan2(np.sin(angle), np.cos(angle))
 
 
 # =============================================================================
@@ -581,7 +581,6 @@ class LinearRoadSegment:
         self.width = data["width"]
         self.speed_limit = data["speed_limit"]
         self._precompute_geometry()
-
 
 # =============================================================================
 # 4. 최적화된 Frenet 좌표계 계산
@@ -1492,10 +1491,32 @@ class RoadNetwork:
 
         return closest_segment
 
-    def calculate_frenet(self, vehicle_pos: Tuple[float, float, float]) -> Optional[Tuple[FrenetState, LinearRoadSegment]]:
-        """차량 위치에 대한 Frenet 좌표 계산"""
+    def calculate_frenet(self, vehicle_pos: Tuple[float, float, float], cached_segment_id: Optional[str] = None) -> Optional[Tuple[FrenetState, LinearRoadSegment]]:
+        """
+        차량 위치에 대한 Frenet 좌표 계산 (캐시 ID 최적화 적용)
+
+        Args:
+            vehicle_pos: (x, y, yaw)
+            cached_segment_id: 이전 프레임에서 계산된 세그먼트 ID (힌트)
+        """
         try:
-            closest_segment = self.find_closest_segment(vehicle_pos[:2])
+            closest_segment = None
+
+            # 1. 캐시된 세그먼트가 유효한지 먼저 확인 (Temporal Coherence)
+            if cached_segment_id and cached_segment_id in self.segments:
+                seg = self.segments[cached_segment_id]
+                # 차량이 해당 세그먼트의 바운딩 박스 근처에 있는지 빠르게 확인
+                # 혹은 project_point 수행 후 거리가 width 허용범위 내인지 확인
+                _, dist, s = seg.project_point(vehicle_pos[:2])
+
+                # 거리가 검색 반경(예: 20m) 이내인가? 호장 길이(s)가 세그먼트 범위 내(또는 연결부 근처)인가?
+                margin = 5.0
+                if (-margin <= s <= seg.get_length() + margin) and dist < 20.0:
+                    closest_segment = seg
+
+            # 2. 캐시 실패 시 전체/공간 검색 수행
+            if closest_segment is None:
+                closest_segment = self.find_closest_segment(vehicle_pos[:2])
 
             if not closest_segment:
                 return None, None
@@ -1818,7 +1839,7 @@ class RoadSystemAPI:
 
     # === 차량 위치 계산 (핵심 API) ===
 
-    def get_vehicle_road_info(self, vehicle_data: Tuple[float, float, float, float, float]) -> Optional[Dict[str, Any]]:
+    def get_vehicle_road_info(self, vehicle_data: Tuple[float, float, float, float, float], cached_segment_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         차량의 도로 정보 계산 (Frenet 좌표, 권장 속도, Frenet 속도, heading error 포함)
 
@@ -1828,7 +1849,7 @@ class RoadSystemAPI:
         x, y, yaw, v_long, v_lat = vehicle_data
         vehicle_pos = (x, y, yaw)
 
-        frenet_state, closest_segment = self.network.calculate_frenet(vehicle_pos)
+        frenet_state, closest_segment = self.network.calculate_frenet(vehicle_pos, cached_segment_id)
 
         if not frenet_state:
             return None
@@ -1912,7 +1933,7 @@ class RoadSystemAPI:
         # min_speed와 max_speed 사이로 제한
         return max(min_speed, min(max_speed, safe_speed))
 
-    def get_vehicle_update_data(self, vehicle_data: Tuple[float, float, float, float, float]):
+    def get_vehicle_update_data(self, vehicle_data: Tuple[float, float, float, float, float], cached_segment_id: Optional[str] = None):
         """차량 업데이트 데이터 계산 (곡률 기반 동적 권장 속도)
         Args:
             vehicle_data: 차량의 현재 위치 및 속도 (x, y, yaw, vel_long, vel_lat)
@@ -1931,7 +1952,7 @@ class RoadSystemAPI:
                             < 0: 도로가 오른쪽 → 우회전 필요
             - angle_to_ref: 차량 위치에서 도로 참조점까지의 각도 [rad] (-π~π)
         """
-        info = self.get_vehicle_road_info(vehicle_data)
+        info = self.get_vehicle_road_info(vehicle_data, cached_segment_id)
 
         if not info:
             return None, None, None, None, None, None, True, None, None, None

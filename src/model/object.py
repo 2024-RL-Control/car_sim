@@ -65,8 +65,8 @@ class BaseObstacle:
         self.vel = vel
 
     def _normalize_angle(self, angle):
-        """[-π, π] 범위로 각도 정규화"""
-        return (angle + pi) % (2 * pi) - pi
+        """-pi ~ pi 범위로 정규화 (numpy 지원)"""
+        return np.arctan2(np.sin(angle), np.cos(angle))
 
     def update(self, dt: float):
         """객체 상태 업데이트: 이동 및 회전"""
