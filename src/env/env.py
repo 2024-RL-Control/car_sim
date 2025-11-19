@@ -383,6 +383,10 @@ class CarSimulatorEnv(gym.Env):
 
         return self.road_manager.add_point_to_point_road(vehicle.get_position(), (x, y, yaw), obstacles=objects)
 
+    def reset_road_manager(self):
+        """도로 관리자 리셋 (도로 변경 시 사용)"""
+        self.road_manager.reset()
+
     def get_vehicle_manager(self):
         """차량 관리자 객체 반환"""
         return self.vehicle_manager

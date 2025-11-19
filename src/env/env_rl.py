@@ -337,6 +337,9 @@ class BasicRLDrivingEnv(gym.Env):
 
         while not success:
             try:
+                # 도로 제거
+                self._reset_road_manager()
+
                 # 장애물 배치
                 self._setup_obstacles()
 
@@ -494,6 +497,10 @@ class BasicRLDrivingEnv(gym.Env):
     def deactivate_action_controller(self):
         """ActionController 비활성화"""
         self.action_controller = None
+
+    def _reset_road_manager(self):
+        """도로 관리자 리셋 (도로 변경 시 사용)"""
+        self.env.reset_road_manager()
 
     def reset(self, *, seed=None, options=None):
         """
